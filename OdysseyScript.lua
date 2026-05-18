@@ -238,7 +238,6 @@ titleLbl.TextColor3 = C.TEXT
 titleLbl.TextSize = 15
 titleLbl.Font = FONT_BOLD
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-titleLbl.LetterSpacing = 4
 titleLbl.ZIndex = 3
 titleLbl.Parent = titleBar
 
@@ -285,21 +284,34 @@ minimizeBtn.MouseButton1Click:Connect(function()
 end)
 
 -- Drag
+local UIS = game:GetService("UserInputService")
 local dragging, dragStart, winStart = false, nil, nil
+
 titleBar.InputBegan:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-        dragging = true; dragStart = i.Position; winStart = win.Position
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+    or i.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = i.Position
+        winStart  = win.Position
     end
 end)
-game:GetService("UserInputService").InputChanged:Connect(function(i)
-    if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-        local d = i.Position - dragStart
-        win.Position = UDim2.new(winStart.X.Scale, winStart.X.Offset + d.X, winStart.Y.Scale, winStart.Y.Offset + d.Y)
-    end
-end)
-game:GetService("UserInputService").InputEnded:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+
+titleBar.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+    or i.UserInputType == Enum.UserInputType.Touch then
         dragging = false
+    end
+end)
+
+UIS.InputChanged:Connect(function(i)
+    if not dragging then return end
+    if i.UserInputType == Enum.UserInputType.MouseMovement
+    or i.UserInputType == Enum.UserInputType.Touch then
+        local d = i.Position - dragStart
+        win.Position = UDim2.new(
+            winStart.X.Scale, winStart.X.Offset + d.X,
+            winStart.Y.Scale, winStart.Y.Offset + d.Y
+        )
     end
 end)
 
@@ -924,10 +936,8 @@ end)
 -- ══════════════════════════════════════════
 switchTab("Lobby")
 
--- Entrance animation
+-- Boot
 win.Position = UDim2.new(0.5, -250, 0.5, -310)
-win.BackgroundTransparency = 1
-tween(win, {BackgroundTransparency = 0, Position = UDim2.new(0.5, -250, 0.5, -310)}, 0.35)
 
 notify("Odyssey Script loaded ✦", true)
 print("[OdysseyScript] GUI loaded successfully.")
