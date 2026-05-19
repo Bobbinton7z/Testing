@@ -8,6 +8,7 @@ local RS           = game:GetService("ReplicatedStorage")
 local TweenSvc     = game:GetService("TweenService")
 local RunSvc       = game:GetService("RunService")
 local UIS          = game:GetService("UserInputService")
+local HttpService  = game:GetService("HttpService")
 
 local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
@@ -113,6 +114,58 @@ local function safeCall(fn, okMsg, failPrefix)
     if okMsg or not ok then notify(ok and okMsg or ((failPrefix or "Error")..": "..tostring(err)), ok) end
     return ok
 end
+
+-- ======================
+-- SETTINGS AUTOSAVE
+-- ======================
+local OZWARE_SAVE_FILE = "OzWare_Settings.json"
+local OzSaved = { toggles = {}, characters = {}, selectedCharacter = nil }
+
+local function canUseFiles()
+    return typeof(readfile) == "function" and typeof(writefile) == "function"
+end
+
+local function loadOzSettings()
+    if not canUseFiles() then return end
+    local exists = false
+    if typeof(isfile) == "function" then
+        local ok, result = pcall(isfile, OZWARE_SAVE_FILE)
+        exists = ok and result
+    else
+        exists = true
+    end
+    if not exists then return end
+    local okRead, raw = pcall(readfile, OZWARE_SAVE_FILE)
+    if not okRead or type(raw) ~= "string" or raw == "" then return end
+    local okDecode, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+    if okDecode and typeof(decoded) == "table" then
+        OzSaved = decoded
+        OzSaved.toggles = OzSaved.toggles or {}
+        OzSaved.characters = OzSaved.characters or {}
+    end
+end
+
+local function saveOzSettings()
+    if not canUseFiles() then return end
+    pcall(function()
+        writefile(OZWARE_SAVE_FILE, HttpService:JSONEncode(OzSaved))
+    end)
+end
+
+local function getSavedToggle(key, default)
+    OzSaved.toggles = OzSaved.toggles or {}
+    local saved = OzSaved.toggles[key]
+    if typeof(saved) == "boolean" then return saved end
+    return default and true or false
+end
+
+local function setSavedToggle(key, value)
+    OzSaved.toggles = OzSaved.toggles or {}
+    OzSaved.toggles[key] = value and true or false
+    saveOzSettings()
+end
+
+loadOzSettings()
 
 -- ======================
 -- WINDOW
@@ -353,10 +406,11 @@ local function input(parent, placeholder, order)
     return tb
 end
 
-local function toggle(parent, text, order, default)
-    -- Button-style toggle: full-width button with a light indicator dot on the right.
-    -- ON  = button background = ACCENT (lit), dot = bright/glow.
-    -- OFF = button background = PANEL (dim),  dot = DISABLED gray.
+local function toggle(parent, text, order, default, saveKey)
+    -- Full-width row with a small indicator light. Only the circle lights up;
+    -- the row itself stays dark so enabled states do not flood the panel.
+    saveKey = saveKey or ("toggle:"..text)
+
     local btnRow=Instance.new("TextButton")
     btnRow.Size=UDim2.new(1,0,0,34); btnRow.AutoButtonColor=false
     btnRow.BackgroundColor3=C.PANEL; btnRow.BorderSizePixel=0
@@ -369,35 +423,37 @@ local function toggle(parent, text, order, default)
     lbl.Text=text; lbl.TextColor3=C.TEXT; lbl.TextSize=13; lbl.Font=FONT_SEMI
     lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4; lbl.Parent=btnRow
 
-    -- "Light" indicator dot
     local light=Instance.new("Frame")
     light.Size=UDim2.new(0,12,0,12); light.Position=UDim2.new(1,-22,0.5,-6)
-    light.BackgroundColor3=C.DISABLED; light.BorderSizePixel=0; light.ZIndex=4; light.Parent=btnRow
+    light.BackgroundColor3=C.DISABLED; light.BorderSizePixel=0; light.ZIndex=5; light.Parent=btnRow
     corner(light,6)
-    -- Soft glow ring around the light (becomes visible when ON)
-    local glow=Instance.new("Frame")
-    glow.Size=UDim2.new(0,20,0,20); glow.Position=UDim2.new(0.5,-10,0.5,-10)
-    glow.BackgroundColor3=C.ACCENT; glow.BackgroundTransparency=1
-    glow.BorderSizePixel=0; glow.ZIndex=3; glow.Parent=light
-    corner(glow,10)
 
-    local enabled = default or false
+    local glow=Instance.new("Frame")
+    glow.Size=UDim2.new(0,22,0,22); glow.Position=UDim2.new(0.5,-11,0.5,-11)
+    glow.BackgroundColor3=C.ACCENT; glow.BackgroundTransparency=1
+    glow.BorderSizePixel=0; glow.ZIndex=4; glow.Parent=light
+    corner(glow,11)
+
+    local enabled = getSavedToggle(saveKey, default)
     local function apply()
+        tween(btnRow,{BackgroundColor3=C.PANEL})
         if enabled then
-            tween(btnRow,{BackgroundColor3=C.ACCENT})
-            tween(light,{BackgroundColor3=Color3.fromRGB(255,255,255)})
-            tween(glow,{BackgroundTransparency=0.4})
+            tween(light,{BackgroundColor3=C.ACCENT})
+            tween(glow,{BackgroundTransparency=0.35})
+            lbl.TextColor3 = C.TEXT
         else
-            tween(btnRow,{BackgroundColor3=C.PANEL})
             tween(light,{BackgroundColor3=C.DISABLED})
             tween(glow,{BackgroundTransparency=1})
+            lbl.TextColor3 = C.SUBTEXT
         end
     end
-    if enabled then apply() end
+    apply()
 
     local callbacks = {}
     btnRow.MouseButton1Click:Connect(function()
-        enabled = not enabled; apply()
+        enabled = not enabled
+        setSavedToggle(saveKey, enabled)
+        apply()
         for _,cb in ipairs(callbacks) do task.spawn(cb, enabled) end
     end)
     return btnRow, function() return enabled end, function(cb) table.insert(callbacks, cb) end
@@ -1261,12 +1317,16 @@ end
 
 -- --- Sections ---------------------------------------------------------------
 local autoSec = section(odysseyPage, "Auto Behavior", 1)
-local _, getAutoPick       = toggle(autoSec, "Auto-pick selected cards",     1, true)
-local _, getSkipMaxedUnit  = toggle(autoSec, "Skip unit-specific cards at MAX (4)", 2, true)
-local _, getSkipMaxedGen   = toggle(autoSec, "Skip selected generic cards when MAXED", 3, true)
-local _, getSkipNextRoom   = toggle(autoSec, "Skip cards in next room",      4, false)
-local _, getAutoChests     = toggle(autoSec, "Auto-collect chests (skip shop)", 5, true)
-local _, getAutoCloseUI    = toggle(autoSec, "Auto-close Treasure / Shop UI", 6, true)
+local _, getAutoNextRoom       = toggle(autoSec, "Auto Next Room", 1, false, "odyssey.auto_next_room")
+label(autoSec, "Will continue to the next room when match is finished", 2)
+local _, getAutoPick           = toggle(autoSec, "Auto select cards", 3, true, "odyssey.auto_select_cards")
+label(autoSec, "Will select basic cards and prioritize the highest rarity", 4)
+local _, getAutoRagnawCards    = toggle(autoSec, "Auto Select Unit Cards (Ragnaw Only)", 5, false, "odyssey.auto_ragnaw_unit_cards")
+label(autoSec, "Will select 4 cards that pair good with Ragnaw", 6)
+local _, getAutoSkipShop       = toggle(autoSec, "Auto skip shop", 7, true, "odyssey.auto_skip_shop")
+label(autoSec, "Will close shop UI; pair this with Auto Next Room", 8)
+local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect chest", 9, true, "odyssey.auto_collect_chest")
+label(autoSec, "Will collect chests and close the treasure UI; pair this with Auto Next Room", 10)
 
 -- =====================================================
 -- CHARACTER JOINER (Odyssey / Adventure)
@@ -1291,6 +1351,13 @@ local function addCharacter(n)
     table.insert(characters, n)
 end
 for _,n in ipairs(DEFAULT_CHARACTERS) do addCharacter(n) end
+if typeof(OzSaved.characters) == "table" then
+    for _,n in ipairs(OzSaved.characters) do addCharacter(n) end
+end
+if type(OzSaved.selectedCharacter) == "string" and OzSaved.selectedCharacter ~= "" then
+    selectedCharName = OzSaved.selectedCharacter
+    addCharacter(selectedCharName)
+end
 
 local charSec = section(odysseyPage, "Character Joiner", 0)
 local charSearch = input(charSec, "Search characters...", 1)
@@ -1365,6 +1432,8 @@ local function rebuildCharList()
         charRows[name]=row
         row.MouseButton1Click:Connect(function()
             selectedCharName = (selectedCharName == name) and nil or name
+            OzSaved.selectedCharacter = selectedCharName
+            saveOzSettings()
             updateSelLbl()
         end)
     end
@@ -1375,12 +1444,18 @@ charSearch:GetPropertyChangedSignal("Text"):Connect(rebuildCharList)
 addBox.FocusLost:Connect(function(enter)
     if enter and addBox.Text ~= "" then
         addCharacter(addBox.Text)
+        OzSaved.characters = OzSaved.characters or {}
+        table.insert(OzSaved.characters, addBox.Text)
+        saveOzSettings()
         addBox.Text=""
         rebuildCharList()
         notify("Character added", true)
     end
 end)
 rebuildCharList()
+
+local ragnawPickedThisRun = {}
+local ragnawPickCount = 0
 
 -- Actions
 local function fireSetLast(name)
@@ -1392,31 +1467,41 @@ local function fireSetLast(name)
     return false
 end
 local function firePlay(name)
-    local oe = Net:FindFirstChild("Odyssey") and Net.Odyssey:FindFirstChild("OdysseyEvent")
+    local od = Net:FindFirstChild("Odyssey")
+    local oe = od and od:FindFirstChild("OdysseyEvent")
     if not (oe and oe:IsA("RemoteEvent")) then return false end
-    -- The server's AdventureClient.OnStartRun expects a BOOLEAN (nightmare flag)
-    -- where we previously sent the string "Adventure". Sending a string there
-    -- throws: "Unable to cast string to bool".
-    -- Try multiple known-shape signatures; the server ignores unknown ones.
+
+    -- AdventureClient.OnStartRun expects the run-mode argument to be a boolean.
+    -- Do not send the old string "Adventure" here; it causes "Unable to cast string to bool".
     local nightmare = false
-    local payload = {CharacterName=name, AdventureName="Adventure", Nightmare=nightmare, FriendsOnly=false}
-    local attempts = {
-        function() oe:FireServer("Play", nightmare, payload) end,                  -- ("Play", bool, table)
-        function() oe:FireServer("Play", "Adventure", nightmare, payload) end,     -- ("Play", mode, bool, table)
-        function() oe:FireServer("StartRun", nightmare, payload) end,
-        function() oe:FireServer("Play", payload) end,                             -- ("Play", table)
+    local payload = {
+        CharacterName = name,
+        Nightmare = nightmare,
+        FriendsOnly = false,
     }
+
+    local attempts = {
+        function() oe:FireServer("Play", nightmare) end,
+        function() oe:FireServer("Play", nightmare, payload) end,
+        function() oe:FireServer("StartRun", nightmare) end,
+        function() oe:FireServer("StartRun", nightmare, payload) end,
+    }
+
     local anyOk = false
     for _,fn in ipairs(attempts) do
         local ok = pcall(fn)
         if ok then anyOk = true end
+        task.wait(0.08)
     end
     return anyOk
 end
 
+
 local startBtn = btn(charSec, "Start Run with Selected", C.ACCENT, 5)
 startBtn.MouseButton1Click:Connect(function()
     if not selectedCharName then notify("Select a character first", false); return end
+    ragnawPickedThisRun = {}
+    ragnawPickCount = 0
     local a = fireSetLast(selectedCharName)
     local b = firePlay(selectedCharName)
     if a or b then notify("Joining: "..selectedCharName, true)
@@ -1426,63 +1511,19 @@ end)
 local _, getAutoJoin = toggle(charSec, "Auto-Join Odyssey with selected character", 6, false)
 task.spawn(function()
     while true do
-        task.wait(5)
+        task.wait(2.5)
         if getAutoJoin() and selectedCharName then
             -- only fire when not already in a run (best-effort: check for run-only GUI is unreliable;
             -- the server ignores Play if already in a match, so it's safe to retry)
+            ragnawPickedThisRun = {}
+            ragnawPickCount = 0
             pcall(fireSetLast, selectedCharName)
             pcall(firePlay, selectedCharName)
         end
     end
 end)
 
-local genSec = section(odysseyPage, "Generic Cards (pick to collect)", 2)
-local redrawGen
-do
-    local r=btn(genSec, "Rescan Cards", Color3.fromRGB(70,70,120), 1)
-    redrawGen = buildCardList(genSec, "generic", "No cards found yet. Open the game once or click Rescan.")
-    r.MouseButton1Click:Connect(function()
-        local n = scanCardsFromFolder()
-        redrawGen()
-        notify("Rescan: "..n.." entries", true)
-    end)
-end
-
-local unitSec2 = section(odysseyPage, "Unit-Specific Cards (pick to collect)", 3)
-local redrawUnit
-do
-    local r=btn(unitSec2, "Rescan Cards", Color3.fromRGB(70,70,120), 1)
-    redrawUnit = buildCardList(unitSec2, "unit", "No unit cards found yet.")
-    r.MouseButton1Click:Connect(function()
-        local n = scanCardsFromFolder()
-        redrawUnit()
-        notify("Rescan: "..n.." entries", true)
-    end)
-end
-
--- Initial scan + periodic UI refresh
-task.spawn(function() scanCardsFromFolder() end)
--- Only redraw when discovered count changes (cheap; no constant DOM churn)
-task.spawn(function()
-    local lastG, lastU = -1, -1
-    while true do
-        task.wait(3)
-        local g = #discoveredCards.generic
-        local u = #discoveredCards.unit
-        if g ~= lastG and redrawGen then lastG = g; pcall(redrawGen) end
-        if u ~= lastU and redrawUnit then lastU = u; pcall(redrawUnit) end
-    end
-end)
-
-local manualSec = section(odysseyPage, "Manual Controls", 4)
-local endRunBtn = btn(manualSec, "Request End Run Preview", C.RED, 1)
-endRunBtn.MouseButton1Click:Connect(function()
-    safeCall(function() getONet("EndRunEvent"):FireServer("RequestPreview") end, "End run preview opened", "End run failed")
-end)
-local snapBtn = btn(manualSec, "Request Map Snapshot", Color3.fromRGB(60,100,180), 2)
-snapBtn.MouseButton1Click:Connect(function()
-    safeCall(function() getONet("MapEvent"):FireServer("RequestSnapshot") end, "Snapshot requested", "Snapshot failed")
-end)
+-- Card scan pick-list sections and manual preview controls removed per request.
 
 -- ======================
 -- ODYSSEY AUTOMATION LOOP
@@ -1592,27 +1633,108 @@ local function fireChest(chestRemote, uuid)
     pcall(function() chestRemote:FireServer("OpenChest", uuid) end)
 end
 
--- Card pick loop: cheap, only when UI is open (1s tick)
+local RARITY_SCORE = {
+    common=1, uncommon=2, rare=3, epic=4, legendary=5, mythic=6, mythical=6, secret=7, celestial=8, divine=9
+}
+-- Ragnaw (Regnaw / Rage) target cards. Match either DisplayName or CardId.
+local RAGNAW_TARGET_CARDS = {
+    ["rageful arrival"]         = true, ["legendaryplacementdamage"]   = true,
+    ["elite conquest"]          = true, ["legendaryeliteplacement"]    = true,
+    ["all-range rage"]          = true, ["all range rage"]             = true, ["mythicfullaoe"] = true,
+    ["monarch's breakthrough"]  = true, ["monarchs breakthrough"]      = true,
+    ["monarch breakthrough"]    = true, ["epicpermanentplacements"]    = true,
+}
+
+local function rarityScore(name)
+    local n = (name or ""):lower()
+    local best = 0
+    for key,score in pairs(RARITY_SCORE) do
+        if n:find(key, 1, true) and score > best then best = score end
+    end
+    return best
+end
+
+local function isRagnawTargetCard(name)
+    local n = (name or ""):lower():gsub("^%s+",""):gsub("%s+$","")
+    return RAGNAW_TARGET_CARDS[n] == true
+end
+
+local function chooseCardIndex(opts)
+    local bestIdx, bestScore
+
+    if getAutoRagnawCards() and ragnawPickCount < 4 then
+        for i,name in ipairs(opts) do
+            if isRagnawTargetCard(name) and not ragnawPickedThisRun[name] then
+                local score = 100 + rarityScore(name)
+                if not bestScore or score > bestScore then
+                    bestIdx, bestScore = i, score
+                end
+            end
+        end
+        if bestIdx then return bestIdx, "ragnaw" end
+    end
+
+    -- If Ragnaw mode active and quota filled (or no target card in this set),
+    -- skip any unit-card screen so the run keeps moving.
+    if getAutoRagnawCards() then
+        local allUnit = #opts > 0
+        for _,name in ipairs(opts) do
+            if classifyCard(name) ~= "unit" then allUnit = false; break end
+        end
+        if allUnit then return nil, "skip-unit" end
+    end
+
+    if getAutoPick() then
+        for i,name in ipairs(opts) do
+            local kind = classifyCard(name)
+            local score = rarityScore(name)
+            if kind == "generic" then score = score + 20 end
+            if not bestScore or score > bestScore then
+                bestIdx, bestScore = i, score
+            end
+        end
+    end
+
+    return bestIdx, "basic"
+end
+
+local function requestNextRoom()
+    local cardEv = getONet("CardPickEvent")
+    if cardEv then pcall(function() cardEv:FireServer("Skip", 0) end) end
+
+    local roomEv = getONet("RoomEvent") or getONet("MapEvent") or getONet("AdventureEvent")
+    if roomEv then
+        pcall(function() roomEv:FireServer("Next") end)
+        pcall(function() roomEv:FireServer("NextRoom") end)
+        pcall(function() roomEv:FireServer("Continue") end)
+    end
+end
+
+-- Card pick loop: choose basic/highest-rarity cards, with optional Ragnaw unit-card priority.
 task.spawn(function()
     while true do
         task.wait(1)
-        if getAutoPick() then
+        if getAutoPick() or getAutoRagnawCards() or getAutoNextRoom() then
             local ok, opts = pcall(readOpenCardOptions)
             if ok and opts then
-                local chosenIdx
-                for i,name in ipairs(opts) do
-                    local kind = classifyCard(name)
-                    if selectedCards[kind][name] then
-                        local maxed = (kind=="unit" and getSkipMaxedUnit() and isMaxedUnitCard(name))
-                                   or (kind=="generic" and getSkipMaxedGen() and isMaxedUnitCard(name))
-                        if not maxed then chosenIdx = i; break end
-                    end
-                end
+                local chosenIdx, reason = chooseCardIndex(opts)
                 if chosenIdx then
                     pickIndex(opts, chosenIdx)
-                elseif getSkipNextRoom() then
-                    skipCards()
+                    if reason == "ragnaw" then
+                        local cardName = opts[chosenIdx]
+                        ragnawPickedThisRun[cardName] = true
+                        ragnawPickCount = math.min(4, ragnawPickCount + 1)
+                    end
+                elseif reason == "skip-unit" then
+                    -- Ragnaw quota filled or no target card here: skip the unit-card screen.
+                    local cardEv = getONet("CardPickEvent")
+                    if cardEv then pcall(function() cardEv:FireServer("Skip", 0) end) end
+                    if getAutoNextRoom() then requestNextRoom() end
+                elseif getAutoNextRoom() then
+                    requestNextRoom()
                 end
+            elseif getAutoNextRoom() then
+                requestNextRoom()
             end
         end
     end
@@ -1622,7 +1744,7 @@ end)
 task.spawn(function()
     while true do
         task.wait(2)
-        if getAutoChests() then
+        if getAutoCollectChests() then
             local sm = Net:FindFirstChild("StageMechanics")
             local chestRemote = sm and sm:FindFirstChild("OdysseyChest")
             if chestRemote then
@@ -1636,23 +1758,31 @@ task.spawn(function()
                     end
                 end
             end
+            closeMatchingUI({"treasure","chest"})
+            if getAutoNextRoom() then requestNextRoom() end
+        end
+        if getAutoSkipShop() then
             local shopEv = getONet("ShopEvent")
             if shopEv then pcall(function() shopEv:FireServer("Close") end) end
+            closeMatchingUI({"shop"})
+            if getAutoNextRoom() then requestNextRoom() end
         end
     end
 end)
 
 -- UI close loop: event-driven, only touches matching new children
-local CLOSE_KEYWORDS = {"treasure","chest","shop"}
 local function maybeCloseGui(g)
-    if not getAutoCloseUI() then return end
     if g == gui then return end
     local n = g.Name:lower()
-    for _,k in ipairs(CLOSE_KEYWORDS) do
-        if n:find(k) then
-            pcall(function() g.Enabled = false end)
-            return
-        end
+    if getAutoCollectChests() and (n:find("treasure") or n:find("chest")) then
+        pcall(function() g.Enabled = false end)
+        if getAutoNextRoom() then requestNextRoom() end
+        return
+    end
+    if getAutoSkipShop() and n:find("shop") then
+        pcall(function() g.Enabled = false end)
+        if getAutoNextRoom() then requestNextRoom() end
+        return
     end
 end
 playerGui.ChildAdded:Connect(function(g) task.wait(0.1); pcall(maybeCloseGui, g) end)
