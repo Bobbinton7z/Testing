@@ -9,7 +9,8 @@ local TweenSvc   = game:GetService("TweenService")
 local RunSvc     = game:GetService("RunService")
 
 local player     = Players.LocalPlayer
-local playerGui  = player.PlayerGui
+local ok, _gui   = pcall(function() return gethui() end)
+local playerGui  = ok and _gui or game:GetService("CoreGui")
 local Net        = RS:WaitForChild("Networking")
 
 -- ══════════════════════════════════════════
@@ -107,7 +108,7 @@ local function notify(msg, ok)
     frame.Position = UDim2.new(0.5, -150, 1, 20)
     frame.BackgroundColor3 = C.PANEL
     frame.ZIndex = 100
-    frame.Parent = playerGui:FindFirstChild("OdysseyScript")
+    frame.Parent = gui
     corner(frame, 10)
     stroke(frame, color, 1)
 
