@@ -354,38 +354,53 @@ local function input(parent, placeholder, order)
 end
 
 local function toggle(parent, text, order, default)
-    local row=Instance.new("Frame")
-    row.Size=UDim2.new(1,0,0,30); row.BackgroundTransparency=1
-    row.LayoutOrder=order or 99; row.ZIndex=3; row.Parent=parent
+    -- Button-style toggle: full-width button with a light indicator dot on the right.
+    -- ON  = button background = ACCENT (lit), dot = bright/glow.
+    -- OFF = button background = PANEL (dim),  dot = DISABLED gray.
+    local btnRow=Instance.new("TextButton")
+    btnRow.Size=UDim2.new(1,0,0,34); btnRow.AutoButtonColor=false
+    btnRow.BackgroundColor3=C.PANEL; btnRow.BorderSizePixel=0
+    btnRow.Text=""; btnRow.LayoutOrder=order or 99; btnRow.ZIndex=3; btnRow.Parent=parent
+    corner(btnRow,7); stroke(btnRow,C.BORDER,1)
+
     local lbl=Instance.new("TextLabel")
-    lbl.Size=UDim2.new(1,-56,1,0); lbl.BackgroundTransparency=1
-    lbl.Text=text; lbl.TextColor3=C.TEXT; lbl.TextSize=13; lbl.Font=FONT_REG
-    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=3; lbl.Parent=row
-    local track=Instance.new("Frame")
-    track.Size=UDim2.new(0,42,0,22); track.Position=UDim2.new(1,-42,0.5,-11)
-    track.BackgroundColor3=C.DISABLED; track.BorderSizePixel=0; track.ZIndex=3; track.Parent=row
-    corner(track,11)
-    local knob=Instance.new("Frame")
-    knob.Size=UDim2.new(0,16,0,16); knob.Position=UDim2.new(0,3,0.5,-8)
-    knob.BackgroundColor3=C.TEXT; knob.BorderSizePixel=0; knob.ZIndex=4; knob.Parent=track
-    corner(knob,8)
+    lbl.Size=UDim2.new(1,-40,1,0); lbl.Position=UDim2.new(0,12,0,0)
+    lbl.BackgroundTransparency=1
+    lbl.Text=text; lbl.TextColor3=C.TEXT; lbl.TextSize=13; lbl.Font=FONT_SEMI
+    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4; lbl.Parent=btnRow
+
+    -- "Light" indicator dot
+    local light=Instance.new("Frame")
+    light.Size=UDim2.new(0,12,0,12); light.Position=UDim2.new(1,-22,0.5,-6)
+    light.BackgroundColor3=C.DISABLED; light.BorderSizePixel=0; light.ZIndex=4; light.Parent=btnRow
+    corner(light,6)
+    -- Soft glow ring around the light (becomes visible when ON)
+    local glow=Instance.new("Frame")
+    glow.Size=UDim2.new(0,20,0,20); glow.Position=UDim2.new(0.5,-10,0.5,-10)
+    glow.BackgroundColor3=C.ACCENT; glow.BackgroundTransparency=1
+    glow.BorderSizePixel=0; glow.ZIndex=3; glow.Parent=light
+    corner(glow,10)
+
     local enabled = default or false
     local function apply()
         if enabled then
-            tween(track,{BackgroundColor3=C.ACCENT}); tween(knob,{Position=UDim2.new(1,-19,0.5,-8)})
+            tween(btnRow,{BackgroundColor3=C.ACCENT})
+            tween(light,{BackgroundColor3=Color3.fromRGB(255,255,255)})
+            tween(glow,{BackgroundTransparency=0.4})
         else
-            tween(track,{BackgroundColor3=C.DISABLED}); tween(knob,{Position=UDim2.new(0,3,0.5,-8)})
+            tween(btnRow,{BackgroundColor3=C.PANEL})
+            tween(light,{BackgroundColor3=C.DISABLED})
+            tween(glow,{BackgroundTransparency=1})
         end
     end
     if enabled then apply() end
-    local clk=Instance.new("TextButton")
-    clk.Size=UDim2.new(1,0,1,0); clk.BackgroundTransparency=1; clk.Text=""; clk.ZIndex=5; clk.Parent=track
+
     local callbacks = {}
-    clk.MouseButton1Click:Connect(function()
+    btnRow.MouseButton1Click:Connect(function()
         enabled = not enabled; apply()
         for _,cb in ipairs(callbacks) do task.spawn(cb, enabled) end
     end)
-    return row, function() return enabled end, function(cb) table.insert(callbacks, cb) end
+    return btnRow, function() return enabled end, function(cb) table.insert(callbacks, cb) end
 end
 
 local function chip(parent, text, selected, onClick)
@@ -1378,11 +1393,25 @@ local function fireSetLast(name)
 end
 local function firePlay(name)
     local oe = Net:FindFirstChild("Odyssey") and Net.Odyssey:FindFirstChild("OdysseyEvent")
-    if oe and oe:IsA("RemoteEvent") then
-        pcall(function() oe:FireServer("Play", "Adventure", {CharacterName=name}) end)
-        return true
+    if not (oe and oe:IsA("RemoteEvent")) then return false end
+    -- The server's AdventureClient.OnStartRun expects a BOOLEAN (nightmare flag)
+    -- where we previously sent the string "Adventure". Sending a string there
+    -- throws: "Unable to cast string to bool".
+    -- Try multiple known-shape signatures; the server ignores unknown ones.
+    local nightmare = false
+    local payload = {CharacterName=name, AdventureName="Adventure", Nightmare=nightmare, FriendsOnly=false}
+    local attempts = {
+        function() oe:FireServer("Play", nightmare, payload) end,                  -- ("Play", bool, table)
+        function() oe:FireServer("Play", "Adventure", nightmare, payload) end,     -- ("Play", mode, bool, table)
+        function() oe:FireServer("StartRun", nightmare, payload) end,
+        function() oe:FireServer("Play", payload) end,                             -- ("Play", table)
+    }
+    local anyOk = false
+    for _,fn in ipairs(attempts) do
+        local ok = pcall(fn)
+        if ok then anyOk = true end
     end
-    return false
+    return anyOk
 end
 
 local startBtn = btn(charSec, "Start Run with Selected", C.ACCENT, 5)
