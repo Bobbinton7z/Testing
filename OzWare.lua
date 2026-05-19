@@ -1332,7 +1332,7 @@ label(autoSec, "Will collect chests and close the treasure UI; pair this with Au
 -- CHARACTER JOINER (Odyssey / Adventure)
 -- Remotes (from logger):
 --   ReplicatedStorage.Networking.Odyssey.Adventure.LoadoutEvent:FireServer("SetLastCharacter", {CharacterName=...})
---   ReplicatedStorage.Networking.Odyssey.OdysseyEvent       :FireServer("Play","Adventure",{CharacterName=...})
+--   ReplicatedStorage.Networking.Odyssey.OdysseyEvent       :FireServer("Play", false)
 -- =====================================================
 local DEFAULT_CHARACTERS = {
     "Regnaw (Rage)",
@@ -1471,29 +1471,13 @@ local function firePlay(name)
     local oe = od and od:FindFirstChild("OdysseyEvent")
     if not (oe and oe:IsA("RemoteEvent")) then return false end
 
-    -- AdventureClient.OnStartRun expects the run-mode argument to be a boolean.
-    -- Do not send the old string "Adventure" here; it causes "Unable to cast string to bool".
-    local nightmare = false
-    local payload = {
-        CharacterName = name,
-        Nightmare = nightmare,
-        FriendsOnly = false,
-    }
-
-    local attempts = {
-        function() oe:FireServer("Play", nightmare) end,
-        function() oe:FireServer("Play", nightmare, payload) end,
-        function() oe:FireServer("StartRun", nightmare) end,
-        function() oe:FireServer("StartRun", nightmare, payload) end,
-    }
-
-    local anyOk = false
-    for _,fn in ipairs(attempts) do
-        local ok = pcall(fn)
-        if ok then anyOk = true end
-        task.wait(0.08)
-    end
-    return anyOk
+    -- Client log shows AdventureClient.OnStartRun(remoteAction, isNightmare)
+    -- expects the second argument to be a boolean. Only send the one known-good
+    -- signature; extra fallback signatures were triggering string->bool casts.
+    local ok = pcall(function()
+        oe:FireServer("Play", false)
+    end)
+    return ok
 end
 
 
