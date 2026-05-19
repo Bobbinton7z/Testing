@@ -414,6 +414,7 @@ end
 -- ======================
 -- LOBBY TAB - AUTO SUMMON TOGGLES
 -- ======================
+do
 local lobbyPage = tabPages["Lobby"]
 
 local sumSec = section(lobbyPage, "Auto Summoner", 1)
@@ -528,10 +529,12 @@ task.spawn(function()
         task.wait(3)
     end
 end)
+end
 
 -- ======================
 -- JOINER TAB
 -- ======================
+do
 local joinerPage = tabPages["Joiner"]
 
 -- Helper: build act lists of length n
@@ -640,10 +643,12 @@ joinBtn.MouseButton1Click:Connect(function()
         end
     end, "Joining "..selType.." "..selStage.." "..selAct, "Join failed")
 end)
+end
 
 -- ======================
 -- GAME TAB
 -- ======================
+do
 local gamePage = tabPages["Game"]
 
 local matchSec = section(gamePage, "Match Controls", 1)
@@ -1108,10 +1113,12 @@ stopBtn.MouseButton1Click:Connect(function()
 end)
 
 rebuildMacroList()
+end
 
 -- ======================
 -- ODYSSEY TAB  (dynamic, no UUIDs)
 -- ======================
+do
 local odysseyPage = tabPages["Odyssey"]
 local function getONet(name) return OdysseyNet() and OdysseyNet():FindFirstChild(name) end
 
@@ -1620,6 +1627,7 @@ local function maybeCloseGui(g)
     end
 end
 playerGui.ChildAdded:Connect(function(g) task.wait(0.1); pcall(maybeCloseGui, g) end)
+end
 
 -- ======================
 -- BOOT
@@ -1632,6 +1640,7 @@ print("[OdysseyScript v2] loaded.")
 -- ======================
 -- FLOATING TOGGLE (bottom-left)  +  SUMMON UI SUPPRESSOR
 -- ======================
+do
 local floatBtn = Instance.new("TextButton")
 floatBtn.Name = "OzFloat"
 floatBtn.Size = UDim2.new(0, 52, 0, 52)
@@ -1704,3 +1713,4 @@ local function suppressSummon(g)
 end
 for _,g in ipairs(playerGui:GetChildren()) do suppressSummon(g) end
 playerGui.ChildAdded:Connect(function(g) task.wait(0.05); pcall(suppressSummon, g) end)
+end
