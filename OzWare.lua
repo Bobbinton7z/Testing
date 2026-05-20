@@ -1393,18 +1393,6 @@ end
 -- Seed defaults (extended from CharactersData known names)
 local DEFAULT_CHARACTERS = {
     "Regnaw (Rage)",
-    "Rogita (Super 4)",
-    "Iscanur (Pride)",
-    "Shinobi God (Infinite Dreams)",
-    "Song Jinwu and Igros",
-    "Tanjiro (Water Breathing)",
-    "Gojo (Infinity)",
-    "Sukuna (Malevolent Shrine)",
-    "Luffy (Gear 5)",
-    "Naruto (Baryon Mode)",
-    "Ichigo (Final Getsuga)",
-    "Vegeta (Ultra Ego)",
-    "Saitama (Serious Punch)",
 }
 for _, n in ipairs(DEFAULT_CHARACTERS) do addCharacter(n) end
 if type(OzSaved.characters) == "table" then
@@ -1784,7 +1772,7 @@ end
 refreshBtn.MouseButton1Click:Connect(requestState)
 
 -- Auto-refresh on load (slight delay to let remotes register)
-task.delay(1.5, requestState)
+-- Auto-request removed: triggers AdventureClient.SelectCharacter type error
 
 -- ── Core action functions ──────────────────────────
 local function doSetLastCharacter(name)
@@ -1800,17 +1788,12 @@ local function doStartRun(name)
     local oe = getOdysseyEvent()
     if not oe then return false, "OdysseyEvent not found" end
 
-    -- Build payload — include loadout if we have state
-    local payload = { CharacterName = name }
-    local lo = getCharLoadout(name)
-    if lo then
-        payload.Loadout = lo
-    end
-
-    -- Confirmed signature from Adventure_Client.txt line 472:
-    -- l_OdysseyEvent_0:FireServer("Play", "Adventure", t93)
+    -- AdventureClient.OnStartRun expects (action, isNightmare bool)
+    -- Passing "Adventure" or a table as 2nd arg throws "Unable to cast string to bool"
+    -- Correct signature confirmed from original OzWare logs:
+    --   OdysseyEvent:FireServer("Play", false)   -- false = Normal mode
     local ok, err = pcall(function()
-        oe:FireServer("Play", "Adventure", payload)
+        oe:FireServer("Play", false)
     end)
     return ok, err
 end
