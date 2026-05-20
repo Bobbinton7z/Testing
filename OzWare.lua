@@ -1331,19 +1331,19 @@ label(autoSec, "Will collect chests and close the treasure UI; pair this with Au
 -- =====================================================
 
 -- ======================
--- ADVENTURE JOINER (minimal, no SetLastCharacter)
--- SetLastCharacter causes AdventureClient.SelectCharacter "Unable to cast Dictionary to bool"
--- Fix: fire Play directly -- server uses last character selected in game panel
+-- ADVENTURE JOINER (final fix)
+-- Root cause confirmed: SetLastCharacter needs a plain STRING not a dict
+-- Start flow is two-step: AddMatch (StageType="Odyssey") -> wait -> StartMatch
+-- OdysseyEvent:FireServer("Play",...) does NOT start the adventure
 -- ======================
 
--- ragnawPickedThisRun / ragnawPickCount used by card automation below
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
-local selectedCharName    = "Regnaw (Rage)"
+local CHAR_NAME           = "Regnaw (Rage)"
 
 local charSec = section(odysseyPage, "Adventure Joiner", 0)
 
--- Character display (read-only, pre-set to Regnaw)
+-- Character display
 local charDisplay = Instance.new("Frame")
 charDisplay.Size              = UDim2.new(1,0,0,36)
 charDisplay.BackgroundColor3  = C.PANEL
@@ -1366,59 +1366,131 @@ local charLbl = Instance.new("TextLabel")
 charLbl.Size             = UDim2.new(1,-24,1,0)
 charLbl.Position         = UDim2.new(0,24,0,0)
 charLbl.BackgroundTransparency = 1
-charLbl.Text             = selectedCharName
+charLbl.Text             = CHAR_NAME
 charLbl.TextColor3       = C.TEXT
 charLbl.TextSize         = 13
 charLbl.Font             = FONT_BOLD
 charLbl.TextXAlignment   = Enum.TextXAlignment.Left
 charLbl.Parent           = charDisplay
 
--- Note label
-local noteLbl = Instance.new("TextLabel")
-noteLbl.Size             = UDim2.new(1,0,0,16)
-noteLbl.BackgroundTransparency = 1
-noteLbl.Text             = "Select your character in the game panel first, then press Start."
-noteLbl.TextColor3       = C.DIM
-noteLbl.TextSize         = 10
-noteLbl.Font             = FONT_REG
-noteLbl.TextXAlignment   = Enum.TextXAlignment.Left
-noteLbl.LayoutOrder      = 2
-noteLbl.Parent           = charSec
+-- Status label
+local advStatusLbl = Instance.new("TextLabel")
+advStatusLbl.Size             = UDim2.new(1,0,0,16)
+advStatusLbl.BackgroundTransparency = 1
+advStatusLbl.Text             = "Ready"
+advStatusLbl.TextColor3       = C.SUBTEXT
+advStatusLbl.TextSize         = 11
+advStatusLbl.Font             = FONT_REG
+advStatusLbl.TextXAlignment   = Enum.TextXAlignment.Left
+advStatusLbl.LayoutOrder      = 2
+advStatusLbl.Parent           = charSec
 
--- Start Run button
+local function setAdvStatus(msg, ok)
+    advStatusLbl.Text = msg
+    advStatusLbl.TextColor3 = ok == true and C.GREEN or (ok == false and C.RED or C.SUBTEXT)
+end
+
+-- Start button
 local startBtn = btn(charSec, "Start Adventure Run", C.GREEN, 3)
 gradient(startBtn, C.GREEN, C.GREEN:Lerp(Color3.new(0,0,0),0.2), 90)
 
+local advRunning = false
+
 local function doStartRun()
-    local od = Net:FindFirstChild("Odyssey")
-    local oe = od and od:FindFirstChild("OdysseyEvent")
-    if not oe then
-        notify("OdysseyEvent not found", false)
-        return false
+    if advRunning then return end
+    advRunning = true
+
+    local LE = Net:FindFirstChild("LobbyEvent")
+    if not LE then
+        setAdvStatus("LobbyEvent not found", false)
+        advRunning = false
+        return
     end
-    -- Confirmed: second arg must be bool (isNightmare). No SetLastCharacter.
-    -- Server uses last character selected from game UI panel.
-    local ok, err = pcall(function() oe:FireServer("Play", false) end)
-    if ok then
-        notify("Adventure run started!", true)
+
+    -- Step 1: Set character as plain STRING (not dict)
+    -- Dict caused "Unable to cast Dictionary to bool" in AdventureClient.SelectCharacter
+    local od  = Net:FindFirstChild("Odyssey")
+    local adv = od and od:FindFirstChild("Adventure")
+    local le  = adv and adv:FindFirstChild("LoadoutEvent")
+    if le then
+        pcall(function()
+            le:FireServer("SetLastCharacter", CHAR_NAME)
+        end)
+        task.wait(0.2)
+    end
+
+    -- Step 2: Create Odyssey lobby via LobbyEvent
+    local matchData = nil
+    local conn
+    conn = LE.OnClientEvent:Connect(function(...)
+        for _, v in ipairs({...}) do
+            if type(v) == "table" and (v.GUID or v.StageType) then
+                matchData = v
+                break
+            end
+        end
+    end)
+
+    setAdvStatus("Creating lobby...", nil)
+    local ok1, err1 = pcall(function()
+        LE:FireServer("AddMatch", {
+            StageType   = "Odyssey",
+            Difficulty  = "Normal",
+            FriendsOnly = false,
+            Act         = "Act1",
+            Stage       = "Stage1",
+        })
+    end)
+
+    if not ok1 then
+        conn:Disconnect()
+        setAdvStatus("AddMatch failed: " .. tostring(err1), false)
+        advRunning = false
+        return
+    end
+
+    -- Step 3: Wait for server to return match table (up to 8s)
+    setAdvStatus("Waiting for server...", nil)
+    local deadline = tick() + 8
+    while not matchData and tick() < deadline do task.wait(0.1) end
+    conn:Disconnect()
+
+    if not matchData then
+        setAdvStatus("Timeout — server did not respond", false)
+        advRunning = false
+        return
+    end
+
+    -- Step 4: Launch the match with the returned table
+    task.wait(0.25)
+    local ok2, err2 = pcall(function()
+        LE:FireServer("StartMatch", matchData)
+    end)
+
+    if ok2 then
+        setAdvStatus("Run started as " .. CHAR_NAME, true)
+        notify("Odyssey Adventure starting!", true)
         ragnawPickedThisRun = {}
         ragnawPickCount = 0
     else
-        notify("Play failed: " .. tostring(err), false)
+        setAdvStatus("StartMatch failed: " .. tostring(err2), false)
+        notify("StartMatch failed: " .. tostring(err2), false)
     end
-    return ok
+
+    task.wait(1)
+    advRunning = false
 end
 
-startBtn.MouseButton1Click:Connect(doStartRun)
+startBtn.MouseButton1Click:Connect(function() task.spawn(doStartRun) end)
 
 -- Auto-join toggle
 local _, getAutoJoin = toggle(charSec, "Auto-Join Adventure (loop)", 4, false, "odyssey.auto_join")
 
 task.spawn(function()
     while true do
-        task.wait(3)
-        if getAutoJoin() then
-            pcall(doStartRun)
+        task.wait(5)
+        if getAutoJoin() and not advRunning then
+            task.spawn(doStartRun)
         end
     end
 end)
