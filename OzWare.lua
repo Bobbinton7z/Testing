@@ -506,19 +506,19 @@ end
 local function fireBanner(name, path, args)
     local remote, err = resolveRemote(path)
     if not remote then
-        warn(("[OdysseyScript][%s] remote not found (%s) | tried: %s"):format(name, err or "?", path))
+        warn(("[OzWare][%s] remote not found (%s) | tried: %s"):format(name, err or "?", path))
         return false
     end
     if not remote:IsA("RemoteEvent") and not remote:IsA("RemoteFunction") then
-        warn(("[OdysseyScript][%s] resolved to %s, not a Remote (%s)"):format(name, remote.ClassName, remote:GetFullName()))
+        warn(("[OzWare][%s] resolved to %s, not a Remote (%s)"):format(name, remote.ClassName, remote:GetFullName()))
         return false
     end
     local ok, e = pcall(function()
-        print(("[OdysseyScript][%s] FireServer %s args=%s"):format(name, remote:GetFullName(), table.concat({tostring(args[1]),tostring(args[2]),tostring(args[3])}, ",")))
+        print(("[OzWare][%s] FireServer %s args=%s"):format(name, remote:GetFullName(), table.concat({tostring(args[1]),tostring(args[2]),tostring(args[3])}, ",")))
         remote:FireServer(table.unpack(args))
     end)
     if not ok then
-        warn(("[OdysseyScript][%s] FireServer ERROR: %s"):format(name, tostring(e)))
+        warn(("[OzWare][%s] FireServer ERROR: %s"):format(name, tostring(e)))
     end
     return ok
 end
@@ -1329,183 +1329,584 @@ local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect chest", 9, true, 
 label(autoSec, "Will collect chests and close the treasure UI; pair this with Auto Next Room", 10)
 
 -- =====================================================
--- CHARACTER JOINER (Odyssey / Adventure)
--- Remotes (from logger):
---   ReplicatedStorage.Networking.Odyssey.Adventure.LoadoutEvent:FireServer("SetLastCharacter", {CharacterName=...})
---   ReplicatedStorage.Networking.Odyssey.OdysseyEvent       :FireServer("Play", false)
+
+-- ======================
+-- ADVENTURE JOINER (v2, source-verified)
+-- ======================
 -- =====================================================
+-- ODYSSEY ADVENTURE JOINER  (high quality, v2)
+-- Source-verified from Adventure_Client.txt:
+--
+--   LoadoutEvent:FireServer("RequestState", nil)
+--     => triggers StateEvent "FullState" with all character data + loadouts
+--
+--   LoadoutEvent:FireServer("SetLastCharacter", {CharacterName = name})
+--     => persists selection server-side
+--
+--   OdysseyEvent:FireServer("Play", "Adventure", {
+--       CharacterName = name,
+--       Loadout       = { Slot1 = ..., Slot2 = ... }   -- from state
+--   })
+--     => starts the run
+-- =====================================================
+
+-- Remote helpers (direct path, no wrapper function - avoids reference mismatch)
+local function getLoadoutEvent()
+    local o = Net:FindFirstChild("Odyssey")
+    local a = o and o:FindFirstChild("Adventure")
+    return a and a:FindFirstChild("LoadoutEvent")
+end
+
+local function getStateEvent()
+    local o = Net:FindFirstChild("Odyssey")
+    local a = o and o:FindFirstChild("Adventure")
+    return a and a:FindFirstChild("StateEvent")
+end
+
+local function getOdysseyEvent()
+    local o = Net:FindFirstChild("Odyssey")
+    return o and o:FindFirstChild("OdysseyEvent")
+end
+
+-- ── State ──────────────────────────────────────────
+local charStateMap     = {}   -- [charName] = full char table from server
+local stateLoaded      = false
+local selectedCharName = nil
+local seenChar         = {}
+local characters       = {}
+
+-- Restore saved selection
+if type(OzSaved.selectedCharacter) == "string" and OzSaved.selectedCharacter ~= "" then
+    selectedCharName = OzSaved.selectedCharacter
+end
+
+-- Ragnaw run tracking (used by card automation below)
+local ragnawPickedThisRun = {}
+local ragnawPickCount     = 0
+
+local function addCharacter(n)
+    if not n or n == "" or seenChar[n] then return end
+    seenChar[n] = true
+    table.insert(characters, n)
+end
+
+-- Seed defaults (extended from CharactersData known names)
 local DEFAULT_CHARACTERS = {
     "Regnaw (Rage)",
     "Rogita (Super 4)",
     "Iscanur (Pride)",
     "Shinobi God (Infinite Dreams)",
     "Song Jinwu and Igros",
+    "Tanjiro (Water Breathing)",
+    "Gojo (Infinity)",
+    "Sukuna (Malevolent Shrine)",
+    "Luffy (Gear 5)",
+    "Naruto (Baryon Mode)",
+    "Ichigo (Final Getsuga)",
+    "Vegeta (Ultra Ego)",
+    "Saitama (Serious Punch)",
 }
-local characters       = {}
-local seenChar         = {}
-local selectedCharName = nil
-local function addCharacter(n)
-    if not n or n=="" then return end
-    if seenChar[n] then return end
-    seenChar[n]=true
-    table.insert(characters, n)
-end
-for _,n in ipairs(DEFAULT_CHARACTERS) do addCharacter(n) end
-if typeof(OzSaved.characters) == "table" then
-    for _,n in ipairs(OzSaved.characters) do addCharacter(n) end
-end
-if type(OzSaved.selectedCharacter) == "string" and OzSaved.selectedCharacter ~= "" then
-    selectedCharName = OzSaved.selectedCharacter
-    addCharacter(selectedCharName)
+for _, n in ipairs(DEFAULT_CHARACTERS) do addCharacter(n) end
+if type(OzSaved.characters) == "table" then
+    for _, n in ipairs(OzSaved.characters) do addCharacter(n) end
 end
 
-local charSec = section(odysseyPage, "Character Joiner", 0)
-local charSearch = input(charSec, "Search characters...", 1)
+-- ── Section ────────────────────────────────────────
+local charSec = section(odysseyPage, "Adventure Joiner", 0)
+
+-- Status bar (top)
+local statusBar = Instance.new("Frame")
+statusBar.Size          = UDim2.new(1,0,0,26)
+statusBar.BackgroundColor3 = C.PANEL
+statusBar.BorderSizePixel = 0
+statusBar.LayoutOrder   = 1
+statusBar.ZIndex        = 4
+statusBar.Parent        = charSec
+corner(statusBar, 6)
+
+local statusDot = Instance.new("Frame")
+statusDot.Size            = UDim2.new(0,8,0,8)
+statusDot.Position        = UDim2.new(0,10,0.5,-4)
+statusDot.BackgroundColor3 = C.DISABLED
+statusDot.BorderSizePixel  = 0
+statusDot.ZIndex           = 5
+statusDot.Parent           = statusBar
+corner(statusDot, 4)
+
+local statusLbl = Instance.new("TextLabel")
+statusLbl.Size             = UDim2.new(1,-100,1,0)
+statusLbl.Position         = UDim2.new(0,24,0,0)
+statusLbl.BackgroundTransparency = 1
+statusLbl.Text             = "State not loaded — click Refresh"
+statusLbl.TextColor3       = C.SUBTEXT
+statusLbl.TextSize         = 11
+statusLbl.Font             = FONT_SEMI
+statusLbl.TextXAlignment   = Enum.TextXAlignment.Left
+statusLbl.ZIndex           = 5
+statusLbl.Parent           = statusBar
+
+local refreshBtn = Instance.new("TextButton")
+refreshBtn.Size            = UDim2.new(0,70,0,20)
+refreshBtn.Position        = UDim2.new(1,-76,0.5,-10)
+refreshBtn.BackgroundColor3 = C.ACCENT
+refreshBtn.Text            = "Refresh"
+refreshBtn.TextColor3      = C.TEXT
+refreshBtn.TextSize        = 11
+refreshBtn.Font            = FONT_BOLD
+refreshBtn.BorderSizePixel = 0
+refreshBtn.ZIndex          = 5
+refreshBtn.Parent          = statusBar
+corner(refreshBtn, 5)
+gradient(refreshBtn, C.ACCENT, C.ACCENT2, 135)
+
+local function setStatus(msg, ok)
+    statusLbl.Text = msg
+    tween(statusDot, {BackgroundColor3 = ok == true  and C.GREEN
+                                      or ok == false and C.RED
+                                      or C.YELLOW}, 0.2)
+    statusLbl.TextColor3 = ok == true and C.GREEN or (ok == false and C.RED or C.SUBTEXT)
+end
+
+-- ── Search + Add row ───────────────────────────────
+local charSearch = input(charSec, "Search characters...", 2)
 
 local addRow = Instance.new("Frame")
-addRow.Size=UDim2.new(1,0,0,32); addRow.BackgroundTransparency=1
-addRow.LayoutOrder=2; addRow.Parent=charSec
+addRow.Size             = UDim2.new(1,0,0,32)
+addRow.BackgroundTransparency = 1
+addRow.LayoutOrder      = 3
+addRow.Parent           = charSec
+
 local addBox = Instance.new("TextBox")
-addBox.Size=UDim2.new(1,-90,1,0); addBox.Position=UDim2.new(0,0,0,0)
-addBox.BackgroundColor3=C.BG; addBox.BorderSizePixel=0
-addBox.PlaceholderText="Add custom character name..."; addBox.PlaceholderColor3=C.DIM
-addBox.Text=""; addBox.TextColor3=C.TEXT; addBox.TextSize=12; addBox.Font=FONT_REG
-addBox.TextXAlignment=Enum.TextXAlignment.Left; addBox.Parent=addRow
-corner(addBox,6); stroke(addBox,C.BORDER,1); padding(addBox,nil,0,0,8,8)
+addBox.Size             = UDim2.new(1,-86,1,0)
+addBox.BackgroundColor3 = C.BG
+addBox.BorderSizePixel  = 0
+addBox.PlaceholderText  = "Add custom character name..."
+addBox.PlaceholderColor3 = C.DIM
+addBox.Text             = ""
+addBox.TextColor3       = C.TEXT
+addBox.TextSize         = 12
+addBox.Font             = FONT_REG
+addBox.TextXAlignment   = Enum.TextXAlignment.Left
+addBox.Parent           = addRow
+corner(addBox, 6); stroke(addBox, C.BORDER, 1); padding(addBox, nil, 0,0,8,8)
+addBox.Focused:Connect(function()  tween(addBox, {BackgroundColor3=C.PANEL}) end)
+addBox.FocusLost:Connect(function() tween(addBox, {BackgroundColor3=C.BG}) end)
 
--- Selected display
+local addConfirmBtn = Instance.new("TextButton")
+addConfirmBtn.Size           = UDim2.new(0,80,1,0)
+addConfirmBtn.Position       = UDim2.new(1,-80,0,0)
+addConfirmBtn.BackgroundColor3 = C.GREEN
+addConfirmBtn.Text           = "+ Add"
+addConfirmBtn.TextColor3     = C.TEXT
+addConfirmBtn.TextSize       = 12
+addConfirmBtn.Font           = FONT_BOLD
+addConfirmBtn.BorderSizePixel = 0
+addConfirmBtn.Parent         = addRow
+corner(addConfirmBtn, 6)
+gradient(addConfirmBtn, C.GREEN, C.GREEN:Lerp(Color3.new(0,0,0),0.2), 90)
+
+-- ── Selected display ───────────────────────────────
+local selFrame = Instance.new("Frame")
+selFrame.Size             = UDim2.new(1,0,0,32)
+selFrame.BackgroundColor3 = C.PANEL
+selFrame.BorderSizePixel  = 0
+selFrame.LayoutOrder      = 4
+selFrame.Parent           = charSec
+corner(selFrame, 7)
+stroke(selFrame, C.BORDER, 1)
+
+local selDot = Instance.new("Frame")
+selDot.Size            = UDim2.new(0,8,0,8)
+selDot.Position        = UDim2.new(0,10,0.5,-4)
+selDot.BackgroundColor3 = C.DISABLED
+selDot.BorderSizePixel = 0
+selDot.Parent          = selFrame
+corner(selDot, 4)
+
 local selLbl = Instance.new("TextLabel")
-selLbl.Size=UDim2.new(1,0,0,20); selLbl.BackgroundTransparency=1
-selLbl.Text="Selected: (none)"; selLbl.TextColor3=C.SUBTEXT
-selLbl.TextSize=12; selLbl.Font=FONT_SEMI
-selLbl.TextXAlignment=Enum.TextXAlignment.Left
-selLbl.LayoutOrder=3; selLbl.Parent=charSec
+selLbl.Size            = UDim2.new(1,-24,1,0)
+selLbl.Position        = UDim2.new(0,24,0,0)
+selLbl.BackgroundTransparency = 1
+selLbl.Text            = "No character selected"
+selLbl.TextColor3      = C.SUBTEXT
+selLbl.TextSize        = 12
+selLbl.Font            = FONT_SEMI
+selLbl.TextXAlignment  = Enum.TextXAlignment.Left
+selLbl.Parent          = selFrame
 
--- Scrolling character list
+-- ── Loadout display ────────────────────────────────
+local loadoutFrame = Instance.new("Frame")
+loadoutFrame.Size             = UDim2.new(1,0,0,28)
+loadoutFrame.BackgroundColor3 = C.PANEL
+loadoutFrame.BorderSizePixel  = 0
+loadoutFrame.LayoutOrder      = 5
+loadoutFrame.Visible          = false
+loadoutFrame.Parent           = charSec
+corner(loadoutFrame, 6)
+
+local loadoutLbl = Instance.new("TextLabel")
+loadoutLbl.Size            = UDim2.new(1,-10,1,0)
+loadoutLbl.Position        = UDim2.new(0,8,0,0)
+loadoutLbl.BackgroundTransparency = 1
+loadoutLbl.Text            = "Loadout: —"
+loadoutLbl.TextColor3      = C.SUBTEXT
+loadoutLbl.TextSize        = 11
+loadoutLbl.Font            = FONT_REG
+loadoutLbl.TextXAlignment  = Enum.TextXAlignment.Left
+loadoutLbl.Parent          = loadoutFrame
+
+-- ── Character scroll list ──────────────────────────
 local charScroll = Instance.new("ScrollingFrame")
-charScroll.Size=UDim2.new(1,0,0,180); charScroll.BackgroundColor3=C.BG
-charScroll.BorderSizePixel=0; charScroll.ScrollBarThickness=4
-charScroll.ScrollBarImageColor3=C.ACCENT
-charScroll.CanvasSize=UDim2.new(0,0,0,0)
-charScroll.AutomaticCanvasSize=Enum.AutomaticSize.Y
-charScroll.ScrollingDirection=Enum.ScrollingDirection.Y
-charScroll.LayoutOrder=4; charScroll.Parent=charSec
-corner(charScroll,7); stroke(charScroll,C.BORDER,1)
-listLayout(charScroll,nil,4); padding(charScroll,nil,6,6,6,6)
+charScroll.Size             = UDim2.new(1,0,0,170)
+charScroll.BackgroundColor3 = C.BG
+charScroll.BorderSizePixel  = 0
+charScroll.ScrollBarThickness = 4
+charScroll.ScrollBarImageColor3 = C.ACCENT
+charScroll.CanvasSize       = UDim2.new(0,0,0,0)
+charScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+charScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+charScroll.LayoutOrder      = 6
+charScroll.Parent           = charSec
+corner(charScroll, 7)
+stroke(charScroll, C.BORDER, 1)
+listLayout(charScroll, nil, 4)
+padding(charScroll, nil, 6,6,6,6)
 
 local charRows = {}
-local function updateSelLbl()
-    selLbl.Text = "Selected: "..(selectedCharName or "(none)")
-    selLbl.TextColor3 = selectedCharName and C.ACCENT or C.SUBTEXT
-    for n,row in pairs(charRows) do
-        local active = (n == selectedCharName)
-        row.BackgroundColor3 = active and C.ACCENT or C.PANEL
-        if row:FindFirstChild("Lbl") then
-            row.Lbl.TextColor3 = active and Color3.fromRGB(20,24,40) or C.TEXT
+
+-- ── Rebuild helpers ────────────────────────────────
+local function getCharLoadout(name)
+    local cd = charStateMap[name]
+    if not cd then return nil end
+    local lo = cd.Loadout
+    if type(lo) ~= "table" then return nil end
+    return lo
+end
+
+local function getCharFloors(name)
+    local cd = charStateMap[name]
+    return cd and cd.HighestFloorsCleared or nil
+end
+
+local function updateSelDisplay()
+    if selectedCharName then
+        selLbl.Text = selectedCharName
+        selLbl.TextColor3 = C.ACCENT
+        tween(selDot, {BackgroundColor3 = C.ACCENT})
+
+        -- Loadout
+        local lo = getCharLoadout(selectedCharName)
+        if lo then
+            local s1 = lo.Slot1 or "—"
+            local s2 = lo.Slot2 or "—"
+            loadoutLbl.Text = ("Loadout  |  Slot 1: %s   Slot 2: %s"):format(s1, s2)
+            loadoutFrame.Visible = true
+        else
+            loadoutFrame.Visible = false
         end
+    else
+        selLbl.Text = "No character selected"
+        selLbl.TextColor3 = C.SUBTEXT
+        tween(selDot, {BackgroundColor3 = C.DISABLED})
+        loadoutFrame.Visible = false
+    end
+
+    for n, row in pairs(charRows) do
+        local active = (n == selectedCharName)
+        tween(row, {BackgroundColor3 = active and C.ACCENT or C.PANEL})
+        local lb = row:FindFirstChild("Lbl")
+        if lb then lb.TextColor3 = active and Color3.fromRGB(20,24,40) or C.TEXT end
+        local fl = row:FindFirstChild("Floors")
+        if fl then fl.TextColor3 = active and Color3.fromRGB(20,24,40) or C.SUBTEXT end
     end
 end
 
 local function rebuildCharList()
-    for _,c in ipairs(charScroll:GetChildren()) do
+    for _, c in ipairs(charScroll:GetChildren()) do
         if c:IsA("TextButton") then c:Destroy() end
     end
     charRows = {}
     local q = (charSearch.Text or ""):lower()
     local sorted = {}
-    for _,n in ipairs(characters) do
-        if q=="" or n:lower():find(q, 1, true) then table.insert(sorted, n) end
+    for _, n in ipairs(characters) do
+        if q == "" or n:lower():find(q, 1, true) then
+            table.insert(sorted, n)
+        end
     end
     table.sort(sorted)
-    for i,name in ipairs(sorted) do
+
+    for i, name in ipairs(sorted) do
         local row = Instance.new("TextButton")
-        row.Size=UDim2.new(1,0,0,30); row.BackgroundColor3=C.PANEL
-        row.AutoButtonColor=false; row.Text=""; row.BorderSizePixel=0
-        row.LayoutOrder=i; row.Parent=charScroll
-        corner(row,6)
+        row.Size             = UDim2.new(1,0,0,32)
+        row.BackgroundColor3 = C.PANEL
+        row.AutoButtonColor  = false
+        row.Text             = ""
+        row.BorderSizePixel  = 0
+        row.LayoutOrder      = i
+        row.Parent           = charScroll
+        corner(row, 6)
+
+        -- Character name
         local lb = Instance.new("TextLabel")
-        lb.Name="Lbl"
-        lb.Size=UDim2.new(1,-16,1,0); lb.Position=UDim2.new(0,10,0,0)
-        lb.BackgroundTransparency=1; lb.Text=name; lb.TextColor3=C.TEXT
-        lb.TextSize=12; lb.Font=FONT_SEMI
-        lb.TextXAlignment=Enum.TextXAlignment.Left; lb.Parent=row
-        charRows[name]=row
+        lb.Name              = "Lbl"
+        lb.Size              = UDim2.new(1,-80,1,0)
+        lb.Position          = UDim2.new(0,12,0,0)
+        lb.BackgroundTransparency = 1
+        lb.Text              = name
+        lb.TextColor3        = C.TEXT
+        lb.TextSize          = 12
+        lb.Font              = FONT_SEMI
+        lb.TextXAlignment    = Enum.TextXAlignment.Left
+        lb.TextTruncate      = Enum.TextTruncate.AtEnd
+        lb.Parent            = row
+
+        -- Floors cleared badge
+        local floors = getCharFloors(name)
+        if floors and floors > 0 then
+            local fl = Instance.new("TextLabel")
+            fl.Name            = "Floors"
+            fl.Size            = UDim2.new(0,70,0,18)
+            fl.Position        = UDim2.new(1,-76,0.5,-9)
+            fl.BackgroundColor3 = C.CARD
+            fl.BorderSizePixel = 0
+            fl.Text            = "Floor " .. floors
+            fl.TextColor3      = C.SUBTEXT
+            fl.TextSize        = 10
+            fl.Font            = FONT_SEMI
+            fl.TextXAlignment  = Enum.TextXAlignment.Center
+            fl.Parent          = row
+            corner(fl, 4)
+        end
+
+        charRows[name] = row
         row.MouseButton1Click:Connect(function()
             selectedCharName = (selectedCharName == name) and nil or name
             OzSaved.selectedCharacter = selectedCharName
             saveOzSettings()
-            updateSelLbl()
+            updateSelDisplay()
         end)
     end
-    updateSelLbl()
+    updateSelDisplay()
 end
 
 charSearch:GetPropertyChangedSignal("Text"):Connect(rebuildCharList)
+
+addConfirmBtn.MouseButton1Click:Connect(function()
+    local t = addBox.Text
+    if not t or t == "" then return end
+    addCharacter(t)
+    OzSaved.characters = OzSaved.characters or {}
+    local exists = false
+    for _, v in ipairs(OzSaved.characters) do if v == t then exists = true break end end
+    if not exists then table.insert(OzSaved.characters, t) end
+    saveOzSettings()
+    addBox.Text = ""
+    rebuildCharList()
+    notify("Character added: " .. t, true)
+end)
+
 addBox.FocusLost:Connect(function(enter)
     if enter and addBox.Text ~= "" then
-        addCharacter(addBox.Text)
-        OzSaved.characters = OzSaved.characters or {}
-        table.insert(OzSaved.characters, addBox.Text)
-        saveOzSettings()
-        addBox.Text=""
-        rebuildCharList()
-        notify("Character added", true)
+        addConfirmBtn:GetPropertyChangedSignal("BackgroundColor3") -- dummy trigger
+        addConfirmBtn.MouseButton1Click:Fire()
     end
 end)
-rebuildCharList()
 
-local ragnawPickedThisRun = {}
-local ragnawPickCount = 0
+-- ── StateEvent hook ────────────────────────────────
+local stateConn = nil
+local function hookStateEvent()
+    if stateConn then stateConn:Disconnect(); stateConn = nil end
+    local se = getStateEvent()
+    if not se then return false end
 
--- Actions
-local function fireSetLast(name)
-    local le = OdysseyNet() and OdysseyNet():FindFirstChild("LoadoutEvent")
-    if le and le:IsA("RemoteEvent") then
-        pcall(function() le:FireServer("SetLastCharacter", {CharacterName=name}) end)
-        return true
-    end
-    return false
-end
-local function firePlay(name)
-    local od = Net:FindFirstChild("Odyssey")
-    local oe = od and od:FindFirstChild("OdysseyEvent")
-    if not (oe and oe:IsA("RemoteEvent")) then return false end
+    stateConn = se.OnClientEvent:Connect(function(eventType, data)
+        if eventType ~= "FullState" or not data then return end
 
-    -- Client log shows AdventureClient.OnStartRun(remoteAction, isNightmare)
-    -- expects the second argument to be a boolean. Only send the one known-good
-    -- signature; extra fallback signatures were triggering string->bool casts.
-    local ok = pcall(function()
-        oe:FireServer("Play", false)
+        stateLoaded = true
+        charStateMap = data.Characters or {}
+
+        local count = 0
+        for charName, charData in pairs(charStateMap) do
+            addCharacter(charName)
+            count = count + 1
+        end
+
+        -- Auto-select last used character from server data
+        if not selectedCharName or selectedCharName == "" then
+            if type(data.LastSelectedCharacter) == "string" and data.LastSelectedCharacter ~= "" then
+                selectedCharName = data.LastSelectedCharacter
+                OzSaved.selectedCharacter = selectedCharName
+                saveOzSettings()
+            end
+        end
+
+        rebuildCharList()
+        setStatus(("%d characters  |  tap a name to select"):format(count), true)
     end)
-    return ok
+
+    -- Also listen for individual updates
+    se.OnClientEvent:Connect(function(eventType, data)
+        if eventType == "LoadoutUpdated" and data and data.CharacterName then
+            if charStateMap[data.CharacterName] then
+                charStateMap[data.CharacterName].Loadout = data.Loadout
+            end
+            if selectedCharName == data.CharacterName then
+                updateSelDisplay()
+            end
+        end
+    end)
+
+    return true
 end
 
+-- ── Refresh (request state from server) ───────────
+local function requestState()
+    local le = getLoadoutEvent()
+    if not le then
+        setStatus("LoadoutEvent not found", false)
+        return
+    end
+    if not hookStateEvent() then
+        setStatus("StateEvent not found", false)
+        return
+    end
+    setStatus("Loading...", nil)
+    tween(refreshBtn, {BackgroundColor3 = C.YELLOW})
+    pcall(function() le:FireServer("RequestState", nil) end)
+    task.delay(6, function()
+        tween(refreshBtn, {BackgroundColor3 = C.ACCENT})
+        if not stateLoaded then
+            setStatus("No response from server — check remotes", false)
+        end
+    end)
+end
 
-local startBtn = btn(charSec, "Start Run with Selected", C.ACCENT, 5)
+refreshBtn.MouseButton1Click:Connect(requestState)
+
+-- Auto-refresh on load (slight delay to let remotes register)
+task.delay(1.5, requestState)
+
+-- ── Core action functions ──────────────────────────
+local function doSetLastCharacter(name)
+    local le = getLoadoutEvent()
+    if not le then return false, "LoadoutEvent not found" end
+    local ok, err = pcall(function()
+        le:FireServer("SetLastCharacter", { CharacterName = name })
+    end)
+    return ok, err
+end
+
+local function doStartRun(name)
+    local oe = getOdysseyEvent()
+    if not oe then return false, "OdysseyEvent not found" end
+
+    -- Build payload — include loadout if we have state
+    local payload = { CharacterName = name }
+    local lo = getCharLoadout(name)
+    if lo then
+        payload.Loadout = lo
+    end
+
+    -- Confirmed signature from Adventure_Client.txt line 472:
+    -- l_OdysseyEvent_0:FireServer("Play", "Adventure", t93)
+    local ok, err = pcall(function()
+        oe:FireServer("Play", "Adventure", payload)
+    end)
+    return ok, err
+end
+
+-- ── Action buttons ─────────────────────────────────
+local btnRow = Instance.new("Frame")
+btnRow.Size              = UDim2.new(1,0,0,32)
+btnRow.BackgroundTransparency = 1
+btnRow.LayoutOrder       = 7
+btnRow.Parent            = charSec
+listLayout(btnRow, Enum.FillDirection.Horizontal, 6)
+
+local startBtn = Instance.new("TextButton")
+startBtn.Size            = UDim2.new(0.62,-3,1,0)
+startBtn.BackgroundColor3 = C.GREEN
+startBtn.Text            = "Start Adventure Run"
+startBtn.TextColor3      = C.TEXT
+startBtn.TextSize        = 13
+startBtn.Font            = FONT_BOLD
+startBtn.BorderSizePixel = 0
+startBtn.LayoutOrder     = 1
+startBtn.Parent          = btnRow
+corner(startBtn, 7)
+gradient(startBtn, C.GREEN, C.GREEN:Lerp(Color3.new(0,0,0),0.2), 90)
+startBtn.MouseEnter:Connect(function() tween(startBtn, {BackgroundTransparency=0.15}) end)
+startBtn.MouseLeave:Connect(function() tween(startBtn, {BackgroundTransparency=0}) end)
+
+local setCharBtn = Instance.new("TextButton")
+setCharBtn.Size           = UDim2.new(0.38,-3,1,0)
+setCharBtn.BackgroundColor3 = C.ACCENT
+setCharBtn.Text           = "Set Character"
+setCharBtn.TextColor3     = C.TEXT
+setCharBtn.TextSize       = 12
+setCharBtn.Font           = FONT_SEMI
+setCharBtn.BorderSizePixel = 0
+setCharBtn.LayoutOrder    = 2
+setCharBtn.Parent         = btnRow
+corner(setCharBtn, 7)
+gradient(setCharBtn, C.ACCENT, C.ACCENT2, 135)
+setCharBtn.MouseEnter:Connect(function() tween(setCharBtn, {BackgroundTransparency=0.15}) end)
+setCharBtn.MouseLeave:Connect(function() tween(setCharBtn, {BackgroundTransparency=0}) end)
+
 startBtn.MouseButton1Click:Connect(function()
-    if not selectedCharName then notify("Select a character first", false); return end
+    if not selectedCharName then
+        notify("Select a character first", false)
+        return
+    end
     ragnawPickedThisRun = {}
     ragnawPickCount = 0
-    local a = fireSetLast(selectedCharName)
-    local b = firePlay(selectedCharName)
-    if a or b then notify("Joining: "..selectedCharName, true)
-    else notify("Remotes not found", false) end
+
+    -- Step 1: set character server-side
+    local ok1, err1 = doSetLastCharacter(selectedCharName)
+    if not ok1 then
+        notify("SetLastCharacter failed: " .. tostring(err1), false)
+        return
+    end
+
+    -- Step 2: small delay then fire Play
+    task.wait(0.15)
+    local ok2, err2 = doStartRun(selectedCharName)
+    if ok2 then
+        notify("Starting: " .. selectedCharName, true)
+        setStatus("Run started as " .. selectedCharName, true)
+    else
+        notify("Play failed: " .. tostring(err2), false)
+        setStatus("Play failed — check console", false)
+    end
 end)
 
-local _, getAutoJoin = toggle(charSec, "Auto-Join Odyssey with selected character", 6, false)
+setCharBtn.MouseButton1Click:Connect(function()
+    if not selectedCharName then
+        notify("Select a character first", false)
+        return
+    end
+    local ok, err = doSetLastCharacter(selectedCharName)
+    notify(ok and ("Character set: " .. selectedCharName) or ("Failed: " .. tostring(err)), ok)
+end)
+
+-- ── Auto-join toggle ───────────────────────────────
+local _, getAutoJoin = toggle(charSec, "Auto-Join Adventure (loop)", 8, false, "odyssey.auto_join")
+
 task.spawn(function()
     while true do
-        task.wait(2.5)
+        task.wait(3)
         if getAutoJoin() and selectedCharName then
-            -- only fire when not already in a run (best-effort: check for run-only GUI is unreliable;
-            -- the server ignores Play if already in a match, so it's safe to retry)
             ragnawPickedThisRun = {}
             ragnawPickCount = 0
-            pcall(fireSetLast, selectedCharName)
-            pcall(firePlay, selectedCharName)
+            pcall(doSetLastCharacter, selectedCharName)
+            task.wait(0.15)
+            pcall(doStartRun, selectedCharName)
         end
     end
 end)
+
+rebuildCharList()
+
 
 -- Card scan pick-list sections and manual preview controls removed per request.
 
@@ -1776,8 +2177,8 @@ end
 -- BOOT
 -- ======================
 switchTab("Lobby")
-notify("Odyssey Script v2.0 loaded", true)
-print("[OdysseyScript v2] loaded.")
+notify("OzWare v2.0 loaded", true)
+print("[OzWare v2] loaded.")
 
 
 -- ======================
