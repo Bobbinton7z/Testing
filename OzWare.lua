@@ -489,7 +489,7 @@ do
 local lobbyPage = tabPages["Lobby"]
 
 local sumSec = section(lobbyPage, "Auto Summoner", 1)
-label(sumSec, "Loops max-pull (50). Game uses available currency.", 1)
+label(sumSec, "Loops summon using the game's own max/current currency handling.", 1)
 
 -- Resolve a remote by a "/" path under ReplicatedStorage, logging each hop
 local function resolveRemote(path)
@@ -539,7 +539,7 @@ end
 -- Do not probe boolean variants here. RemoteEvent argument errors can happen in
 -- the game's client/server handlers, so probing bad signatures can break the
 -- manual summon UI after OzWare is executed.
-local function fireBanner(name, path, bannerId, amount, _isMemoria)
+local function fireBanner(name, path, bannerId, _amount, _isMemoria)
     local remote, err = resolveRemote(path)
     if not remote then
         warn(("[OzWare][%s] remote not found (%s) | tried: %s"):format(name, err or "?", path))
@@ -550,7 +550,7 @@ local function fireBanner(name, path, bannerId, amount, _isMemoria)
         return false
     end
 
-    local args = { "SummonMany", bannerId, amount }
+    local args = { "SummonMany", bannerId }
     local ok, errFire = pcall(function() remote:FireServer(table.unpack(args)) end)
     if ok then
         print(("[OzWare][%s] sent %s args=%s"):format(name, remote:GetFullName(), fmtArgs(args)))
@@ -561,11 +561,11 @@ local function fireBanner(name, path, bannerId, amount, _isMemoria)
 end
 
 local BANNERS = {
-    { name="Selection Banner",  call=function() return fireBanner("Selection Banner", "Networking/Units/SummonEvent", "Selection",       50, false) end },
-    { name="Special Banner",    call=function() return fireBanner("Special Banner",   "Networking/Units/SummonEvent", "Special",         50, false) end },
-    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Units/SummonEvent", "StandardMemoria", 50, true ) end },
-    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",    "Networking/Units/SummonEvent", "Spring26",        50, false) end },
-    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",   "Networking/Units/SummonEvent", "Spring26Memoria", 50, true ) end },
+    { name="Selection Banner",  call=function() return fireBanner("Selection Banner", "Networking/Units/SummonEvent", "Selection",       nil, false) end },
+    { name="Special Banner",    call=function() return fireBanner("Special Banner",   "Networking/Units/SummonEvent", "Special",         nil, false) end },
+    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Units/SummonEvent", "StandardMemoria", nil, true ) end },
+    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",    "Networking/Units/SummonEvent", "Spring26",        nil, false) end },
+    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",   "Networking/Units/SummonEvent", "Spring26Memoria", nil, true ) end },
 }
 
 for i,b in ipairs(BANNERS) do
@@ -1383,9 +1383,9 @@ local _, getAutoPick           = toggle(autoSec, "Auto select cards", 3, true, "
 label(autoSec, "Will select basic cards and prioritize the highest rarity", 4)
 local _, getAutoRagnawCards    = toggle(autoSec, "Auto Select Unit Cards (Ragnaw Only)", 5, false, "odyssey.auto_ragnaw_unit_cards")
 label(autoSec, "Will select 4 cards that pair good with Ragnaw", 6)
-local _, getAutoSkipShop       = toggle(autoSec, "Auto skip shop", 7, true, "odyssey.auto_skip_shop")
+local _, getAutoSkipShop       = toggle(autoSec, "Auto skip shop", 7, false, "odyssey.auto_skip_shop.v2_safe")
 label(autoSec, "Will close shop UI; pair this with Auto Next Room", 8)
-local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect chest", 9, true, "odyssey.auto_collect_chest")
+local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect chest", 9, false, "odyssey.auto_collect_chest.v2_safe")
 label(autoSec, "Will collect chests and close the treasure UI; pair this with Auto Next Room", 10)
 
 -- =====================================================
@@ -1533,11 +1533,10 @@ local function closeMatchingUI(keywords)
                     local dn = d.Name:lower()
                     if dn:find("close") or dn:find("exit") or d.Text=="X" or d.Text=="x" then
                         pcall(function() firesignal(d.MouseButton1Click) end)
-                        pcall(function() d.Visible = false end)
                     end
                 end
             end
-            pcall(function() g.Enabled = false end)
+            -- intentionally do not disable the game GUI; forcing ScreenGui off can break manual buttons
         end
     end
 end
@@ -1705,12 +1704,10 @@ local function maybeCloseGui(g)
     if g == gui then return end
     local n = g.Name:lower()
     if getAutoCollectChests() and (n:find("treasure") or n:find("chest")) then
-        pcall(function() g.Enabled = false end)
         if getAutoNextRoom() then requestNextRoom() end
         return
     end
     if getAutoSkipShop() and n:find("shop") then
-        pcall(function() g.Enabled = false end)
         if getAutoNextRoom() then requestNextRoom() end
         return
     end
