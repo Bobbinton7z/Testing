@@ -52,7 +52,7 @@ local function SkipWaveEvent()return Net:FindFirstChild("SkipWaveEvent") end
 -- HELPERS
 -- ======================
 local function tween(o, p, t) TweenSvc:Create(o, TweenInfo.new(t or 0.18, Enum.EasingStyle.Quad), p):Play() end
-local function corner(p, r)   local c=Instance.new("UICorner");  c.CornerRadius=UDim.new(0,r or 8); c.Parent=p; return c end
+local function corner(p, r)   local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r or 8); c.Parent=p; return c end
 local function stroke(p, col, th) local s=Instance.new("UIStroke"); s.Color=col or C.BORDER; s.Thickness=th or 1; s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; s.Parent=p; return s end
 local function gradient(p, a, b, rot)
     local g=Instance.new("UIGradient")
@@ -181,7 +181,6 @@ local function glowBar(side, col)
     local g=Instance.new("Frame")
     g.AnchorPoint=Vector2.new(0.5,0.5)
     g.Size=UDim2.new(0,4,0,420)
-    -- side: -1 = left of window, +1 = right of window
     g.Position=UDim2.new(0.5, side * (360 + 16), 0.5, 0)
     g.BackgroundColor3=col; g.BorderSizePixel=0; g.ZIndex=0; g.Parent=gui
     corner(g,2)
@@ -231,10 +230,6 @@ local function titleBtn(rightOffset, bg, symbol)
     b.MouseLeave:Connect(function() tween(b,{BackgroundTransparency=0}) end)
     return b
 end
--- (Minimize / Close buttons removed; using floating toggle bottom-left)
-
-
--- floating toggle handler is added after sidebar/contentArea exist (see bottom of file)
 
 -- Drag
 local dragging, dragStart, winStart = false, nil, nil
@@ -257,13 +252,11 @@ end)
 -- ======================
 -- SIDEBAR (left vertical tabs) + CONTENT (right)
 -- ======================
--- Sidebar container (no list layout — children positioned manually)
 local sidebar=Instance.new("Frame")
 sidebar.Size=UDim2.new(0,150,1,-64); sidebar.Position=UDim2.new(0,10,0,58)
 sidebar.BackgroundColor3=C.PANEL; sidebar.BorderSizePixel=0; sidebar.ZIndex=2; sidebar.Parent=win
 corner(sidebar,14)
 
--- Tab list (top of sidebar)
 local tabList=Instance.new("Frame")
 tabList.Size=UDim2.new(1,-12,1,-78); tabList.Position=UDim2.new(0,6,0,8)
 tabList.BackgroundTransparency=1; tabList.ZIndex=3; tabList.Parent=sidebar
@@ -407,10 +400,7 @@ local function input(parent, placeholder, order)
 end
 
 local function toggle(parent, text, order, default, saveKey)
-    -- Full-width row with a small indicator light. Only the circle lights up;
-    -- the row itself stays dark so enabled states do not flood the panel.
     saveKey = saveKey or ("toggle:"..text)
-
     local btnRow=Instance.new("TextButton")
     btnRow.Size=UDim2.new(1,0,0,34); btnRow.AutoButtonColor=false
     btnRow.BackgroundColor3=C.PANEL; btnRow.BorderSizePixel=0
@@ -487,11 +477,9 @@ end
 -- ======================
 do
 local lobbyPage = tabPages["Lobby"]
-
 local sumSec = section(lobbyPage, "Auto Summoner", 1)
 label(sumSec, "Loops summon using the game's own max/current currency handling.", 1)
 
--- Resolve a remote by a "/" path under ReplicatedStorage, logging each hop
 local function resolveRemote(path)
     local node = RS
     for part in string.gmatch(path, "[^/]+") do
@@ -534,11 +522,6 @@ local function tryRemoteCandidates(tag, remote, candidates)
     return false
 end
 
--- Verified from the manual remote recorder:
--- ReplicatedStorage.Networking.Units.SummonEvent:FireServer("SummonMany", bannerId, amount)
--- Do not probe boolean variants here. RemoteEvent argument errors can happen in
--- the game's client/server handlers, so probing bad signatures can break the
--- manual summon UI after OzWare is executed.
 local function fireBanner(name, path, bannerId, _amount, _isMemoria)
     local remote, err = resolveRemote(path)
     if not remote then
@@ -550,7 +533,6 @@ local function fireBanner(name, path, bannerId, _amount, _isMemoria)
         return false
     end
 
-    -- bannerId is nil for dedicated-remote banners (Selection/Special/Memoria)
     local args = bannerId and { "SummonMany", bannerId } or { "SummonMany" }
     local ok, errFire = pcall(function() remote:FireServer(table.unpack(args)) end)
     if ok then
@@ -561,11 +543,6 @@ local function fireBanner(name, path, bannerId, _amount, _isMemoria)
     return false
 end
 
--- Confirmed remote paths from scanner sessions:
---   Selection  -> Networking.SummonSelectionEvent          (dedicated, no bannerId)
---   Special    -> Networking.Units.SummonIndexEvent        (dedicated, no bannerId)
---   Std Mem    -> Networking.Memorias.MemoriaSummonEvent   (dedicated, no bannerId)
---   Spring*    -> Networking.Units.SummonEvent + bannerId  (confirmed "Spring26"/"Spring26Memoria")
 local BANNERS = {
     { name="Selection Banner",  call=function() return fireBanner("Selection Banner",  "Networking/SummonSelectionEvent",        nil,               nil, false) end },
     { name="Special Banner",    call=function() return fireBanner("Special Banner",    "Networking/Units/SummonIndexEvent",      nil,               nil, false) end },
@@ -575,8 +552,6 @@ local BANNERS = {
 }
 
 for i,b in ipairs(BANNERS) do
-    -- Versioned save key prevents old broken saved toggles from auto-firing
-    -- immediately on execute after the remote signature changed.
     local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-recorder-v5:"..b.name)
     task.spawn(function()
         while true do
@@ -588,7 +563,6 @@ for i,b in ipairs(BANNERS) do
     end)
 end
 
--- Claimers (each has a Run button + Loop toggle)
 local claimSec = section(lobbyPage, "Claimer", 2)
 local CLAIMERS = {
     { name="Claim All Quests", color=C.GREEN, fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
@@ -604,7 +578,6 @@ local CLAIMERS = {
 }
 local loopGetters = {}
 for i,c in ipairs(CLAIMERS) do
-    -- Row holding button + loop pill
     local row=Instance.new("Frame")
     row.Size=UDim2.new(1,0,0,34); row.BackgroundTransparency=1
     row.LayoutOrder=i; row.ZIndex=3; row.Parent=claimSec
@@ -615,7 +588,7 @@ for i,c in ipairs(CLAIMERS) do
     b.ZIndex=3; b.Parent=row; corner(b,7)
     gradient(b,c.color,c.color:Lerp(Color3.new(0,0,0),0.25),90)
     b.MouseButton1Click:Connect(function() safeCall(c.fn, c.name.." done!", "Claim failed") end)
-    -- Loop pill (toggle)
+    
     local track=Instance.new("TextButton")
     track.Size=UDim2.new(0,72,1,0); track.Position=UDim2.new(1,-72,0,0)
     track.BackgroundColor3=C.DISABLED; track.Text="Loop OFF"; track.TextColor3=C.TEXT
@@ -633,7 +606,7 @@ local allBtn = btn(claimSec, "Run All Claims", C.ACCENT, #CLAIMERS+10)
 allBtn.MouseButton1Click:Connect(function()
     safeCall(function() for _,c in ipairs(CLAIMERS) do c.fn(); task.wait(0.2) end end, "All rewards claimed!", "Claim all failed")
 end)
--- Looper
+
 task.spawn(function()
     while true do
         for i,c in ipairs(CLAIMERS) do
@@ -652,8 +625,6 @@ end
 -- ======================
 do
 local joinerPage = tabPages["Joiner"]
-
--- Helper: build act lists of length n
 local function acts(n) local t={}; for i=1,n do t[i]="Act"..i end; return t end
 
 local STAGES = {
@@ -751,15 +722,12 @@ joinBtn.MouseButton1Click:Connect(function()
             FriendsOnly = friendsOnly,
         }
 
-        -- Newer lobby code expects a bool in the join/start argument list.
-        -- The old AddMatch + dictionary call is what produces
-        -- "Unable to cast Dictionary to bool" in StageSelection/AdventureClient.
         tryRemoteCandidates("Join Match", LE, {
             {"AddMatch", friendsOnly, payload},
             {friendsOnly, "AddMatch", payload},
             {"CreateMatch", friendsOnly, payload},
             {"JoinMatch", friendsOnly, payload},
-            {"AddMatch", payload}, -- final legacy fallback only
+            {"AddMatch", payload}
         })
 
         if getAutoStart() then
@@ -841,10 +809,7 @@ for i,p in ipairs({"First","Last","Closest","Strongest","Weakest","Bosses"}) do
     end)
 end
 
--- ======================
--- AUTO ABILITIES (per-unit, fires on cooldown)
--- ======================
-local autoAbilities = {}  -- [key] = { args, cooldown, enabled, label }
+local autoAbilities = {}
 local abilitySec = section(gamePage, "Auto Abilities", 4)
 label(abilitySec, "Use an ability once - it gets captured below.", 1)
 
@@ -862,7 +827,6 @@ corner(abilityScroll,7); stroke(abilityScroll,C.BORDER,1)
 listLayout(abilityScroll,nil,4); padding(abilityScroll,nil,6,6,6,6)
 
 local function abilityKey(args)
-    -- key by string-ified args so the same ability collapses to one row
     local parts = {}
     for i,a in ipairs(args) do
         local t = typeof(a)
@@ -892,6 +856,7 @@ local function rebuildAbilityList()
         lb.TextColor3=C.TEXT; lb.TextSize=11; lb.Font=FONT_REG
         lb.TextXAlignment=Enum.TextXAlignment.Left
         lb.TextTruncate=Enum.TextTruncate.AtEnd; lb.Parent=row
+        
         local cd=Instance.new("TextBox")
         cd.Size=UDim2.new(0,38,0,22); cd.Position=UDim2.new(1,-130,0.5,-11)
         cd.BackgroundColor3=C.BG; cd.Text=tostring(entry.cooldown)
@@ -900,6 +865,7 @@ local function rebuildAbilityList()
         cd.FocusLost:Connect(function()
             local n = tonumber(cd.Text); if n and n>0 then entry.cooldown=n else cd.Text=tostring(entry.cooldown) end
         end)
+        
         local tg=Instance.new("TextButton")
         tg.Size=UDim2.new(0,46,0,22); tg.Position=UDim2.new(1,-86,0.5,-11)
         tg.BackgroundColor3 = entry.enabled and C.GREEN or C.DISABLED
@@ -911,6 +877,7 @@ local function rebuildAbilityList()
             tg.BackgroundColor3 = entry.enabled and C.GREEN or C.DISABLED
             tg.Text = entry.enabled and "ON" or "OFF"
         end)
+        
         local del=Instance.new("TextButton")
         del.Size=UDim2.new(0,34,0,22); del.Position=UDim2.new(1,-38,0.5,-11)
         del.BackgroundColor3=C.RED; del.Text="X"; del.TextColor3=C.TEXT
@@ -926,7 +893,6 @@ end
 local clrBtn = btn(abilitySec, "Clear Captured Abilities", Color3.fromRGB(120,120,140), 4)
 clrBtn.MouseButton1Click:Connect(function() autoAbilities={}; rebuildAbilityList() end)
 
--- Hook ability fires to capture entries
 local hookOK2 = (typeof(hookmetamethod)=="function") and (typeof(getnamecallmethod)=="function")
 if hookOK2 then
     local oldNC
@@ -950,7 +916,6 @@ if hookOK2 then
     end)
 end
 
--- Auto-ability loop
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -966,11 +931,7 @@ task.spawn(function()
     end
 end)
 
--- ======================
--- UTILITY  (delete map / enemies, boost fps)
--- ======================
 local utilSec = section(gamePage, "Utility", 5)
-
 local savedMapParts = nil
 local function getMapRoot()
     return workspace:FindFirstChild("Map")
@@ -989,7 +950,7 @@ task.spawn(function()
                 for _,d in ipairs(m:GetDescendants()) do
                     if d:IsA("BasePart") and d.Transparency < 1 then
                         d.Transparency = 1
-                        if d.CanCollide then d.CanCollide = true end -- keep walkable
+                        if d.CanCollide then d.CanCollide = true end
                     elseif d:IsA("Decal") or d:IsA("Texture") then
                         d.Transparency = 1
                     end
@@ -1047,7 +1008,6 @@ task.spawn(function()
                 end
                 settings().Rendering.QualityLevel = 1
             end)
-            -- strip particles/trails from existing instances
             for _,d in ipairs(workspace:GetDescendants()) do
                 if d:IsA("ParticleEmitter") or d:IsA("Trail")
                    or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles") then
@@ -1067,10 +1027,7 @@ task.spawn(function()
     end
 end)
 
--- ======================
--- MACROS  (record/play unit + ability actions)
--- ======================
-local macros = {}          -- [name] = { events = {{t, remoteName, args}}, duration }
+local macros = {}
 local selectedMacro = nil
 local recording = false
 local playing = false
@@ -1169,7 +1126,6 @@ createBtn.MouseButton1Click:Connect(function()
     notify("Macro created: "..n, true)
 end)
 
--- __namecall hook (executor required)
 local hookOK = (typeof(hookmetamethod)=="function") and (typeof(getnamecallmethod)=="function")
 if hookOK then
     local oldNamecall
@@ -1259,10 +1215,6 @@ do
 local odysseyPage = tabPages["Odyssey"]
 local function getONet(name) return OdysseyNet() and OdysseyNet():FindFirstChild(name) end
 
--- --- Card discovery ---------------------------------------------------------
--- Cards come from one of:
---   1) ReplicatedStorage / Odyssey / Cards (or similar)
---   2) Scraped at runtime when the card-pick UI opens
 local function tryFindCardsFolder()
     local candidates = {
         RS:FindFirstChild("Odyssey"),
@@ -1278,11 +1230,9 @@ local function tryFindCardsFolder()
     return nil
 end
 
--- Heuristic: any card whose name contains a unit name OR has UnitName attribute = unit-specific
 local function classifyCard(name, obj)
     local n = (name or ""):lower()
     if obj and obj:GetAttribute("UnitName") then return "unit" end
-    -- typical unit-specific keywords (game-tunable)
     for _,k in ipairs({"unit","goku","luffy","naruto","saitama","ichigo","gojo","sukuna","tanjiro","sasuke","vegeta"}) do
         if n:find(k, 1, true) then return "unit" end
     end
@@ -1290,7 +1240,7 @@ local function classifyCard(name, obj)
 end
 
 local discoveredCards = { generic = {}, unit = {} }
-local selectedCards   = { generic = {}, unit = {} }  -- [cardName] = true
+local selectedCards   = { generic = {}, unit = {} }
 
 local function addCard(name, obj)
     if not name or name=="" then return end
@@ -1311,8 +1261,6 @@ local function scanCardsFromFolder()
     return n
 end
 
--- Runtime scrape: watch PlayerGui for card-pick UIs and learn card names
--- Event-driven scrape: only scan a card-pick UI when it actually appears.
 local function scrapeGui(g)
     local lname = g.Name:lower()
     if not (lname:find("card") or lname:find("odyssey")) then return end
@@ -1329,11 +1277,10 @@ local function scrapeGui(g)
     end
 end
 playerGui.ChildAdded:Connect(function(g)
-    task.wait(0.3) -- let it populate
+    task.wait(0.3)
     pcall(scrapeGui, g)
 end)
 
--- --- UI: card list builder --------------------------------------------------
 local function buildCardList(parent, kind, emptyMsg)
     local holder = Instance.new("Frame")
     holder.Size=UDim2.new(1,0,0,0); holder.AutomaticSize=Enum.AutomaticSize.Y
@@ -1381,7 +1328,6 @@ local function buildCardList(parent, kind, emptyMsg)
     return redraw
 end
 
--- --- Sections ---------------------------------------------------------------
 local autoSec = section(odysseyPage, "Auto Behavior", 1)
 local _, getAutoNextRoom       = toggle(autoSec, "Auto Next Room", 1, false, "odyssey.auto_next_room")
 label(autoSec, "Will continue to the next room when match is finished", 2)
@@ -1394,21 +1340,10 @@ label(autoSec, "Will close shop UI; pair this with Auto Next Room", 8)
 local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect chest", 9, false, "odyssey.auto_collect_chest.v2_safe")
 label(autoSec, "Will collect chests and close the treasure UI; pair this with Auto Next Room", 10)
 
--- =====================================================
-
--- ======================
--- ======================
--- ======================
--- ADVENTURE JOINER (character reference only)
--- ======================
-
--- Required by card automation below
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
 
 local charSec = section(odysseyPage, "Supported Characters", 0)
-
--- Header note
 local charNote = Instance.new("TextLabel")
 charNote.Size                  = UDim2.new(1,0,0,16)
 charNote.BackgroundTransparency = 1
@@ -1420,7 +1355,6 @@ charNote.TextXAlignment        = Enum.TextXAlignment.Left
 charNote.LayoutOrder           = 1
 charNote.Parent                = charSec
 
--- Regnaw (Rage) entry
 local ragnawRow = Instance.new("Frame")
 ragnawRow.Size              = UDim2.new(1,0,0,34)
 ragnawRow.BackgroundColor3  = C.PANEL
@@ -1450,7 +1384,7 @@ raName.TextXAlignment    = Enum.TextXAlignment.Left
 raName.Parent            = ragnawRow
 
 local raBadge = Instance.new("TextLabel")
-raBadge.Size             = UDim2.new(0,80,0,20)
+raBadge.Size          = UDim2.new(0,80,0,20)
 raBadge.Position         = UDim2.new(1,-86,0.5,-10)
 raBadge.BackgroundColor3 = C.GREEN
 raBadge.BorderSizePixel  = 0
@@ -1462,11 +1396,7 @@ raBadge.TextXAlignment   = Enum.TextXAlignment.Center
 raBadge.Parent           = ragnawRow
 corner(raBadge, 5)
 
--- ODYSSEY AUTOMATION LOOP
--- ======================
 local function isMaxedUnitCard(cardName)
-    -- Try to count how many of this card the player has via stat folder/attribute
-    -- Common patterns: Player:FindFirstChild("OdysseyCards"), or per-unit count attribute
     local function countIn(container)
         if not container then return nil end
         local n = container:GetAttribute(cardName)
@@ -1504,7 +1434,6 @@ local function skipCards()
     pcall(function() ev:FireServer("Skip", 0) end)
 end
 
--- Find the current open card-pick UI and scrape option names
 local function readOpenCardOptions()
     for _,g in ipairs(playerGui:GetChildren()) do
         local lname = g.Name:lower()
@@ -1533,7 +1462,6 @@ local function closeMatchingUI(keywords)
         local hit = false
         for _,k in ipairs(keywords) do if n:find(k) then hit=true; break end end
         if hit then
-            -- click any close button we can find
             for _,d in ipairs(g:GetDescendants()) do
                 if d:IsA("TextButton") or d:IsA("ImageButton") then
                     local dn = d.Name:lower()
@@ -1542,12 +1470,10 @@ local function closeMatchingUI(keywords)
                     end
                 end
             end
-            -- intentionally do not disable the game GUI; forcing ScreenGui off can break manual buttons
         end
     end
 end
 
--- Find narrow chest containers ONCE; never full-workspace scan in the hot loop.
 local CHEST_FOLDER_NAMES = {"Chests","OdysseyChests","Odyssey","AdventureChests","Adventure"}
 local function getChestRoots()
     local roots = {}
@@ -1571,7 +1497,6 @@ end
 local RARITY_SCORE = {
     common=1, uncommon=2, rare=3, epic=4, legendary=5, mythic=6, mythical=6, secret=7, celestial=8, divine=9
 }
--- Ragnaw (Regnaw / Rage) target cards. Match either DisplayName or CardId.
 local RAGNAW_TARGET_CARDS = {
     ["rageful arrival"]         = true, ["legendaryplacementdamage"]   = true,
     ["elite conquest"]          = true, ["legendaryeliteplacement"]    = true,
@@ -1609,8 +1534,6 @@ local function chooseCardIndex(opts)
         if bestIdx then return bestIdx, "ragnaw" end
     end
 
-    -- If Ragnaw mode active and quota filled (or no target card in this set),
-    -- skip any unit-card screen so the run keeps moving.
     if getAutoRagnawCards() then
         local allUnit = #opts > 0
         for _,name in ipairs(opts) do
@@ -1645,9 +1568,6 @@ local function requestNextRoom()
     end
 end
 
-
--- Guard: prevents Odyssey automation remotes firing in the lobby.
--- Lobby-fired CardPickEvent/ShopEvent cause AdventureClient.SelectCharacter crashes.
 local function inOdysseyRun()
     if getMapRoot() then return true end
     for _, name in ipairs({"OdysseyRoom","AdventureRoom","Adventure",
@@ -1657,13 +1577,11 @@ local function inOdysseyRun()
     return false
 end
 
--- Card pick loop: choose basic/highest-rarity cards, with optional Ragnaw unit-card priority.
 task.spawn(function()
     while true do
         task.wait(1)
         if not inOdysseyRun() then
-            -- Not in a game world; skip Odyssey automation to prevent
-            -- lobby-fired remotes from crashing AdventureClient
+            -- Standing by in lobby
         elseif getAutoPick() or getAutoRagnawCards() or getAutoNextRoom() then
             local ok, opts = pcall(readOpenCardOptions)
             if ok and opts then
@@ -1676,7 +1594,6 @@ task.spawn(function()
                         ragnawPickCount = math.min(4, ragnawPickCount + 1)
                     end
                 elseif reason == "skip-unit" then
-                    -- Ragnaw quota filled or no target card here: skip the unit-card screen.
                     local cardEv = getONet("CardPickEvent")
                     if cardEv then pcall(function() cardEv:FireServer("Skip", 0) end) end
                     if getAutoNextRoom() then requestNextRoom() end
@@ -1690,12 +1607,11 @@ task.spawn(function()
     end
 end)
 
--- Chest loop: narrow scan, slow tick (2s)
 task.spawn(function()
     while true do
         task.wait(2)
         if not inOdysseyRun() then
-            -- Not in game, skip
+            -- Standing by in lobby
         elseif getAutoCollectChests() then
             local sm = Net:FindFirstChild("StageMechanics")
             local chestRemote = sm and sm:FindFirstChild("OdysseyChest")
@@ -1712,7 +1628,6 @@ task.spawn(function()
             end
             closeMatchingUI({"treasure","chest"})
             if getAutoNextRoom() then requestNextRoom() end
-        end
         elseif getAutoSkipShop() then
             local shopEv = getONet("ShopEvent")
             if shopEv then pcall(function() shopEv:FireServer("Close") end) end
@@ -1722,7 +1637,6 @@ task.spawn(function()
     end
 end)
 
--- UI close loop: event-driven, only touches matching new children
 local function maybeCloseGui(g)
     if g == gui then return end
     local n = g.Name:lower()
@@ -1739,15 +1653,14 @@ playerGui.ChildAdded:Connect(function(g) task.wait(0.1); pcall(maybeCloseGui, g)
 end
 
 -- ======================
--- BOOT
+-- BOOT & DEFAULT INITIALIZATION
 -- ======================
-switchTab("Lobby")
-notify("OzWare v2.3 loaded", true)
-print("[OzWare v2.3] loaded.")
-
+switchTab("Lobby") -- Fixed layout: Open default tab on runtime execution
+notify("OzWare v2.4 loaded safely", true)
+print("[OzWare v2.4] loaded safely.")
 
 -- ======================
--- FLOATING TOGGLE (bottom-left)  +  SUMMON UI SUPPRESSOR
+-- FLOATING TOGGLE BUTTON
 -- ======================
 do
 local floatBtn = Instance.new("TextButton")
@@ -1768,47 +1681,40 @@ corner(floatBtn, 26)
 stroke(floatBtn, C.ACCENT, 2)
 gradient(floatBtn, C.ACCENT, C.ACCENT2, 135)
 
--- Drag support for floating button
-do
-    local dragging, startPos, startInput
-    floatBtn.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-            dragging=true; startPos=floatBtn.Position; startInput=i.Position
-        end
-    end)
-    floatBtn.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-            dragging=false
-        end
-    end)
-    UIS.InputChanged:Connect(function(i)
-        if not dragging then return end
-        if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
-            local d = i.Position - startInput
-            floatBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X, startPos.Y.Scale, startPos.Y.Offset+d.Y)
-        end
-    end)
-end
+-- Modern, precise touch & drag tracker
+local dragging, startPos, startInput = false, nil, nil
+local pressStart, startMousePos
 
--- Tap (no drag) toggles window
-local pressStart, pressPos
-floatBtn.MouseButton1Down:Connect(function() pressStart = tick(); pressPos = floatBtn.Position end)
-floatBtn.MouseButton1Click:Connect(function()
-    if pressStart and (tick()-pressStart) < 0.4 and pressPos and pressPos == floatBtn.Position then
-        win.Visible = not win.Visible
-    elseif not pressStart then
-        win.Visible = not win.Visible
-    else
-        -- treat as tap if barely moved
-        win.Visible = not win.Visible
+floatBtn.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        startInput = i.Position
+        startPos = floatBtn.Position
+        pressStart = tick()
+        startMousePos = UIS:GetMouseLocation()
     end
 end)
 
--- ======================
--- Safety note
--- ======================
--- Do not destroy game ScreenGuis and do not monkey-patch SummonAnimationHandler.
--- Both approaches can leave WindowHandler / game button state stuck, which is
--- what made summon buttons and mode-join buttons stop responding.
-notify("OzWare Testing loaded safely", true)
+floatBtn.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+        
+        local timeElapsed = tick() - (pressStart or 0)
+        local currentMousePos = UIS:GetMouseLocation()
+        local distanceMoved = startMousePos and (currentMousePos - startMousePos).Magnitude or 0
+        
+        -- Safe drag protection window toggle threshold 
+        if timeElapsed < 0.4 and distanceMoved < 6 then
+            win.Visible = not win.Visible
+        end
+    end
+end)
+
+UIS.InputChanged:Connect(function(i)
+    if not dragging then return end
+    if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
+        local d = i.Position - startInput
+        floatBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X, startPos.Y.Scale, startPos.Y.Offset+d.Y)
+    end
+end)
 end
