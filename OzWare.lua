@@ -550,7 +550,8 @@ local function fireBanner(name, path, bannerId, _amount, _isMemoria)
         return false
     end
 
-    local args = { "SummonMany", bannerId }
+    -- bannerId is nil for dedicated-remote banners (Selection/Special/Memoria)
+    local args = bannerId and { "SummonMany", bannerId } or { "SummonMany" }
     local ok, errFire = pcall(function() remote:FireServer(table.unpack(args)) end)
     if ok then
         print(("[OzWare][%s] sent %s args=%s"):format(name, remote:GetFullName(), fmtArgs(args)))
@@ -560,12 +561,17 @@ local function fireBanner(name, path, bannerId, _amount, _isMemoria)
     return false
 end
 
+-- Confirmed remote paths from scanner sessions:
+--   Selection  -> Networking.SummonSelectionEvent          (dedicated, no bannerId)
+--   Special    -> Networking.Units.SummonIndexEvent        (dedicated, no bannerId)
+--   Std Mem    -> Networking.Memorias.MemoriaSummonEvent   (dedicated, no bannerId)
+--   Spring*    -> Networking.Units.SummonEvent + bannerId  (confirmed "Spring26"/"Spring26Memoria")
 local BANNERS = {
-    { name="Selection Banner",  call=function() return fireBanner("Selection Banner", "Networking/Units/SummonEvent", "Selection",       nil, false) end },
-    { name="Special Banner",    call=function() return fireBanner("Special Banner",   "Networking/Units/SummonEvent", "Special",         nil, false) end },
-    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Units/SummonEvent", "StandardMemoria", nil, true ) end },
-    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",    "Networking/Units/SummonEvent", "Spring26",        nil, false) end },
-    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",   "Networking/Units/SummonEvent", "Spring26Memoria", nil, true ) end },
+    { name="Selection Banner",  call=function() return fireBanner("Selection Banner",  "Networking/SummonSelectionEvent",        nil,               nil, false) end },
+    { name="Special Banner",    call=function() return fireBanner("Special Banner",    "Networking/Units/SummonIndexEvent",      nil,               nil, false) end },
+    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Memorias/MemoriaSummonEvent", nil,               nil, true ) end },
+    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",     "Networking/Units/SummonEvent",           "Spring26",        nil, false) end },
+    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",    "Networking/Units/SummonEvent",           "Spring26Memoria", nil, true ) end },
 }
 
 for i,b in ipairs(BANNERS) do
@@ -1639,11 +1645,26 @@ local function requestNextRoom()
     end
 end
 
+
+-- Guard: prevents Odyssey automation remotes firing in the lobby.
+-- Lobby-fired CardPickEvent/ShopEvent cause AdventureClient.SelectCharacter crashes.
+local function inOdysseyRun()
+    if getMapRoot() then return true end
+    for _, name in ipairs({"OdysseyRoom","AdventureRoom","Adventure",
+                            "OdysseyMap","AdventureMap","Stage","Match"}) do
+        if workspace:FindFirstChild(name) then return true end
+    end
+    return false
+end
+
 -- Card pick loop: choose basic/highest-rarity cards, with optional Ragnaw unit-card priority.
 task.spawn(function()
     while true do
         task.wait(1)
-        if getAutoPick() or getAutoRagnawCards() or getAutoNextRoom() then
+        if not inOdysseyRun() then
+            -- Not in a game world; skip Odyssey automation to prevent
+            -- lobby-fired remotes from crashing AdventureClient
+        elseif getAutoPick() or getAutoRagnawCards() or getAutoNextRoom() then
             local ok, opts = pcall(readOpenCardOptions)
             if ok and opts then
                 local chosenIdx, reason = chooseCardIndex(opts)
@@ -1673,7 +1694,9 @@ end)
 task.spawn(function()
     while true do
         task.wait(2)
-        if getAutoCollectChests() then
+        if not inOdysseyRun() then
+            -- Not in game, skip
+        elseif getAutoCollectChests() then
             local sm = Net:FindFirstChild("StageMechanics")
             local chestRemote = sm and sm:FindFirstChild("OdysseyChest")
             if chestRemote then
@@ -1690,7 +1713,7 @@ task.spawn(function()
             closeMatchingUI({"treasure","chest"})
             if getAutoNextRoom() then requestNextRoom() end
         end
-        if getAutoSkipShop() then
+        elseif getAutoSkipShop() then
             local shopEv = getONet("ShopEvent")
             if shopEv then pcall(function() shopEv:FireServer("Close") end) end
             closeMatchingUI({"shop"})
