@@ -1724,22 +1724,70 @@ floatBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Suppress in-game Summon result UI (causes frame drops)
-local SUMMON_UI_KEYWORDS = {"summon","banner","reward","pull","gacha"}
-local suppressed = setmetatable({}, {__mode="k"})
-local function suppressSummon(g)
-    if g == gui or suppressed[g] then return end
-    local n = g.Name:lower()
-    for _,k in ipairs(SUMMON_UI_KEYWORDS) do
-        if n:find(k) then
-            suppressed[g] = true
-            pcall(function() g.Enabled = false end)
-            -- one-shot kill, no descendant walk in a loop
-            pcall(function() g:Destroy() end)
-            return
+-- ======================
+-- Skip Summon Animations (safe: patch the game's handler module)
+-- Replaces the old destructive "suppressSummon" that nuked any ScreenGui
+-- whose name contained summon/banner/reward/pull/gacha -- which was
+-- destroying legitimate game HUDs and breaking lobby/dungeon buttons.
+-- ======================
+task.spawn(function()
+    local function tryRequire(path)
+        local ok, mod = pcall(require, path)
+        if ok then return mod end
+        return nil
+    end
+
+    local SP = game:GetService("StarterPlayer")
+    local sahModule
+    pcall(function()
+        sahModule = SP:WaitForChild("Modules", 10)
+            :WaitForChild("Gameplay", 5)
+            :WaitForChild("Summon", 5)
+            :WaitForChild("SummonAnimationHandler", 5)
+    end)
+    if not sahModule then
+        return notify("SkipSummon: handler not found", false)
+    end
+    local SAH = tryRequire(sahModule)
+    if type(SAH) ~= "table" then
+        return notify("SkipSummon: require failed", false)
+    end
+
+    -- Grab WindowHandler so we can reset its viewing flags after a skip,
+    -- otherwise the game thinks a "special window" is still open and
+    -- blocks other UI input.
+    local WH
+    pcall(function()
+        WH = require(SP.Modules.Interface.Loader.WindowHandler)
+    end)
+
+    local function fireAndClear()
+        pcall(function()
+            if SAH.SummonAnimationPlayed and SAH.SummonAnimationPlayed.Fire then
+                SAH.SummonAnimationPlayed:Fire()
+            end
+        end)
+        if WH then
+            pcall(function()
+                WH._IsViewing = false
+                WH.SpecialWindowOpened = false
+            end)
         end
     end
-end
-for _,g in ipairs(playerGui:GetChildren()) do suppressSummon(g) end
-playerGui.ChildAdded:Connect(function(g) task.wait(0.05); pcall(suppressSummon, g) end)
+
+    local function noop(...) fireAndClear() end
+
+    pcall(function() SAH.PlayMemoriaSummon = noop end)
+    pcall(function() SAH.PlayCustomSummon  = noop end)
+    pcall(function() SAH.PlayAnimation     = noop end)
+
+    -- Hide any leftover "Memoria" ScreenGui the handler may have spawned
+    -- before we patched it. EXACT name match, hide only -- do NOT destroy.
+    pcall(function()
+        local existing = playerGui:FindFirstChild("Memoria")
+        if existing and existing:IsA("ScreenGui") then existing.Enabled = false end
+    end)
+
+    notify("Summon animations skipped", true)
+end)
 end
