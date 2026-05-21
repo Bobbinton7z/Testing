@@ -1332,257 +1332,69 @@ label(autoSec, "Will collect chests and close the treasure UI; pair this with Au
 
 -- ======================
 -- ======================
--- ADVENTURE JOINER (recorder/replay)
--- Records the exact remote sequence from a manual run, then replays it
--- No LobbyEvent/SetLastCharacter calls that break the Adventure Panel UI
+-- ======================
+-- ADVENTURE JOINER (character reference only)
 -- ======================
 
+-- Required by card automation below
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
 
--- Recorded sequence storage
-local advRecorded    = {}   -- [{remote=fullpath, args={...}}, ...]
-local advRecording   = false
-local advReplaying   = false
+local charSec = section(odysseyPage, "Supported Characters", 0)
 
--- Serialise args for replay (handles strings, numbers, bools; tables shallow-copied)
-local function serializeArgs(args)
-    local out = {}
-    for i, v in ipairs(args) do
-        local t = type(v)
-        if t == "string" or t == "number" or t == "boolean" then
-            out[i] = v
-        elseif t == "table" then
-            local copy = {}
-            for k, val in pairs(v) do copy[k] = val end
-            out[i] = copy
-        elseif t == "userdata" then
-            -- Instance ref — store path for re-lookup
-            local ok, path = pcall(function() return v:GetFullName() end)
-            out[i] = ok and ("__instance:"..path) or nil
-        else
-            out[i] = v
-        end
-    end
-    return out
-end
+-- Header note
+local charNote = Instance.new("TextLabel")
+charNote.Size                  = UDim2.new(1,0,0,16)
+charNote.BackgroundTransparency = 1
+charNote.Text                  = "Characters with unit-card support:"
+charNote.TextColor3            = C.SUBTEXT
+charNote.TextSize              = 11
+charNote.Font                  = FONT_REG
+charNote.TextXAlignment        = Enum.TextXAlignment.Left
+charNote.LayoutOrder           = 1
+charNote.Parent                = charSec
 
-local function resolveArg(v)
-    if type(v) == "string" and v:sub(1, 11) == "__instance:" then
-        local path = v:sub(12)
-        local obj = game
-        for _, part in ipairs(string.split(path, ".")) do
-            obj = obj:FindFirstChild and obj:FindFirstChild(part) or nil
-            if not obj then return nil end
-        end
-        return obj
-    end
-    return v
-end
+-- Regnaw (Rage) entry
+local ragnawRow = Instance.new("Frame")
+ragnawRow.Size              = UDim2.new(1,0,0,34)
+ragnawRow.BackgroundColor3  = C.PANEL
+ragnawRow.BorderSizePixel   = 0
+ragnawRow.LayoutOrder       = 2
+ragnawRow.Parent            = charSec
+corner(ragnawRow, 7)
+stroke(ragnawRow, C.ACCENT, 1)
 
-local function resolveArgs(args)
-    local out = {}
-    for i, v in ipairs(args) do
-        out[i] = resolveArg(v)
-    end
-    return out
-end
+local raDot = Instance.new("Frame")
+raDot.Size             = UDim2.new(0,8,0,8)
+raDot.Position         = UDim2.new(0,10,0.5,-4)
+raDot.BackgroundColor3 = C.GREEN
+raDot.BorderSizePixel  = 0
+raDot.Parent           = ragnawRow
+corner(raDot, 4)
 
--- Hook to capture remotes during recording
-local advOldNC
-local advHookOK = typeof(hookmetamethod) == "function" and typeof(getnamecallmethod) == "function"
+local raName = Instance.new("TextLabel")
+raName.Size              = UDim2.new(0.6,0,1,0)
+raName.Position          = UDim2.new(0,24,0,0)
+raName.BackgroundTransparency = 1
+raName.Text              = "Regnaw (Rage)"
+raName.TextColor3        = C.TEXT
+raName.TextSize          = 13
+raName.Font              = FONT_BOLD
+raName.TextXAlignment    = Enum.TextXAlignment.Left
+raName.Parent            = ragnawRow
 
-local RECORD_FILTER = {
-    "Networking", "Odyssey", "Adventure", "LoadoutEvent",
-    "LobbyEvent", "OdysseyEvent", "StateEvent",
-}
-
-local function shouldRecord(path)
-    for _, kw in ipairs(RECORD_FILTER) do
-        if path:find(kw, 1, true) then return true end
-    end
-    return false
-end
-
-if advHookOK then
-    advOldNC = hookmetamethod(game, "__namecall", function(self, ...)
-        local m = getnamecallmethod()
-        if advRecording and m == "FireServer" then
-            local ok, path = pcall(function() return self:GetFullName() end)
-            if ok and shouldRecord(path) then
-                local args = {...}
-                table.insert(advRecorded, {
-                    remote = path,
-                    args   = serializeArgs(args),
-                })
-                print("[RECORDED] " .. path)
-                for i, v in ipairs(args) do
-                    if type(v) == "table" then
-                        for k, val in pairs(v) do
-                            print("  [" .. tostring(k) .. "] = " .. tostring(val))
-                        end
-                    else
-                        print("  Arg " .. i .. ": " .. tostring(v))
-                    end
-                end
-            end
-        end
-        return advOldNC(self, ...)
-    end)
-end
-
--- Section UI
-local charSec = section(odysseyPage, "Adventure Joiner", 0)
-
--- Status
-local advStatusLbl = Instance.new("TextLabel")
-advStatusLbl.Size                  = UDim2.new(1,0,0,16)
-advStatusLbl.BackgroundTransparency = 1
-advStatusLbl.Text                  = "Press Record then start Odyssey manually in-game"
-advStatusLbl.TextColor3            = C.SUBTEXT
-advStatusLbl.TextSize              = 11
-advStatusLbl.Font                  = FONT_REG
-advStatusLbl.TextXAlignment        = Enum.TextXAlignment.Left
-advStatusLbl.LayoutOrder           = 1
-advStatusLbl.Parent                = charSec
-
-local function setAdvStatus(msg, ok)
-    advStatusLbl.Text       = msg
-    advStatusLbl.TextColor3 = ok == true and C.GREEN
-                           or ok == false and C.RED
-                           or C.SUBTEXT
-end
-
--- Button row
-local btnRow = Instance.new("Frame")
-btnRow.Size              = UDim2.new(1,0,0,34)
-btnRow.BackgroundTransparency = 1
-btnRow.LayoutOrder       = 2
-btnRow.Parent            = charSec
-hlist(btnRow, 6)
-
-local recordBtn = Instance.new("TextButton")
-recordBtn.Size            = UDim2.new(0.5,-3,1,0)
-recordBtn.BackgroundColor3 = Color3.fromRGB(200,80,80)
-recordBtn.Text            = "Record"
-recordBtn.TextColor3      = C.TEXT
-recordBtn.TextSize        = 13
-recordBtn.Font            = FONT_BOLD
-recordBtn.BorderSizePixel = 0
-recordBtn.LayoutOrder     = 1
-recordBtn.Parent          = btnRow
-corner(recordBtn, 7)
-gradient(recordBtn, Color3.fromRGB(200,80,80), Color3.fromRGB(140,40,40), 90)
-
-local replayBtn = Instance.new("TextButton")
-replayBtn.Size            = UDim2.new(0.5,-3,1,0)
-replayBtn.BackgroundColor3 = C.GREEN
-replayBtn.Text            = "Replay Run  (0 events)"
-replayBtn.TextColor3      = C.TEXT
-replayBtn.TextSize        = 12
-replayBtn.Font            = FONT_BOLD
-replayBtn.BorderSizePixel = 0
-replayBtn.LayoutOrder     = 2
-replayBtn.Parent          = btnRow
-corner(replayBtn, 7)
-gradient(replayBtn, C.GREEN, C.GREEN:Lerp(Color3.new(0,0,0),0.25), 90)
-
--- Record toggle
-recordBtn.MouseButton1Click:Connect(function()
-    if not advHookOK then
-        return setAdvStatus("Executor does not support hookmetamethod", false)
-    end
-    advRecording = not advRecording
-    if advRecording then
-        advRecorded = {}
-        recordBtn.Text = "Stop Recording"
-        tween(recordBtn, {BackgroundColor3 = C.YELLOW})
-        setAdvStatus("Recording... now press Start in the game's Adventure Panel", nil)
-        print("[Recorder] Started - press Start Run in the game panel now")
-    else
-        recordBtn.Text = "Record"
-        tween(recordBtn, {BackgroundColor3 = Color3.fromRGB(200,80,80)})
-        replayBtn.Text = "Replay Run  (" .. #advRecorded .. " events)"
-        if #advRecorded > 0 then
-            setAdvStatus("Captured " .. #advRecorded .. " events — press Replay to use", true)
-            -- Save to OzSaved for persistence across sessions
-            OzSaved.advRecorded = advRecorded
-            saveOzSettings()
-        else
-            setAdvStatus("Nothing captured — make sure you started a run during recording", false)
-        end
-        print("[Recorder] Stopped. " .. #advRecorded .. " events captured.")
-    end
-end)
-
--- Load saved recording on startup
-if type(OzSaved.advRecorded) == "table" and #OzSaved.advRecorded > 0 then
-    advRecorded = OzSaved.advRecorded
-    replayBtn.Text = "Replay Run  (" .. #advRecorded .. " events)"
-    setAdvStatus("Loaded saved recording (" .. #advRecorded .. " events)", true)
-end
-
--- Replay
-local function doStartRun()
-    if advReplaying then return end
-    if #advRecorded == 0 then
-        setAdvStatus("Nothing recorded yet — press Record first", false)
-        notify("Record a run first", false)
-        return
-    end
-
-    advReplaying = true
-    setAdvStatus("Replaying " .. #advRecorded .. " events...", nil)
-    ragnawPickedThisRun = {}
-    ragnawPickCount = 0
-
-    task.spawn(function()
-        for i, event in ipairs(advRecorded) do
-            -- Resolve remote from full path
-            local parts = {}
-            for part in event.remote:gmatch("[^%.]+") do
-                table.insert(parts, part)
-            end
-            local obj = game
-            for _, part in ipairs(parts) do
-                obj = obj and (obj:FindFirstChild and obj:FindFirstChild(part) or nil)
-            end
-
-            if obj then
-                local args = resolveArgs(event.args)
-                local ok, err = pcall(function()
-                    obj:FireServer(table.unpack(args))
-                end)
-                if ok then
-                    print("[Replay] " .. i .. " OK: " .. event.remote)
-                else
-                    print("[Replay] " .. i .. " FAIL: " .. event.remote .. " — " .. tostring(err))
-                end
-            else
-                print("[Replay] " .. i .. " SKIP (remote not found): " .. event.remote)
-            end
-            task.wait(0.15)
-        end
-
-        setAdvStatus("Replay complete!", true)
-        notify("Adventure run replayed!", true)
-        advReplaying = false
-    end)
-end
-
-replayBtn.MouseButton1Click:Connect(doStartRun)
-
--- Auto-join toggle
-local _, getAutoJoin = toggle(charSec, "Auto-Join Adventure (loop)", 3, false, "odyssey.auto_join")
-
-task.spawn(function()
-    while true do
-        task.wait(5)
-        if getAutoJoin() and not advReplaying and #advRecorded > 0 then
-            task.spawn(doStartRun)
-        end
-    end
-end)
+local raBadge = Instance.new("TextLabel")
+raBadge.Size             = UDim2.new(0,80,0,20)
+raBadge.Position         = UDim2.new(1,-86,0.5,-10)
+raBadge.BackgroundColor3 = C.GREEN
+raBadge.BorderSizePixel  = 0
+raBadge.Text             = "Active"
+raBadge.TextColor3       = Color3.fromRGB(10,20,10)
+raBadge.TextSize         = 11
+raBadge.Font             = FONT_BOLD
+raBadge.TextXAlignment   = Enum.TextXAlignment.Center
+raBadge.Parent           = ragnawRow
+corner(raBadge, 5)
 
 -- ODYSSEY AUTOMATION LOOP
 -- ======================
