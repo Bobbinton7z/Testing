@@ -503,7 +503,38 @@ local function resolveRemote(path)
     return node
 end
 
-local function fireBanner(name, path, args)
+local function fmtArgs(args)
+    local out = {}
+    for i,v in ipairs(args) do out[i] = tostring(v) end
+    return table.concat(out, ",")
+end
+
+local function callRemote(remote, args)
+    if remote:IsA("RemoteFunction") then
+        return remote:InvokeServer(table.unpack(args))
+    end
+    return remote:FireServer(table.unpack(args))
+end
+
+local function tryRemoteCandidates(tag, remote, candidates)
+    local lastErr
+    for _,args in ipairs(candidates) do
+        local ok, result = pcall(function()
+            return callRemote(remote, args)
+        end)
+        if ok then
+            print(("[OzWare][%s] sent %s args=%s"):format(tag, remote:GetFullName(), fmtArgs(args)))
+            return true, result
+        end
+        lastErr = result
+        warn(("[OzWare][%s] candidate failed args=%s | %s"):format(tag, fmtArgs(args), tostring(result)))
+        task.wait(0.05)
+    end
+    warn(("[OzWare][%s] all candidates failed: %s"):format(tag, tostring(lastErr)))
+    return false
+end
+
+local function fireBanner(name, path, bannerId, amount, isMemoria)
     local remote, err = resolveRemote(path)
     if not remote then
         warn(("[OzWare][%s] remote not found (%s) | tried: %s"):format(name, err or "?", path))
@@ -513,32 +544,39 @@ local function fireBanner(name, path, args)
         warn(("[OzWare][%s] resolved to %s, not a Remote (%s)"):format(name, remote.ClassName, remote:GetFullName()))
         return false
     end
-    local ok, e = pcall(function()
-        print(("[OzWare][%s] FireServer %s args=%s"):format(name, remote:GetFullName(), table.concat({tostring(args[1]),tostring(args[2]),tostring(args[3])}, ",")))
-        remote:FireServer(table.unpack(args))
-    end)
-    if not ok then
-        warn(("[OzWare][%s] FireServer ERROR: %s"):format(name, tostring(e)))
-    end
-    return ok
+
+    -- UPD 12.5 changed the summon remote so a boolean is expected before
+    -- the banner payload. The old {"SummonMany", banner, 50} call throws
+    -- "Unable to cast string to bool" and can wedge the game's lobby UI.
+    local multi = true
+    local candidates = {
+        {multi, bannerId, amount},
+        {multi, "SummonMany", bannerId, amount},
+        {isMemoria and true or false, bannerId, amount},
+        {isMemoria and true or false, "SummonMany", bannerId, amount},
+        {"SummonMany", bannerId, amount}, -- final legacy fallback only
+    }
+    return tryRemoteCandidates(name, remote, candidates)
 end
 
 local BANNERS = {
-    { name="Selection Banner",  call=function() return fireBanner("Selection Banner", "Networking/Units/SummonEvent", {"SummonMany", "Selection", 50}) end },
-    { name="Special Banner",    call=function() return fireBanner("Special Banner",   "Networking/Units/SummonEvent", {"SummonMany", "Special", 50}) end },
-    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Units/SummonEvent", {"SummonMany", "StandardMemoria", 50}) end },
-    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",    "Networking/Units/SummonEvent", {"SummonMany", "Spring26", 50}) end },
-    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",   "Networking/Units/SummonEvent", {"SummonMany", "Spring26Memoria", 50}) end },
+    { name="Selection Banner",  call=function() return fireBanner("Selection Banner", "Networking/Units/SummonEvent", "Selection", 50, false) end },
+    { name="Special Banner",    call=function() return fireBanner("Special Banner",   "Networking/Units/SummonEvent", "Special", 50, false) end },
+    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Units/SummonEvent", "StandardMemoria", 50, true) end },
+    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",    "Networking/Units/SummonEvent", "Spring26", 50, false) end },
+    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",   "Networking/Units/SummonEvent", "Spring26Memoria", 50, true) end },
 }
 
 for i,b in ipairs(BANNERS) do
-    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false)
+    -- Versioned save key prevents old broken saved toggles from auto-firing
+    -- immediately on execute after the remote signature changed.
+    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-fixed-v3:"..b.name)
     task.spawn(function()
         while true do
             if getOn() then
                 b.call()
             end
-            task.wait(0.6)
+            task.wait(1.25)
         end
     end)
 end
@@ -696,21 +734,42 @@ local joinBtn = btn(joinBtnSec, "Join Match", C.GREEN, 1)
 joinBtn.MouseButton1Click:Connect(function()
     safeCall(function()
         local LE = LobbyEvent()
-        LE:FireServer("AddMatch", {
+        if not LE then error("LobbyEvent not found") end
+        local friendsOnly = getFriendsOnly()
+        local payload = {
             Difficulty  = getNightmare() and "Nightmare" or "Normal",
             Act         = selAct,
             StageType   = selType,
             Stage       = selStage,
-            FriendsOnly = getFriendsOnly(),
+            FriendsOnly = friendsOnly,
+        }
+
+        -- Newer lobby code expects a bool in the join/start argument list.
+        -- The old AddMatch + dictionary call is what produces
+        -- "Unable to cast Dictionary to bool" in StageSelection/AdventureClient.
+        tryRemoteCandidates("Join Match", LE, {
+            {"AddMatch", friendsOnly, payload},
+            {friendsOnly, "AddMatch", payload},
+            {"CreateMatch", friendsOnly, payload},
+            {"JoinMatch", friendsOnly, payload},
+            {"AddMatch", payload}, -- final legacy fallback only
         })
+
         if getAutoStart() then
             task.wait(0.5)
-            -- try common start signatures so you actually enter the stage
-            pcall(function() LE:FireServer("StartMatch") end)
-            pcall(function() LE:FireServer("PlayMatch") end)
-            pcall(function() LE:FireServer("Start") end)
+            tryRemoteCandidates("Start Match", LE, {
+                {"StartMatch", friendsOnly},
+                {friendsOnly, "StartMatch"},
+                {"PlayMatch", friendsOnly},
+                {friendsOnly, "PlayMatch"},
+                {"Start", friendsOnly},
+                {"StartMatch"},
+            })
             local sm = Net:FindFirstChild("StartMatch", true) or Net:FindFirstChild("PlayMatch", true)
-            if sm then pcall(function() sm:FireServer() end) end
+            if sm and (sm:IsA("RemoteEvent") or sm:IsA("RemoteFunction")) then
+                pcall(function() callRemote(sm, {friendsOnly}) end)
+                pcall(function() callRemote(sm, {}) end)
+            end
         end
     end, "Joining "..selType.." "..selStage.." "..selAct, "Join failed")
 end)
@@ -1725,69 +1784,10 @@ floatBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ======================
--- Skip Summon Animations (safe: patch the game's handler module)
--- Replaces the old destructive "suppressSummon" that nuked any ScreenGui
--- whose name contained summon/banner/reward/pull/gacha -- which was
--- destroying legitimate game HUDs and breaking lobby/dungeon buttons.
+-- Safety note
 -- ======================
-task.spawn(function()
-    local function tryRequire(path)
-        local ok, mod = pcall(require, path)
-        if ok then return mod end
-        return nil
-    end
-
-    local SP = game:GetService("StarterPlayer")
-    local sahModule
-    pcall(function()
-        sahModule = SP:WaitForChild("Modules", 10)
-            :WaitForChild("Gameplay", 5)
-            :WaitForChild("Summon", 5)
-            :WaitForChild("SummonAnimationHandler", 5)
-    end)
-    if not sahModule then
-        return notify("SkipSummon: handler not found", false)
-    end
-    local SAH = tryRequire(sahModule)
-    if type(SAH) ~= "table" then
-        return notify("SkipSummon: require failed", false)
-    end
-
-    -- Grab WindowHandler so we can reset its viewing flags after a skip,
-    -- otherwise the game thinks a "special window" is still open and
-    -- blocks other UI input.
-    local WH
-    pcall(function()
-        WH = require(SP.Modules.Interface.Loader.WindowHandler)
-    end)
-
-    local function fireAndClear()
-        pcall(function()
-            if SAH.SummonAnimationPlayed and SAH.SummonAnimationPlayed.Fire then
-                SAH.SummonAnimationPlayed:Fire()
-            end
-        end)
-        if WH then
-            pcall(function()
-                WH._IsViewing = false
-                WH.SpecialWindowOpened = false
-            end)
-        end
-    end
-
-    local function noop(...) fireAndClear() end
-
-    pcall(function() SAH.PlayMemoriaSummon = noop end)
-    pcall(function() SAH.PlayCustomSummon  = noop end)
-    pcall(function() SAH.PlayAnimation     = noop end)
-
-    -- Hide any leftover "Memoria" ScreenGui the handler may have spawned
-    -- before we patched it. EXACT name match, hide only -- do NOT destroy.
-    pcall(function()
-        local existing = playerGui:FindFirstChild("Memoria")
-        if existing and existing:IsA("ScreenGui") then existing.Enabled = false end
-    end)
-
-    notify("Summon animations skipped", true)
-end)
+-- Do not destroy game ScreenGuis and do not monkey-patch SummonAnimationHandler.
+-- Both approaches can leave WindowHandler / game button state stuck, which is
+-- what made summon buttons and mode-join buttons stop responding.
+notify("OzWare Testing loaded safely", true)
 end
