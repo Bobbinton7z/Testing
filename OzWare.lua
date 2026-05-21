@@ -534,43 +534,45 @@ local function tryRemoteCandidates(tag, remote, candidates)
     return false
 end
 
-local function fireBanner(name, path, bannerId, amount, isMemoria)
+-- Verified via REMOTE spy (OzWare_BlockerTest):
+--   ReplicatedStorage.Networking.Units.SummonEvent:FireServer(
+--     "SummonMany", <bannerId>, <amount>)
+-- e.g. ("SummonMany","Spring26",18), ("SummonMany","Selection",50),
+--      ("SummonMany","StandardMemoria",43), ("SummonMany","Spring26Memoria",18).
+-- No leading boolean. FireServer never errors on the client, so we must
+-- fire exactly ONE correct variant — never loop through candidates.
+local function fireBanner(name, path, bannerId, amount, _isMemoria)
     local remote, err = resolveRemote(path)
     if not remote then
         warn(("[OzWare][%s] remote not found (%s) | tried: %s"):format(name, err or "?", path))
         return false
     end
-    if not remote:IsA("RemoteEvent") and not remote:IsA("RemoteFunction") then
-        warn(("[OzWare][%s] resolved to %s, not a Remote (%s)"):format(name, remote.ClassName, remote:GetFullName()))
+    if not remote:IsA("RemoteEvent") then
+        warn(("[OzWare][%s] resolved to %s, expected RemoteEvent (%s)"):format(name, remote.ClassName, remote:GetFullName()))
         return false
     end
-
-    -- UPD 12.5 changed the summon remote so a boolean is expected before
-    -- the banner payload. The old {"SummonMany", banner, 50} call throws
-    -- "Unable to cast string to bool" and can wedge the game's lobby UI.
-    local multi = true
-    local candidates = {
-        {multi, bannerId, amount},
-        {multi, "SummonMany", bannerId, amount},
-        {isMemoria and true or false, bannerId, amount},
-        {isMemoria and true or false, "SummonMany", bannerId, amount},
-        {"SummonMany", bannerId, amount}, -- final legacy fallback only
-    }
-    return tryRemoteCandidates(name, remote, candidates)
+    local args = {"SummonMany", bannerId, amount}
+    local ok, errFire = pcall(function() remote:FireServer(table.unpack(args)) end)
+    if ok then
+        print(("[OzWare][%s] sent %s args=%s"):format(name, remote:GetFullName(), fmtArgs(args)))
+        return true
+    end
+    warn(("[OzWare][%s] FireServer failed: %s"):format(name, tostring(errFire)))
+    return false
 end
 
 local BANNERS = {
-    { name="Selection Banner",  call=function() return fireBanner("Selection Banner", "Networking/Units/SummonEvent", "Selection", 50, false) end },
-    { name="Special Banner",    call=function() return fireBanner("Special Banner",   "Networking/Units/SummonEvent", "Special", 50, false) end },
-    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Units/SummonEvent", "StandardMemoria", 50, true) end },
-    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",    "Networking/Units/SummonEvent", "Spring26", 50, false) end },
-    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",   "Networking/Units/SummonEvent", "Spring26Memoria", 50, true) end },
+    { name="Selection Banner",  call=function() return fireBanner("Selection Banner", "Networking/Units/SummonEvent", "Selection",       50, false) end },
+    { name="Special Banner",    call=function() return fireBanner("Special Banner",   "Networking/Units/SummonEvent", "Special",         50, false) end },
+    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Units/SummonEvent", "StandardMemoria", 50, true ) end },
+    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",    "Networking/Units/SummonEvent", "Spring26",        50, false) end },
+    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",   "Networking/Units/SummonEvent", "Spring26Memoria", 50, true ) end },
 }
 
 for i,b in ipairs(BANNERS) do
     -- Versioned save key prevents old broken saved toggles from auto-firing
     -- immediately on execute after the remote signature changed.
-    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-fixed-v3:"..b.name)
+    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-verified-v4:"..b.name)
     task.spawn(function()
         while true do
             if getOn() then
