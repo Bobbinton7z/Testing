@@ -534,24 +534,11 @@ local function tryRemoteCandidates(tag, remote, candidates)
     return false
 end
 
--- The game's SummonEvent signature includes a boolean (the previous "no bool"
--- assumption produced "Unable to cast string to bool"). The bool position
--- isn't stable across game updates, so we cache the first variant that works
--- per remote and reuse it. Variants cover both common shapes:
---   (isMulti, "SummonMany", bannerId, amount)
---   ("SummonMany", bannerId, amount, isMulti)
-local _summonVariantCache = {}
-
-local function summonCandidates(bannerId, amount)
-    return {
-        { true,  "SummonMany", bannerId, amount },
-        { "SummonMany", bannerId, amount, true  },
-        { false, "SummonMany", bannerId, amount },
-        { "SummonMany", bannerId, amount, false },
-        { "SummonMany", bannerId, amount },               -- legacy fallback
-    }
-end
-
+-- Verified from the manual remote recorder:
+-- ReplicatedStorage.Networking.Units.SummonEvent:FireServer("SummonMany", bannerId, amount)
+-- Do not probe boolean variants here. RemoteEvent argument errors can happen in
+-- the game's client/server handlers, so probing bad signatures can break the
+-- manual summon UI after OzWare is executed.
 local function fireBanner(name, path, bannerId, amount, _isMemoria)
     local remote, err = resolveRemote(path)
     if not remote then
@@ -563,35 +550,13 @@ local function fireBanner(name, path, bannerId, amount, _isMemoria)
         return false
     end
 
-    local cacheKey = remote:GetFullName() .. "|" .. tostring(bannerId)
-    local cached = _summonVariantCache[cacheKey]
-    if cached then
-        -- rebuild args with current amount in case it changed
-        local args = {}
-        for i,v in ipairs(cached) do
-            if type(v) == "number" then args[i] = amount else args[i] = v end
-        end
-        local ok, errFire = pcall(function() remote:FireServer(table.unpack(args)) end)
-        if ok then
-            print(("[OzWare][%s] sent (cached) args=%s"):format(name, fmtArgs(args)))
-            return true
-        end
-        warn(("[OzWare][%s] cached variant failed, re-probing: %s"):format(name, tostring(errFire)))
-        _summonVariantCache[cacheKey] = nil
+    local args = { "SummonMany", bannerId, amount }
+    local ok, errFire = pcall(function() remote:FireServer(table.unpack(args)) end)
+    if ok then
+        print(("[OzWare][%s] sent %s args=%s"):format(name, remote:GetFullName(), fmtArgs(args)))
+        return true
     end
-
-    local lastErr
-    for _, args in ipairs(summonCandidates(bannerId, amount)) do
-        local ok, errFire = pcall(function() remote:FireServer(table.unpack(args)) end)
-        if ok then
-            _summonVariantCache[cacheKey] = args
-            print(("[OzWare][%s] sent %s args=%s"):format(name, remote:GetFullName(), fmtArgs(args)))
-            return true
-        end
-        lastErr = errFire
-        task.wait(0.05)
-    end
-    warn(("[OzWare][%s] FireServer failed (all variants): %s"):format(name, tostring(lastErr)))
+    warn(("[OzWare][%s] FireServer failed args=%s | %s"):format(name, fmtArgs(args), tostring(errFire)))
     return false
 end
 
@@ -606,7 +571,7 @@ local BANNERS = {
 for i,b in ipairs(BANNERS) do
     -- Versioned save key prevents old broken saved toggles from auto-firing
     -- immediately on execute after the remote signature changed.
-    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-verified-v4:"..b.name)
+    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-recorder-v5:"..b.name)
     task.spawn(function()
         while true do
             if getOn() then
@@ -1757,8 +1722,8 @@ end
 -- BOOT
 -- ======================
 switchTab("Lobby")
-notify("OzWare v2.0 loaded", true)
-print("[OzWare v2] loaded.")
+notify("OzWare v2.3 loaded", true)
+print("[OzWare v2.3] loaded.")
 
 
 -- ======================
