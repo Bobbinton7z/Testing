@@ -14,9 +14,6 @@ local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
 local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
 
--- Set true only when actively debugging remote signatures; keep false in normal use
--- to prevent console spam from flooding the executor output / game UI.
-local DEBUG_LOG = false
 local Net       = RS:WaitForChild("Networking")
 
 -- ======================
@@ -524,22 +521,16 @@ local lobbyPage = tabPages["Lobby"]
 local sumSec = section(lobbyPage, "Auto Summoner", 1)
 label(sumSec, "Loops summon using the game's own max/current currency handling.", 1)
 
--- Resolve a remote by a "/" path under ReplicatedStorage, logging each hop
+-- Resolve a remote by a "/" path under ReplicatedStorage
 local function resolveRemote(path)
     local node = RS
     for part in string.gmatch(path, "[^/]+") do
-        if not node then return nil, "nil before "..part end
+        if not node then return nil end
         local nxt = node:FindFirstChild(part)
-        if not nxt then return nil, "missing: "..part.." under "..node:GetFullName() end
+        if not nxt then return nil end
         node = nxt
     end
     return node
-end
-
-local function fmtArgs(args)
-    local out = {}
-    for i,v in ipairs(args) do out[i] = tostring(v) end
-    return table.concat(out, ",")
 end
 
 local function callRemote(remote, args)
@@ -550,59 +541,28 @@ local function callRemote(remote, args)
 end
 
 local function tryRemoteCandidates(tag, remote, candidates)
-    local lastErr
     for _,args in ipairs(candidates) do
         local ok, result = pcall(function()
             return callRemote(remote, args)
         end)
         if ok then
-            if DEBUG_LOG then
-                print(("[OzWare][%s] sent %s args=%s"):format(tag, remote:GetFullName(), fmtArgs(args)))
-            end
+            -- Stop immediately on first success — do NOT continue trying other
+            -- candidates. Continued firing of LobbyEvent with wrong-typed args
+            -- after a successful call corrupts the server's summon handler state.
             return true, result
         end
-        lastErr = result
         task.wait(0.05)
-    end
-    if DEBUG_LOG then
-        warn(("[OzWare][%s] all candidates failed: %s"):format(tag, tostring(lastErr)))
     end
     return false
 end
 
--- Verified from the manual remote recorder:
--- ReplicatedStorage.Networking.Units.SummonEvent:FireServer("SummonMany", bannerId, amount)
--- Do not probe boolean variants here. RemoteEvent argument errors can happen in
--- the game's client/server handlers, so probing bad signatures can break the
--- manual summon UI after OzWare is executed.
 local function fireBanner(name, path, bannerId, _amount, _isMemoria)
     local remote, err = resolveRemote(path)
-    if not remote then
-        if DEBUG_LOG then
-            warn(("[OzWare][%s] remote not found (%s) | tried: %s"):format(name, err or "?", path))
-        end
-        return false
-    end
-    if not remote:IsA("RemoteEvent") then
-        if DEBUG_LOG then
-            warn(("[OzWare][%s] resolved to %s, expected RemoteEvent (%s)"):format(name, remote.ClassName, remote:GetFullName()))
-        end
-        return false
-    end
-
-    -- bannerId is nil for dedicated-remote banners (Selection/Special/Memoria)
+    if not remote then return false end
+    if not remote:IsA("RemoteEvent") then return false end
     local args = bannerId and { "SummonMany", bannerId } or { "SummonMany" }
-    local ok, errFire = pcall(function() remote:FireServer(table.unpack(args)) end)
-    if ok then
-        if DEBUG_LOG then
-            print(("[OzWare][%s] sent %s args=%s"):format(name, remote:GetFullName(), fmtArgs(args)))
-        end
-        return true
-    end
-    if DEBUG_LOG then
-        warn(("[OzWare][%s] FireServer failed args=%s | %s"):format(name, fmtArgs(args), tostring(errFire)))
-    end
-    return false
+    local ok = pcall(function() remote:FireServer(table.unpack(args)) end)
+    return ok
 end
 
 -- Confirmed remote paths from scanner sessions:
@@ -842,10 +802,12 @@ local gamePage = tabPages["Game"]
 local matchSec = section(gamePage, "Match Controls", 1)
 local skipBtn = btn(matchSec, "Skip Wave", C.ACCENT, 1)
 skipBtn.MouseButton1Click:Connect(function()
+    if not inGameMode() then return notify("Must be in a match to skip wave", false) end
     safeCall(function() Net.SkipWaveEvent:FireServer("Skip") end, "Wave skipped", "Skip failed")
 end)
 local statusBtn = btn(matchSec, "Update Match Status", Color3.fromRGB(60,100,200), 2)
 statusBtn.MouseButton1Click:Connect(function()
+    if not inGameMode() then return notify("Must be in a match", false) end
     safeCall(function() Net.MatchStatusEvent:FireServer("UpdateStatus", 2) end, "Status updated", "Status failed")
 end)
 
@@ -865,6 +827,7 @@ label(unitSec, "Unit UUID", 1)
 local uuidBox = input(unitSec, "Paste unit UUID here", 2)
 local upgradeBtn = btn(unitSec, "Upgrade", C.ACCENT, 3)
 upgradeBtn.MouseButton1Click:Connect(function()
+    if not inGameMode() then return notify("Must be in a match to upgrade units", false) end
     local uuid=uuidBox.Text; if uuid=="" then return notify("Enter a UUID first", false) end
     safeCall(function() UnitEvent():FireServer("Upgrade", uuid) end, "Unit upgraded", "Upgrade failed")
 end)
@@ -872,12 +835,14 @@ label(unitSec, "Target Upgrade Level", 4)
 local levelBox = input(unitSec, "e.g. 12", 5)
 local upgradeMultiBtn = btn(unitSec, "Upgrade Multiple", Color3.fromRGB(80,60,220), 6)
 upgradeMultiBtn.MouseButton1Click:Connect(function()
+    if not inGameMode() then return notify("Must be in a match to upgrade units", false) end
     local uuid=uuidBox.Text; local lv=tonumber(levelBox.Text)
     if uuid=="" or not lv then return notify("Enter UUID and level", false) end
     safeCall(function() UnitEvent():FireServer("UpgradeMultiple", uuid, lv) end, "Upgraded to "..lv, "Upgrade failed")
 end)
 local sellBtn = btn(unitSec, "Sell Unit", C.RED, 7)
 sellBtn.MouseButton1Click:Connect(function()
+    if not inGameMode() then return notify("Must be in a match to sell units", false) end
     local uuid=uuidBox.Text; if uuid=="" then return notify("Enter a UUID first", false) end
     safeCall(function() UnitEvent():FireServer("Sell", uuid) end, "Unit sold", "Sell failed")
 end)
@@ -887,6 +852,7 @@ label(priSec, "Uses UUID from above", 1)
 for i,p in ipairs({"First","Last","Closest","Strongest","Weakest","Bosses"}) do
     local b=btn(priSec, p, Color3.fromRGB(45,45,80), i+1)
     b.MouseButton1Click:Connect(function()
+        if not inGameMode() then return notify("Must be in a match to set priority", false) end
         local uuid=uuidBox.Text; if uuid=="" then return notify("Enter a UUID first", false) end
         safeCall(function() UnitEvent():FireServer("ChangePriority", uuid, p) end, "Priority "..p, "Priority failed")
     end)
@@ -1068,7 +1034,8 @@ task.spawn(function()
     local Terrain  = workspace:FindFirstChildOfClass("Terrain")
     while true do
         task.wait(1)
-        if getBoostFPS() and not fpsApplied then
+        local shouldApply = getBoostFPS() and inGameMode()
+        if shouldApply and not fpsApplied then
             fpsApplied = true
             pcall(function()
                 oldGfx.GlobalShadows = Lighting.GlobalShadows
@@ -1099,7 +1066,7 @@ task.spawn(function()
                 end
             end
             notify("FPS Boost ON", true)
-        elseif (not getBoostFPS()) and fpsApplied then
+        elseif (not shouldApply) and fpsApplied then
             fpsApplied = false
             pcall(function()
                 if oldGfx.GlobalShadows ~= nil then Lighting.GlobalShadows = oldGfx.GlobalShadows end
@@ -1241,6 +1208,7 @@ local stopBtn = btn(macroSec, "Stop Playback",   Color3.fromRGB(120,120,140), 8)
 recBtn.MouseButton1Click:Connect(function()
     if not hookOK then return notify("Executor lacks hookmetamethod", false) end
     if not selectedMacro then return notify("Select or create a macro first", false) end
+    if not inGameMode() then return notify("Must be in a match to record", false) end
     if recording then
         recording = false
         recBtn.Text = "Start Recording"
@@ -1261,6 +1229,7 @@ end)
 
 playBtn.MouseButton1Click:Connect(function()
     if not selectedMacro or not macros[selectedMacro] then return notify("Select a macro", false) end
+    if not inGameMode() then return notify("Must be in a match to play a macro", false) end
     if playing then return notify("Already playing", false) end
     local mac = macros[selectedMacro]
     if #mac.events == 0 then return notify("Macro is empty", false) end
@@ -1780,7 +1749,6 @@ end -- close Odyssey do block
 -- ======================
 switchTab("Lobby")
 notify("OzWare V3 loaded", true)
-print("[OzWare V3] loaded.")
 
 
 -- ======================
