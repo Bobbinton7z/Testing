@@ -1537,15 +1537,16 @@ end
 
 local function closeMatchingUI(keywords)
     for _,g in ipairs(playerGui:GetChildren()) do
-        if g == gui then continue end  -- never touch OzWare's own GUI
-        local n = g.Name:lower()
-        local hit = false
-        for _,k in ipairs(keywords) do if n:find(k) then hit=true; break end end
-        if hit then
-            -- Safely hide the UI without firing any game button signals.
-            -- Firing firesignal on game close buttons can corrupt the game's
-            -- internal UI/button state and break manual summon/start buttons.
-            pcall(function() g.Enabled = false end)
+        if g ~= gui then  -- never touch OzWare's own GUI
+            local n = g.Name:lower()
+            local hit = false
+            for _,k in ipairs(keywords) do if n:find(k) then hit=true; break end end
+            if hit then
+                -- Safely hide the UI without firing any game button signals.
+                -- Firing firesignal on game close buttons can corrupt the game's
+                -- internal UI/button state and break manual summon/start buttons.
+                pcall(function() g.Enabled = false end)
+            end
         end
     end
 end
@@ -1746,6 +1747,7 @@ local function maybeCloseGui(g)
     end
 end
 playerGui.ChildAdded:Connect(function(g) task.wait(0.1); pcall(maybeCloseGui, g) end)
+end -- close Odyssey do block
 
 -- ======================
 -- BOOT
