@@ -1,6 +1,6 @@
 -- ======================
 -- |        OzWare       |
--- | Neon dashboard UI   |
+-- |    V3 Dashboard     |
 -- ======================
 
 local Players      = game:GetService("Players")
@@ -47,6 +47,27 @@ local function SummonEvent() local u = Net:FindFirstChild("Units")    return u a
 local function OdysseyNet()  local o = Net:FindFirstChild("Odyssey")  return o and o:FindFirstChild("Adventure") end
 local function AbilityEvent()return Net:FindFirstChild("AbilityEvent") end
 local function SkipWaveEvent()return Net:FindFirstChild("SkipWaveEvent") end
+
+-- ======================
+-- GAME-MODE GUARD (top-level, shared by all tabs)
+-- Returns true only when the player is inside an active match/map,
+-- not in the lobby. All automation loops check this before firing remotes.
+-- ======================
+local function getMapRoot()
+    return workspace:FindFirstChild("Map")
+        or workspace:FindFirstChild("MapHolder")
+        or workspace:FindFirstChild("Maps")
+        or workspace:FindFirstChild("Stage")
+end
+
+local function inGameMode()
+    if getMapRoot() then return true end
+    for _, name in ipairs({"OdysseyRoom","AdventureRoom","Adventure",
+                            "OdysseyMap","AdventureMap","Stage","Match"}) do
+        if workspace:FindFirstChild(name) then return true end
+    end
+    return false
+end
 
 -- ======================
 -- HELPERS
@@ -222,7 +243,7 @@ gradient(logo,C.ACCENT,C.ACCENT2,135)
 local titleLbl=Instance.new("TextLabel")
 titleLbl.Size=UDim2.new(0,200,1,0); titleLbl.AnchorPoint=Vector2.new(0.5,0)
 titleLbl.Position=UDim2.new(0.5,0,0,0)
-titleLbl.BackgroundTransparency=1; titleLbl.Text="OzWare"
+titleLbl.BackgroundTransparency=1; titleLbl.Text="OzWare V3"
 titleLbl.TextColor3=C.TEXT; titleLbl.TextSize=18; titleLbl.Font=FONT_BOLD
 titleLbl.ZIndex=3; titleLbl.Parent=titleBar
 
@@ -588,7 +609,9 @@ for i,b in ipairs(BANNERS) do
     local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-recorder-v5:"..b.name)
     task.spawn(function()
         while true do
-            if getOn() then
+            -- Only fire summon remotes when NOT in the lobby.
+            -- Firing these from the lobby breaks the game's summon UI buttons.
+            if getOn() and not inGameMode() then
                 b.call()
             end
             task.wait(1.25)
@@ -641,18 +664,23 @@ local allBtn = btn(claimSec, "Run All Claims", C.ACCENT, #CLAIMERS+10)
 allBtn.MouseButton1Click:Connect(function()
     safeCall(function() for _,c in ipairs(CLAIMERS) do c.fn(); task.wait(0.2) end end, "All rewards claimed!", "Claim all failed")
 end)
--- Looper
-task.spawn(function()
-    while true do
-        for i,c in ipairs(CLAIMERS) do
+-- Looper: fires each enabled claimer once per 5-second cycle, only in lobby.
+-- Uses a single connection instead of a while-true loop so it never blocks
+-- or interrupts other coroutines.
+do
+    local loopClock = 0
+    RunSvc.Heartbeat:Connect(function()
+        if os.clock() - loopClock < 5 then return end
+        loopClock = os.clock()
+        -- Claimers are lobby-only actions; skip entirely while in a match.
+        if inGameMode() then return end
+        for i, c in ipairs(CLAIMERS) do
             if loopGetters[i] and loopGetters[i]() then
-                pcall(c.fn)
+                task.spawn(function() pcall(c.fn) end)
             end
-            task.wait(0.1)
         end
-        task.wait(3)
-    end
-end)
+    end)
+end
 end
 
 -- ======================
@@ -810,7 +838,7 @@ local _, getAutoSkipWave = toggle(matchSec, "Auto Skip Wave (loop)", 3, false)
 task.spawn(function()
     while true do
         task.wait(1.5)
-        if getAutoSkipWave() then
+        if getAutoSkipWave() and inGameMode() then
             local r = SkipWaveEvent()
             if r then pcall(function() r:FireServer("Skip") end) end
         end
@@ -962,6 +990,7 @@ end
 task.spawn(function()
     while true do
         task.wait(0.5)
+        if not inGameMode() then continue end
         local ae = AbilityEvent()
         if ae then
             for _,entry in pairs(autoAbilities) do
@@ -979,19 +1008,11 @@ end)
 -- ======================
 local utilSec = section(gamePage, "Utility", 5)
 
-local savedMapParts = nil
-local function getMapRoot()
-    return workspace:FindFirstChild("Map")
-        or workspace:FindFirstChild("MapHolder")
-        or workspace:FindFirstChild("Maps")
-        or workspace:FindFirstChild("Stage")
-end
-
 local _, getDeleteMap = toggle(utilSec, "Delete Map (hide terrain)", 1, false)
 task.spawn(function()
     while true do
         task.wait(2)
-        if getDeleteMap() then
+        if getDeleteMap() and inGameMode() then
             local m = getMapRoot()
             if m then
                 for _,d in ipairs(m:GetDescendants()) do
@@ -1011,7 +1032,7 @@ local _, getDeleteEnemies = toggle(utilSec, "Delete Enemies (loop)", 2, false)
 task.spawn(function()
     while true do
         task.wait(0.5)
-        if getDeleteEnemies() then
+        if getDeleteEnemies() and inGameMode() then
             for _,folder in ipairs({"Enemies","Mobs","EnemiesFolder","Zombies"}) do
                 local f = workspace:FindFirstChild(folder)
                 if f then
@@ -1650,57 +1671,46 @@ local function requestNextRoom()
 end
 
 
--- Guard: prevents Odyssey automation remotes firing in the lobby.
--- Lobby-fired CardPickEvent/ShopEvent cause AdventureClient.SelectCharacter crashes.
-local function inOdysseyRun()
-    if getMapRoot() then return true end
-    for _, name in ipairs({"OdysseyRoom","AdventureRoom","Adventure",
-                            "OdysseyMap","AdventureMap","Stage","Match"}) do
-        if workspace:FindFirstChild(name) then return true end
-    end
-    return false
-end
-
 -- Card pick loop: choose basic/highest-rarity cards, with optional Ragnaw unit-card priority.
-task.spawn(function()
-    while true do
-        task.wait(1)
-        if not inOdysseyRun() then
-            -- Not in a game world; skip Odyssey automation to prevent
-            -- lobby-fired remotes from crashing AdventureClient
-        elseif getAutoPick() or getAutoRagnawCards() or getAutoNextRoom() then
-            local ok, opts = pcall(readOpenCardOptions)
-            if ok and opts then
-                local chosenIdx, reason = chooseCardIndex(opts)
-                if chosenIdx then
-                    pickIndex(opts, chosenIdx)
-                    if reason == "ragnaw" then
-                        local cardName = opts[chosenIdx]
-                        ragnawPickedThisRun[cardName] = true
-                        ragnawPickCount = math.min(4, ragnawPickCount + 1)
-                    end
-                elseif reason == "skip-unit" then
-                    -- Ragnaw quota filled or no target card here: skip the unit-card screen.
-                    local cardEv = getONet("CardPickEvent")
-                    if cardEv then pcall(function() cardEv:FireServer("Skip", 0) end) end
-                    if getAutoNextRoom() then requestNextRoom() end
-                elseif getAutoNextRoom() then
-                    requestNextRoom()
+-- Uses a Heartbeat connection instead of a while-true loop so it never blocks other coroutines.
+do
+    local cardClock = 0
+    RunSvc.Heartbeat:Connect(function()
+        if os.clock() - cardClock < 1 then return end
+        cardClock = os.clock()
+        if not inGameMode() then return end
+        if not (getAutoPick() or getAutoRagnawCards() or getAutoNextRoom()) then return end
+        local ok, opts = pcall(readOpenCardOptions)
+        if ok and opts then
+            local chosenIdx, reason = chooseCardIndex(opts)
+            if chosenIdx then
+                pickIndex(opts, chosenIdx)
+                if reason == "ragnaw" then
+                    local cardName = opts[chosenIdx]
+                    ragnawPickedThisRun[cardName] = true
+                    ragnawPickCount = math.min(4, ragnawPickCount + 1)
                 end
+            elseif reason == "skip-unit" then
+                local cardEv = getONet("CardPickEvent")
+                if cardEv then pcall(function() cardEv:FireServer("Skip", 0) end) end
+                if getAutoNextRoom() then requestNextRoom() end
             elseif getAutoNextRoom() then
                 requestNextRoom()
             end
+        elseif getAutoNextRoom() then
+            requestNextRoom()
         end
-    end
-end)
+    end)
+end
 
--- Chest loop: narrow scan, slow tick (2s)
-task.spawn(function()
-    while true do
-        task.wait(2)
-        if not inOdysseyRun() then
-            -- Not in game, skip
-        elseif getAutoCollectChests() then
+-- Chest handler: event-driven via Heartbeat, only runs in-game, 2s cadence.
+do
+    local chestClock = 0
+    RunSvc.Heartbeat:Connect(function()
+        if os.clock() - chestClock < 2 then return end
+        chestClock = os.clock()
+        if not inGameMode() then return end
+        if getAutoCollectChests() then
             local sm = Net:FindFirstChild("StageMechanics")
             local chestRemote = sm and sm:FindFirstChild("OdysseyChest")
             if chestRemote then
@@ -1722,12 +1732,13 @@ task.spawn(function()
             closeMatchingUI({"shop"})
             if getAutoNextRoom() then requestNextRoom() end
         end
-    end
-end)
+    end)
+end
 
 -- UI close loop: event-driven, only touches matching new children
 local function maybeCloseGui(g)
     if g == gui then return end
+    if not inGameMode() then return end  -- never touch game GUIs in the lobby
     local n = g.Name:lower()
     -- Only act on GUIs whose names explicitly match chest or shop keywords,
     -- and only when the corresponding auto-toggle is ON.
@@ -1753,8 +1764,8 @@ end -- close Odyssey do block
 -- BOOT
 -- ======================
 switchTab("Lobby")
-notify("OzWare v2.3 loaded", true)
-print("[OzWare v2.3] loaded.")
+notify("OzWare V3 loaded", true)
+print("[OzWare V3] loaded.")
 
 
 -- ======================
@@ -1821,5 +1832,5 @@ end)
 -- Do not destroy game ScreenGuis and do not monkey-patch SummonAnimationHandler.
 -- Both approaches can leave WindowHandler / game button state stuck, which is
 -- what made summon buttons and mode-join buttons stop responding.
-notify("OzWare Testing loaded safely", true)
+notify("OzWare V3 loaded safely", true)
 end
