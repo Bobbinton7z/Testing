@@ -624,8 +624,9 @@ for i,b in ipairs(BANNERS) do
     local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-recorder-v5:"..b.name)
     task.spawn(function()
         while true do
-            -- Only fire summon remotes when NOT in the lobby.
-            -- Firing these from the lobby breaks the game's summon UI buttons.
+            -- Summon remotes are only valid from the lobby/summon screen.
+            -- inGameMode() returns true when a map/match is loaded, so we fire
+            -- only when that guard is FALSE (i.e. the player is in the lobby).
             if getOn() and not inGameMode() then
                 b.call()
             end
@@ -802,31 +803,30 @@ joinBtn.MouseButton1Click:Connect(function()
             FriendsOnly = friendsOnly,
         }
 
-        -- Newer lobby code expects a bool in the join/start argument list.
-        -- The old AddMatch + dictionary call is what produces
-        -- "Unable to cast Dictionary to bool" in StageSelection/AdventureClient.
+        -- Only fire candidates where the second argument is a bool, never a raw
+        -- Dictionary. Passing a Dictionary as arg 2 to LobbyEvent causes the
+        -- server's SummonButtonsHandler to throw "Unable to cast string to bool"
+        -- which breaks the game's own summon UI buttons for the rest of the session.
         tryRemoteCandidates("Join Match", LE, {
-            {"AddMatch", friendsOnly, payload},
-            {friendsOnly, "AddMatch", payload},
+            {"AddMatch",    friendsOnly, payload},
             {"CreateMatch", friendsOnly, payload},
-            {"JoinMatch", friendsOnly, payload},
-            {"AddMatch", payload}, -- final legacy fallback only
+            {"JoinMatch",   friendsOnly, payload},
         })
 
         if getAutoStart() then
             task.wait(0.5)
-            tryRemoteCandidates("Start Match", LE, {
-                {"StartMatch", friendsOnly},
-                {friendsOnly, "StartMatch"},
-                {"PlayMatch", friendsOnly},
-                {friendsOnly, "PlayMatch"},
-                {"Start", friendsOnly},
-                {"StartMatch"},
-            })
+            -- Only attempt StartMatch once against dedicated remotes; do NOT
+            -- re-fire LobbyEvent with bad-typed candidates or it will crash the
+            -- server handler again.
             local sm = Net:FindFirstChild("StartMatch", true) or Net:FindFirstChild("PlayMatch", true)
             if sm and (sm:IsA("RemoteEvent") or sm:IsA("RemoteFunction")) then
                 pcall(function() callRemote(sm, {friendsOnly}) end)
-                pcall(function() callRemote(sm, {}) end)
+            else
+                tryRemoteCandidates("Start Match", LE, {
+                    {"StartMatch", friendsOnly},
+                    {"PlayMatch",  friendsOnly},
+                    {"Start",      friendsOnly},
+                })
             end
         end
     end, "Joining "..selType.." "..selStage.." "..selAct, "Join failed")
