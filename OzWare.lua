@@ -42,10 +42,7 @@ local FONT_REG  = Enum.Font.Gotham
 -- ======================
 -- REMOTES
 -- ======================
-local function UnitEvent()    return Net:FindFirstChild("UnitEvent") end
 local function OdysseyNet()   local o = Net:FindFirstChild("Odyssey") return o and o:FindFirstChild("Adventure") end
-local function AbilityEvent() return Net:FindFirstChild("AbilityEvent") end
-local function SkipWaveEvent()return Net:FindFirstChild("SkipWaveEvent") end
 
 -- ======================
 -- GAME-MODE GUARD (top-level, shared by all tabs)
@@ -736,14 +733,13 @@ joinBtn.MouseButton1Click:Connect(function()
             FriendsOnly = friendsOnly,
         }
 
-        -- IMPORTANT: Do NOT use LobbyEvent here.
-        -- LobbyEvent is shared with SummonButtonsHandler on the server.
-        -- Firing it with string args crashes the summon UI for the entire session.
-        -- Instead look for dedicated join remotes only.
-        local joinRemoteNames = {"JoinMatch","CreateMatch","AddMatch","MatchEvent","LobbyMatchEvent"}
+        -- Search direct children of Networking only — no recursive search.
+        -- Recursive FindFirstChild can match unrelated remotes deeper in the tree.
+        -- AddMatch/CreateMatch excluded — those strings crash SummonButtonsHandler.
+        local joinRemoteNames = {"JoinMatch", "MatchEvent", "LobbyMatchEvent"}
         local fired = false
         for _, name in ipairs(joinRemoteNames) do
-            local r = Net:FindFirstChild(name) or Net:FindFirstChild(name, true)
+            local r = Net:FindFirstChild(name)  -- direct children only
             if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
                 local ok = pcall(function()
                     if r:IsA("RemoteFunction") then
@@ -778,197 +774,23 @@ do
 local gamePage = tabPages["Game"]
 
 local matchSec = section(gamePage, "Match Controls", 1)
-local skipBtn = btn(matchSec, "Skip Wave", C.ACCENT, 1)
-skipBtn.MouseButton1Click:Connect(function()
-    if not inGameMode() then return notify("Must be in a match to skip wave", false) end
-    safeCall(function() Net.SkipWaveEvent:FireServer("Skip") end, "Wave skipped", "Skip failed")
-end)
-local statusBtn = btn(matchSec, "Update Match Status", Color3.fromRGB(60,100,200), 2)
-statusBtn.MouseButton1Click:Connect(function()
-    if not inGameMode() then return notify("Must be in a match", false) end
-    safeCall(function() Net.MatchStatusEvent:FireServer("UpdateStatus", 2) end, "Status updated", "Status failed")
-end)
 
-local unitSec = section(gamePage, "Unit Controls", 2)
-label(unitSec, "Unit UUID", 1)
-local uuidBox = input(unitSec, "Paste unit UUID here", 2)
-local upgradeBtn = btn(unitSec, "Upgrade", C.ACCENT, 3)
-upgradeBtn.MouseButton1Click:Connect(function()
-    if not inGameMode() then return notify("Must be in a match to upgrade units", false) end
-    local uuid=uuidBox.Text; if uuid=="" then return notify("Enter a UUID first", false) end
-    safeCall(function() UnitEvent():FireServer("Upgrade", uuid) end, "Unit upgraded", "Upgrade failed")
-end)
-label(unitSec, "Target Upgrade Level", 4)
-local levelBox = input(unitSec, "e.g. 12", 5)
-local upgradeMultiBtn = btn(unitSec, "Upgrade Multiple", Color3.fromRGB(80,60,220), 6)
-upgradeMultiBtn.MouseButton1Click:Connect(function()
-    if not inGameMode() then return notify("Must be in a match to upgrade units", false) end
-    local uuid=uuidBox.Text; local lv=tonumber(levelBox.Text)
-    if uuid=="" or not lv then return notify("Enter UUID and level", false) end
-    safeCall(function() UnitEvent():FireServer("UpgradeMultiple", uuid, lv) end, "Upgraded to "..lv, "Upgrade failed")
-end)
-local sellBtn = btn(unitSec, "Sell Unit", C.RED, 7)
-sellBtn.MouseButton1Click:Connect(function()
-    if not inGameMode() then return notify("Must be in a match to sell units", false) end
-    local uuid=uuidBox.Text; if uuid=="" then return notify("Enter a UUID first", false) end
-    safeCall(function() UnitEvent():FireServer("Sell", uuid) end, "Unit sold", "Sell failed")
-end)
-
-local priSec = section(gamePage, "Unit Priority", 3)
-label(priSec, "Uses UUID from above", 1)
-for i,p in ipairs({"First","Last","Closest","Strongest","Weakest","Bosses"}) do
-    local b=btn(priSec, p, Color3.fromRGB(45,45,80), i+1)
-    b.MouseButton1Click:Connect(function()
-        if not inGameMode() then return notify("Must be in a match to set priority", false) end
-        local uuid=uuidBox.Text; if uuid=="" then return notify("Enter a UUID first", false) end
-        safeCall(function() UnitEvent():FireServer("ChangePriority", uuid, p) end, "Priority "..p, "Priority failed")
-    end)
-end
-
--- ======================
--- AUTO ABILITIES (per-unit, fires on cooldown)
--- ======================
-local autoAbilities = {}  -- [key] = { args, cooldown, enabled, label }
-local abilitySec = section(gamePage, "Auto Abilities", 4)
-label(abilitySec, "Use an ability once - it gets captured below.", 1)
-
-local cdBox = input(abilitySec, "Cooldown seconds for new entries (e.g. 10)", 2)
-cdBox.Text = "10"
-
-local abilityScroll = Instance.new("ScrollingFrame")
-abilityScroll.Size=UDim2.new(1,0,0,140); abilityScroll.BackgroundColor3=C.BG
-abilityScroll.BorderSizePixel=0; abilityScroll.ScrollBarThickness=4
-abilityScroll.ScrollBarImageColor3=C.ACCENT
-abilityScroll.CanvasSize=UDim2.new(0,0,0,0)
-abilityScroll.AutomaticCanvasSize=Enum.AutomaticSize.Y
-abilityScroll.LayoutOrder=3; abilityScroll.Parent=abilitySec
-corner(abilityScroll,7); stroke(abilityScroll,C.BORDER,1)
-listLayout(abilityScroll,nil,4); padding(abilityScroll,nil,6,6,6,6)
-
-local function abilityKey(args)
-    -- key by string-ified args so the same ability collapses to one row
-    local parts = {}
-    for i,a in ipairs(args) do
-        local t = typeof(a)
-        if t=="string" or t=="number" or t=="boolean" then
-            parts[i] = tostring(a)
-        else
-            parts[i] = t
-        end
-    end
-    return table.concat(parts, "|")
-end
-
-local abilityRows = {}
-local function rebuildAbilityList()
-    for _,c in ipairs(abilityScroll:GetChildren()) do
-        if c:IsA("Frame") then c:Destroy() end
-    end
-    abilityRows = {}
-    for key,entry in pairs(autoAbilities) do
-        local row = Instance.new("Frame")
-        row.Size=UDim2.new(1,0,0,32); row.BackgroundColor3=C.PANEL
-        row.BorderSizePixel=0; row.Parent=abilityScroll
-        corner(row,6)
-        local lb=Instance.new("TextLabel")
-        lb.Size=UDim2.new(1,-140,1,0); lb.Position=UDim2.new(0,8,0,0)
-        lb.BackgroundTransparency=1; lb.Text=entry.label
-        lb.TextColor3=C.TEXT; lb.TextSize=11; lb.Font=FONT_REG
-        lb.TextXAlignment=Enum.TextXAlignment.Left
-        lb.TextTruncate=Enum.TextTruncate.AtEnd; lb.Parent=row
-        local cd=Instance.new("TextBox")
-        cd.Size=UDim2.new(0,38,0,22); cd.Position=UDim2.new(1,-130,0.5,-11)
-        cd.BackgroundColor3=C.BG; cd.Text=tostring(entry.cooldown)
-        cd.TextColor3=C.TEXT; cd.TextSize=11; cd.Font=FONT_REG
-        cd.BorderSizePixel=0; cd.Parent=row; corner(cd,4); stroke(cd,C.BORDER,1)
-        cd.FocusLost:Connect(function()
-            local n = tonumber(cd.Text); if n and n>0 then entry.cooldown=n else cd.Text=tostring(entry.cooldown) end
-        end)
-        local tg=Instance.new("TextButton")
-        tg.Size=UDim2.new(0,46,0,22); tg.Position=UDim2.new(1,-86,0.5,-11)
-        tg.BackgroundColor3 = entry.enabled and C.GREEN or C.DISABLED
-        tg.Text = entry.enabled and "ON" or "OFF"
-        tg.TextColor3=C.TEXT; tg.TextSize=11; tg.Font=FONT_BOLD; tg.BorderSizePixel=0; tg.Parent=row
-        corner(tg,4)
-        tg.MouseButton1Click:Connect(function()
-            entry.enabled = not entry.enabled
-            tg.BackgroundColor3 = entry.enabled and C.GREEN or C.DISABLED
-            tg.Text = entry.enabled and "ON" or "OFF"
-        end)
-        local del=Instance.new("TextButton")
-        del.Size=UDim2.new(0,34,0,22); del.Position=UDim2.new(1,-38,0.5,-11)
-        del.BackgroundColor3=C.RED; del.Text="X"; del.TextColor3=C.TEXT
-        del.TextSize=12; del.Font=FONT_BOLD; del.BorderSizePixel=0; del.Parent=row
-        corner(del,4)
-        del.MouseButton1Click:Connect(function()
-            autoAbilities[key]=nil; rebuildAbilityList()
-        end)
-        abilityRows[key]=row
-    end
-end
-
-local clrBtn = btn(abilitySec, "Clear Captured Abilities", Color3.fromRGB(120,120,140), 4)
-clrBtn.MouseButton1Click:Connect(function() autoAbilities={}; rebuildAbilityList() end)
-
--- Hook ability fires to capture entries
-local hookOK2 = (typeof(hookmetamethod)=="function") and (typeof(getnamecallmethod)=="function")
-if hookOK2 then
-    local oldNC
-    oldNC = hookmetamethod(game, "__namecall", function(self, ...)
-        local m = getnamecallmethod()
-        if m == "FireServer" and self == AbilityEvent() then
-            local args = {...}
-            local key = abilityKey(args)
-            if not autoAbilities[key] then
-                local cdN = tonumber(cdBox.Text) or 10
-                local lbl = "Ability"
-                if args[1] then lbl = tostring(args[1]) end
-                if args[2] then lbl = lbl.."  "..tostring(args[2]):sub(1,18) end
-                autoAbilities[key] = { args=args, cooldown=cdN, enabled=false, label=lbl, lastFire=0 }
-                task.defer(rebuildAbilityList)
-            else
-                autoAbilities[key].lastFire = os.clock()
-            end
-        end
-        return oldNC(self, ...)
-    end)
-end
-
--- Auto-ability loop
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        if not inGameMode() then continue end
-        local ae = AbilityEvent()
-        if ae then
-            for _,entry in pairs(autoAbilities) do
-                if entry.enabled and (os.clock() - entry.lastFire) >= entry.cooldown then
-                    pcall(function() ae:FireServer(table.unpack(entry.args)) end)
-                    entry.lastFire = os.clock()
-                end
-            end
-        end
-    end
-end)
-
--- ======================
--- UTILITY  (skip wave / delete map / enemies / fps boost)
--- All of these fire ONCE when toggled ON. No loops.
--- ======================
-local utilSec = section(gamePage, "Utility", 5)
-
--- Skip Wave: single button, fires once
-local skipWaveBtn = btn(utilSec, "Skip Wave (once)", C.ACCENT, 1)
-skipWaveBtn.MouseButton1Click:Connect(function()
-    if not inGameMode() then return notify("Must be in a match", false) end
+-- Skip Wave: toggle, fires every 3s while on and in-match
+local _, getSkipWave, onSkipWave = toggle(matchSec, "Skip Wave", C.ACCENT, 1, "game.skipwave")
+local skipWaveClock = 0
+RunSvc.Heartbeat:Connect(function()
+    if not getSkipWave() then return end
+    if not inGameMode() then return end
+    if os.clock() - skipWaveClock < 3 then return end
+    skipWaveClock = os.clock()
     local r = Net:FindFirstChild("SkipWaveEvent")
-    if r and r:IsA("RemoteEvent") then
-        pcall(function() r:FireServer("Skip") end)
-        notify("Wave skipped", true)
-    else
-        notify("SkipWaveEvent not found", false)
-    end
+    if r and r:IsA("RemoteEvent") then pcall(function() r:FireServer("Skip") end) end
 end)
+
+-- ======================
+-- UTILITY
+-- ======================
+local utilSec = section(gamePage, "Utility", 2)
 
 -- Delete Map: fires once on toggle-on, skips base/path/spawn parts
 -- Base template parts are anything named with: base, spawn, path, road, floor, ground
@@ -981,7 +803,7 @@ local function isBasePart(name)
     return false
 end
 local mapDeleted = false
-local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures (once)", 2, false, "util.deletemap")
+local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
     if not on then mapDeleted = false; return end
     if mapDeleted then return end
@@ -1005,7 +827,7 @@ end)
 
 -- Delete Enemies: fires once on toggle-on, destroys permanently + watches for new ones
 local enemiesDeleted = false
-local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies (once)", 3, false, "util.deletenemies")
+local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies", 3, false, "util.deletenemies")
 onDeleteEnemies(function(on)
     if not on then enemiesDeleted = false; return end
     if enemiesDeleted then return end
@@ -1033,7 +855,7 @@ end)
 -- FPS Boost: fires once on toggle-on, restores on toggle-off
 local fpsApplied = false
 local oldGfx = {}
-local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS (once)", 4, false, "util.fpsbst")
+local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.fpsbst")
 onBoostFPS(function(on)
     local Lighting = game:GetService("Lighting")
     local Terrain  = workspace:FindFirstChildOfClass("Terrain")
@@ -1078,191 +900,6 @@ onBoostFPS(function(on)
     end
 end)
 
--- ======================
--- MACROS  (record/play unit + ability actions)
--- ======================
-local macros = {}          -- [name] = { events = {{t, remoteName, args}}, duration }
-local selectedMacro = nil
-local recording = false
-local playing = false
-local recStart = 0
-local recBuffer = nil
-
-local macroSec = section(gamePage, "Macros", 4)
-label(macroSec, "Records Unit placements + Abilities. Press Play when wave 1 starts.", 1)
-
-local nameBox = input(macroSec, "Macro name...", 2)
-local createBtn = btn(macroSec, "Create Macro", Color3.fromRGB(70,70,140), 3)
-
-local selLblM = Instance.new("TextLabel")
-selLblM.Size=UDim2.new(1,0,0,18); selLblM.BackgroundTransparency=1
-selLblM.Text="Selected: (none)"; selLblM.TextColor3=C.SUBTEXT
-selLblM.TextSize=12; selLblM.Font=FONT_SEMI
-selLblM.TextXAlignment=Enum.TextXAlignment.Left
-selLblM.LayoutOrder=4; selLblM.Parent=macroSec
-
-local macroScroll = Instance.new("ScrollingFrame")
-macroScroll.Size=UDim2.new(1,0,0,140); macroScroll.BackgroundColor3=C.BG
-macroScroll.BorderSizePixel=0; macroScroll.ScrollBarThickness=4
-macroScroll.ScrollBarImageColor3=C.ACCENT
-macroScroll.CanvasSize=UDim2.new(0,0,0,0)
-macroScroll.AutomaticCanvasSize=Enum.AutomaticSize.Y
-macroScroll.ScrollingDirection=Enum.ScrollingDirection.Y
-macroScroll.LayoutOrder=5; macroScroll.Parent=macroSec
-corner(macroScroll,7); stroke(macroScroll,C.BORDER,1)
-listLayout(macroScroll,nil,4); padding(macroScroll,nil,6,6,6,6)
-
-local macroRows = {}
-local function updateMacroSel()
-    local n = selectedMacro
-    if n and macros[n] then
-        selLblM.Text = ("Selected: %s (%d events)"):format(n, #macros[n].events)
-        selLblM.TextColor3 = C.ACCENT
-    else
-        selLblM.Text = "Selected: (none)"; selLblM.TextColor3 = C.SUBTEXT
-    end
-    for k,row in pairs(macroRows) do
-        local active = (k == selectedMacro)
-        row.BackgroundColor3 = active and C.ACCENT or C.PANEL
-        if row:FindFirstChild("Lbl") then
-            row.Lbl.TextColor3 = active and Color3.fromRGB(20,24,40) or C.TEXT
-        end
-    end
-end
-
-local function rebuildMacroList()
-    for _,c in ipairs(macroScroll:GetChildren()) do
-        if c:IsA("TextButton") then c:Destroy() end
-    end
-    macroRows = {}
-    local names = {}
-    for k,_ in pairs(macros) do table.insert(names,k) end
-    table.sort(names)
-    for i,name in ipairs(names) do
-        local row = Instance.new("TextButton")
-        row.Size=UDim2.new(1,0,0,28); row.BackgroundColor3=C.PANEL
-        row.AutoButtonColor=false; row.Text=""; row.BorderSizePixel=0
-        row.LayoutOrder=i; row.Parent=macroScroll
-        corner(row,6)
-        local lb = Instance.new("TextLabel"); lb.Name="Lbl"
-        lb.Size=UDim2.new(1,-70,1,0); lb.Position=UDim2.new(0,10,0,0)
-        lb.BackgroundTransparency=1
-        lb.Text=("%s  -  %d ev"):format(name, #macros[name].events)
-        lb.TextColor3=C.TEXT; lb.TextSize=12; lb.Font=FONT_SEMI
-        lb.TextXAlignment=Enum.TextXAlignment.Left; lb.Parent=row
-        local del = Instance.new("TextButton")
-        del.Size=UDim2.new(0,54,0,20); del.Position=UDim2.new(1,-60,0.5,-10)
-        del.BackgroundColor3=C.RED; del.Text="Delete"; del.TextColor3=C.TEXT
-        del.TextSize=11; del.Font=FONT_BOLD; del.BorderSizePixel=0; del.Parent=row
-        corner(del,5)
-        del.MouseButton1Click:Connect(function()
-            macros[name]=nil
-            if selectedMacro==name then selectedMacro=nil end
-            rebuildMacroList(); updateMacroSel()
-        end)
-        macroRows[name]=row
-        row.MouseButton1Click:Connect(function()
-            selectedMacro = (selectedMacro==name) and nil or name
-            updateMacroSel()
-        end)
-    end
-    updateMacroSel()
-end
-
-createBtn.MouseButton1Click:Connect(function()
-    local n = nameBox.Text
-    if not n or n=="" then return notify("Type a macro name first", false) end
-    if macros[n] then return notify("Macro already exists", false) end
-    macros[n] = { events = {}, duration = 0 }
-    nameBox.Text = ""
-    selectedMacro = n
-    rebuildMacroList()
-    notify("Macro created: "..n, true)
-end)
-
--- __namecall hook (executor required)
-local hookOK = (typeof(hookmetamethod)=="function") and (typeof(getnamecallmethod)=="function")
-if hookOK then
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        local m = getnamecallmethod()
-        if recording and m == "FireServer" and selectedMacro and macros[selectedMacro] then
-            local ue, ae = UnitEvent(), AbilityEvent()
-            if self == ue or self == ae then
-                local args = {...}
-                table.insert(macros[selectedMacro].events, {
-                    t = os.clock() - recStart,
-                    remote = (self == ue) and "Unit" or "Ability",
-                    args = args,
-                })
-            end
-        end
-        return oldNamecall(self, ...)
-    end)
-end
-
-local recBtn  = btn(macroSec, "Start Recording", Color3.fromRGB(220,90,90), 6)
-local playBtn = btn(macroSec, "Play Macro",      C.GREEN, 7)
-local stopBtn = btn(macroSec, "Stop Playback",   Color3.fromRGB(120,120,140), 8)
-
-recBtn.MouseButton1Click:Connect(function()
-    if not hookOK then return notify("Executor lacks hookmetamethod", false) end
-    if not selectedMacro then return notify("Select or create a macro first", false) end
-    if not inGameMode() then return notify("Must be in a match to record", false) end
-    if recording then
-        recording = false
-        recBtn.Text = "Start Recording"
-        recBtn.BackgroundColor3 = Color3.fromRGB(220,90,90)
-        local mac = macros[selectedMacro]
-        if mac then mac.duration = os.clock() - recStart end
-        notify(("Recorded %d events"):format(mac and #mac.events or 0), true)
-        rebuildMacroList()
-    else
-        macros[selectedMacro].events = {}
-        recStart = os.clock()
-        recording = true
-        recBtn.Text = "Stop Recording"
-        recBtn.BackgroundColor3 = C.YELLOW
-        notify("Recording macro: "..selectedMacro, true)
-    end
-end)
-
-playBtn.MouseButton1Click:Connect(function()
-    if not selectedMacro or not macros[selectedMacro] then return notify("Select a macro", false) end
-    if not inGameMode() then return notify("Must be in a match to play a macro", false) end
-    if playing then return notify("Already playing", false) end
-    local mac = macros[selectedMacro]
-    if #mac.events == 0 then return notify("Macro is empty", false) end
-    playing = true
-    notify("Playing macro: "..selectedMacro, true)
-    task.spawn(function()
-        local t0 = os.clock()
-        for _,ev in ipairs(mac.events) do
-            if not playing then break end
-            local delay = ev.t - (os.clock() - t0)
-            if delay > 0 then task.wait(delay) end
-            if not playing then break end
-            local remote = (ev.remote == "Unit") and UnitEvent() or AbilityEvent()
-            if remote then pcall(function() remote:FireServer(table.unpack(ev.args)) end) end
-        end
-        playing = false
-        notify("Macro playback done", true)
-    end)
-end)
-
-stopBtn.MouseButton1Click:Connect(function()
-    if recording then
-        recording = false
-        recBtn.Text = "Start Recording"
-        recBtn.BackgroundColor3 = Color3.fromRGB(220,90,90)
-        local mac = macros[selectedMacro]
-        if mac then mac.duration = os.clock() - recStart end
-        rebuildMacroList()
-    end
-    if playing then playing = false; notify("Playback stopped", true) end
-end)
-
-rebuildMacroList()
 end
 
 -- ======================
