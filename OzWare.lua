@@ -44,7 +44,6 @@ local FONT_REG  = Enum.Font.Gotham
 -- ======================
 local function UnitEvent()   return Net:FindFirstChild("UnitEvent") end
 local function LobbyEvent()  return Net:FindFirstChild("LobbyEvent") end
-local function SummonEvent() local u = Net:FindFirstChild("Units")    return u and u:FindFirstChild("SummonEvent") end
 local function OdysseyNet()  local o = Net:FindFirstChild("Odyssey")  return o and o:FindFirstChild("Adventure") end
 local function AbilityEvent()return Net:FindFirstChild("AbilityEvent") end
 local function SkipWaveEvent()return Net:FindFirstChild("SkipWaveEvent") end
@@ -521,74 +520,40 @@ local lobbyPage = tabPages["Lobby"]
 local sumSec = section(lobbyPage, "Auto Summoner", 1)
 label(sumSec, "Loops summon using the game's own max/current currency handling.", 1)
 
--- Resolve a remote by a "/" path under ReplicatedStorage
-local function resolveRemote(path)
-    local node = RS
-    for part in string.gmatch(path, "[^/]+") do
-        if not node then return nil end
-        local nxt = node:FindFirstChild(part)
-        if not nxt then return nil end
-        node = nxt
-    end
-    return node
+-- Logger-confirmed signature (UPD 12.5):
+--   ALL banners use ONE remote: Networking/Units/SummonEvent
+--   SummonEvent:FireServer("SummonMany", bannerId, amount)
+--
+--   bannerId / amount confirmed from live captures:
+--     Selection       "Selection"       45
+--     Special         "Special"         45
+--     StandardMemoria "StandardMemoria" 47
+--     Spring26        "Spring26"        1
+--     Spring26Memoria "Spring26Memoria" 1
+
+local summonRemote = Net:WaitForChild("Units", 5) and Net.Units:WaitForChild("SummonEvent", 5)
+
+local function fireBanner(bannerId, amount)
+    if not summonRemote then return false end
+    return pcall(function()
+        summonRemote:FireServer("SummonMany", bannerId, amount)
+    end)
 end
 
-local function callRemote(remote, args)
-    if remote:IsA("RemoteFunction") then
-        return remote:InvokeServer(table.unpack(args))
-    end
-    return remote:FireServer(table.unpack(args))
-end
-
-local function tryRemoteCandidates(tag, remote, candidates)
-    for _,args in ipairs(candidates) do
-        local ok, result = pcall(function()
-            return callRemote(remote, args)
-        end)
-        if ok then
-            -- Stop immediately on first success — do NOT continue trying other
-            -- candidates. Continued firing of LobbyEvent with wrong-typed args
-            -- after a successful call corrupts the server's summon handler state.
-            return true, result
-        end
-        task.wait(0.05)
-    end
-    return false
-end
-
-local function fireBanner(name, path, bannerId, _amount, _isMemoria)
-    local remote, err = resolveRemote(path)
-    if not remote then return false end
-    if not remote:IsA("RemoteEvent") then return false end
-    local args = bannerId and { "SummonMany", bannerId } or { "SummonMany" }
-    local ok = pcall(function() remote:FireServer(table.unpack(args)) end)
-    return ok
-end
-
--- Confirmed remote paths from scanner sessions:
---   Selection  -> Networking.SummonSelectionEvent          (dedicated, no bannerId)
---   Special    -> Networking.Units.SummonIndexEvent        (dedicated, no bannerId)
---   Std Mem    -> Networking.Memorias.MemoriaSummonEvent   (dedicated, no bannerId)
---   Spring*    -> Networking.Units.SummonEvent + bannerId  (confirmed "Spring26"/"Spring26Memoria")
 local BANNERS = {
-    { name="Selection Banner",  call=function() return fireBanner("Selection Banner",  "Networking/SummonSelectionEvent",        nil,               nil, false) end },
-    { name="Special Banner",    call=function() return fireBanner("Special Banner",    "Networking/Units/SummonIndexEvent",      nil,               nil, false) end },
-    { name="Standard Memoria",  call=function() return fireBanner("Standard Memoria", "Networking/Memorias/MemoriaSummonEvent", nil,               nil, true ) end },
-    { name="Spring Banner",     call=function() return fireBanner("Spring Banner",     "Networking/Units/SummonEvent",           "Spring26",        nil, false) end },
-    { name="Spring Memoria",    call=function() return fireBanner("Spring Memoria",    "Networking/Units/SummonEvent",           "Spring26Memoria", nil, true ) end },
+    { name = "Selection",        id = "Selection",        amount = 45 },
+    { name = "Special",          id = "Special",          amount = 45 },
+    { name = "Standard Memoria", id = "StandardMemoria",  amount = 47 },
+    { name = "Spring Banner",    id = "Spring26",         amount = 1  },
+    { name = "Spring Memoria",   id = "Spring26Memoria",  amount = 1  },
 }
 
-for i,b in ipairs(BANNERS) do
-    -- Versioned save key prevents old broken saved toggles from auto-firing
-    -- immediately on execute after the remote signature changed.
-    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-recorder-v5:"..b.name)
+for i, b in ipairs(BANNERS) do
+    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-v7:"..b.id)
     task.spawn(function()
         while true do
-            -- Summon remotes are only valid from the lobby/summon screen.
-            -- inGameMode() returns true when a map/match is loaded, so we fire
-            -- only when that guard is FALSE (i.e. the player is in the lobby).
             if getOn() and not inGameMode() then
-                b.call()
+                fireBanner(b.id, b.amount)
             end
             task.wait(1.25)
         end
@@ -664,6 +629,23 @@ end
 -- ======================
 do
 local joinerPage = tabPages["Joiner"]
+
+-- Remote helpers (joiner only)
+local function callRemote(remote, args)
+    if remote:IsA("RemoteFunction") then
+        return remote:InvokeServer(table.unpack(args))
+    end
+    return remote:FireServer(table.unpack(args))
+end
+
+local function tryRemoteCandidates(tag, remote, candidates)
+    for _, args in ipairs(candidates) do
+        local ok, result = pcall(function() return callRemote(remote, args) end)
+        if ok then return true, result end
+        task.wait(0.05)
+    end
+    return false
+end
 
 -- Helper: build act lists of length n
 local function acts(n) local t={}; for i=1,n do t[i]="Act"..i end; return t end
@@ -775,18 +757,12 @@ joinBtn.MouseButton1Click:Connect(function()
 
         if getAutoStart() then
             task.wait(0.5)
-            -- Only attempt StartMatch once against dedicated remotes; do NOT
-            -- re-fire LobbyEvent with bad-typed candidates or it will crash the
-            -- server handler again.
+            -- Only fire a dedicated StartMatch/PlayMatch remote.
+            -- Do NOT fall back to LobbyEvent with string args — that remote
+            -- is shared with the summon handler and crashes it with wrong types.
             local sm = Net:FindFirstChild("StartMatch", true) or Net:FindFirstChild("PlayMatch", true)
             if sm and (sm:IsA("RemoteEvent") or sm:IsA("RemoteFunction")) then
                 pcall(function() callRemote(sm, {friendsOnly}) end)
-            else
-                tryRemoteCandidates("Start Match", LE, {
-                    {"StartMatch", friendsOnly},
-                    {"PlayMatch",  friendsOnly},
-                    {"Start",      friendsOnly},
-                })
             end
         end
     end, "Joining "..selType.." "..selStage.." "..selAct, "Join failed")
@@ -809,17 +785,6 @@ local statusBtn = btn(matchSec, "Update Match Status", Color3.fromRGB(60,100,200
 statusBtn.MouseButton1Click:Connect(function()
     if not inGameMode() then return notify("Must be in a match", false) end
     safeCall(function() Net.MatchStatusEvent:FireServer("UpdateStatus", 2) end, "Status updated", "Status failed")
-end)
-
-local _, getAutoSkipWave = toggle(matchSec, "Auto Skip Wave (loop)", 3, false)
-task.spawn(function()
-    while true do
-        task.wait(1.5)
-        if getAutoSkipWave() and inGameMode() then
-            local r = SkipWaveEvent()
-            if r then pcall(function() r:FireServer("Skip") end) end
-        end
-    end
 end)
 
 local unitSec = section(gamePage, "Unit Controls", 2)
@@ -985,96 +950,129 @@ task.spawn(function()
 end)
 
 -- ======================
--- UTILITY  (delete map / enemies, boost fps)
+-- UTILITY  (skip wave / delete map / enemies / fps boost)
+-- All of these fire ONCE when toggled ON. No loops.
 -- ======================
 local utilSec = section(gamePage, "Utility", 5)
 
-local _, getDeleteMap = toggle(utilSec, "Delete Map (hide terrain)", 1, false)
-task.spawn(function()
-    while true do
-        task.wait(2)
-        if getDeleteMap() and inGameMode() then
-            local m = getMapRoot()
-            if m then
-                for _,d in ipairs(m:GetDescendants()) do
-                    if d:IsA("BasePart") and d.Transparency < 1 then
-                        d.Transparency = 1
-                        if d.CanCollide then d.CanCollide = true end -- keep walkable
-                    elseif d:IsA("Decal") or d:IsA("Texture") then
-                        d.Transparency = 1
-                    end
-                end
-            end
-        end
+-- Skip Wave: single button, fires once
+local skipWaveBtn = btn(utilSec, "Skip Wave (once)", C.ACCENT, 1)
+skipWaveBtn.MouseButton1Click:Connect(function()
+    if not inGameMode() then return notify("Must be in a match", false) end
+    local r = Net:FindFirstChild("SkipWaveEvent")
+    if r and r:IsA("RemoteEvent") then
+        pcall(function() r:FireServer("Skip") end)
+        notify("Wave skipped", true)
+    else
+        notify("SkipWaveEvent not found", false)
     end
 end)
 
-local _, getDeleteEnemies = toggle(utilSec, "Delete Enemies (loop)", 2, false)
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        if getDeleteEnemies() and inGameMode() then
-            for _,folder in ipairs({"Enemies","Mobs","EnemiesFolder","Zombies"}) do
-                local f = workspace:FindFirstChild(folder)
-                if f then
-                    for _,e in ipairs(f:GetChildren()) do
-                        pcall(function() e:Destroy() end)
-                    end
-                end
+-- Delete Map: fires once on toggle-on, skips base/path/spawn parts
+-- Base template parts are anything named with: base, spawn, path, road, floor, ground
+local BASE_KEYWORDS = {"base","spawn","path","road","floor","ground","terrain","plate"}
+local function isBasePart(name)
+    local n = name:lower()
+    for _, kw in ipairs(BASE_KEYWORDS) do
+        if n:find(kw, 1, true) then return true end
+    end
+    return false
+end
+local mapDeleted = false
+local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures (once)", 2, false, "util.deletemap")
+onDeleteMap(function(on)
+    if not on then mapDeleted = false; return end
+    if mapDeleted then return end
+    if not inGameMode() then notify("Must be in a match", false); return end
+    local m = getMapRoot()
+    if not m then notify("Map not found", false); return end
+    mapDeleted = true
+    local count = 0
+    for _, d in ipairs(m:GetDescendants()) do
+        if not isBasePart(d.Name) then
+            if d:IsA("BasePart") and d.Transparency < 1 then
+                d.Transparency = 1
+                count = count + 1
+            elseif d:IsA("Decal") or d:IsA("Texture") or d:IsA("SpecialMesh") then
+                d.Transparency = 1
             end
         end
     end
+    notify(("Map: hid %d parts"):format(count), true)
 end)
 
+-- Delete Enemies: fires once on toggle-on, destroys permanently + watches for new ones
+local enemiesDeleted = false
+local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies (once)", 3, false, "util.deletenemies")
+onDeleteEnemies(function(on)
+    if not on then enemiesDeleted = false; return end
+    if enemiesDeleted then return end
+    if not inGameMode() then notify("Must be in a match", false); return end
+    enemiesDeleted = true
+    local count = 0
+    for _, folder in ipairs({"Enemies","Mobs","EnemiesFolder","Zombies"}) do
+        local f = workspace:FindFirstChild(folder)
+        if f then
+            for _, e in ipairs(f:GetChildren()) do
+                pcall(function() e:Destroy(); count = count + 1 end)
+            end
+            -- Destroy new enemies as they spawn
+            f.ChildAdded:Connect(function(child)
+                if getDeleteEnemies() then
+                    task.wait(0.05)
+                    pcall(function() child:Destroy() end)
+                end
+            end)
+        end
+    end
+    notify(("Deleted %d enemies"):format(count), true)
+end)
+
+-- FPS Boost: fires once on toggle-on, restores on toggle-off
 local fpsApplied = false
 local oldGfx = {}
-local _, getBoostFPS = toggle(utilSec, "Boost FPS (low graphics)", 3, false)
-task.spawn(function()
+local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS (once)", 4, false, "util.fpsbst")
+onBoostFPS(function(on)
     local Lighting = game:GetService("Lighting")
     local Terrain  = workspace:FindFirstChildOfClass("Terrain")
-    while true do
-        task.wait(1)
-        local shouldApply = getBoostFPS() and inGameMode()
-        if shouldApply and not fpsApplied then
-            fpsApplied = true
-            pcall(function()
-                oldGfx.GlobalShadows = Lighting.GlobalShadows
-                oldGfx.FogEnd = Lighting.FogEnd
-                oldGfx.Brightness = Lighting.Brightness
-                Lighting.GlobalShadows = false
-                Lighting.FogEnd = 1e9
-                for _,e in ipairs(Lighting:GetDescendants()) do
-                    if e:IsA("BloomEffect") or e:IsA("BlurEffect")
-                       or e:IsA("SunRaysEffect") or e:IsA("DepthOfFieldEffect")
-                       or e:IsA("ColorCorrectionEffect") then
-                        e.Enabled = false
-                    end
-                end
-                if Terrain then
-                    Terrain.WaterWaveSize = 0
-                    Terrain.WaterWaveSpeed = 0
-                    Terrain.WaterReflectance = 0
-                    Terrain.WaterTransparency = 1
-                end
-                settings().Rendering.QualityLevel = 1
-            end)
-            -- strip particles/trails from existing instances
-            for _,d in ipairs(workspace:GetDescendants()) do
-                if d:IsA("ParticleEmitter") or d:IsA("Trail")
-                   or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles") then
-                    d.Enabled = false
+    if on and not fpsApplied then
+        fpsApplied = true
+        pcall(function()
+            oldGfx.GlobalShadows = Lighting.GlobalShadows
+            oldGfx.FogEnd        = Lighting.FogEnd
+            oldGfx.Brightness    = Lighting.Brightness
+            Lighting.GlobalShadows = false
+            Lighting.FogEnd        = 1e9
+            for _, e in ipairs(Lighting:GetDescendants()) do
+                if e:IsA("BloomEffect") or e:IsA("BlurEffect")
+                or e:IsA("SunRaysEffect") or e:IsA("DepthOfFieldEffect")
+                or e:IsA("ColorCorrectionEffect") then
+                    e.Enabled = false
                 end
             end
-            notify("FPS Boost ON", true)
-        elseif (not shouldApply) and fpsApplied then
-            fpsApplied = false
-            pcall(function()
-                if oldGfx.GlobalShadows ~= nil then Lighting.GlobalShadows = oldGfx.GlobalShadows end
-                if oldGfx.FogEnd then Lighting.FogEnd = oldGfx.FogEnd end
-                if oldGfx.Brightness then Lighting.Brightness = oldGfx.Brightness end
-            end)
-            notify("FPS Boost OFF", true)
+            if Terrain then
+                Terrain.WaterWaveSize     = 0
+                Terrain.WaterWaveSpeed    = 0
+                Terrain.WaterReflectance  = 0
+                Terrain.WaterTransparency = 1
+            end
+            settings().Rendering.QualityLevel = 1
+        end)
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("ParticleEmitter") or d:IsA("Trail")
+            or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles") then
+                d.Enabled = false
+            end
         end
+        notify("FPS Boost ON", true)
+    elseif not on and fpsApplied then
+        fpsApplied = false
+        pcall(function()
+            if oldGfx.GlobalShadows ~= nil then Lighting.GlobalShadows = oldGfx.GlobalShadows end
+            if oldGfx.FogEnd        ~= nil then Lighting.FogEnd        = oldGfx.FogEnd        end
+            if oldGfx.Brightness    ~= nil then Lighting.Brightness    = oldGfx.Brightness    end
+        end)
+        notify("FPS Boost OFF", true)
     end
 end)
 
@@ -1270,7 +1268,37 @@ end
 -- ======================
 do
 local odysseyPage = tabPages["Odyssey"]
-local function getONet(name) return OdysseyNet() and OdysseyNet():FindFirstChild(name) end
+-- ======================
+-- Confirmed remote map (UPD 12.5):
+--   Networking.CardPickEvent                        "Pick"/n, "Skip"/0
+--   Networking.ShopEvent                            "Close"
+--   Networking.StageMechanics.OdysseyChest          "OpenChest", uuid
+--   Networking.MapEvent                             "RequestSnapshot"
+--   Networking.Odyssey.Adventure.VoteEvent          "Vote", nodeIndex  ← CONFIRMED
+-- ======================
+local _odyFolder  = Net:FindFirstChild("Odyssey")
+local _advFolder  = _odyFolder and _odyFolder:FindFirstChild("Adventure")
+local _stageMech  = Net:FindFirstChild("StageMechanics")
+
+local REMOTES = {
+    CardPickEvent = Net:FindFirstChild("CardPickEvent"),
+    ShopEvent     = Net:FindFirstChild("ShopEvent"),
+    MapEvent      = Net:FindFirstChild("MapEvent"),
+    OdysseyChest  = _stageMech and _stageMech:FindFirstChild("OdysseyChest"),
+    VoteEvent     = _advFolder  and _advFolder:FindFirstChild("VoteEvent"),
+}
+
+-- Lazy-resolve in case folders load after script start
+local function getONet(name)
+    if REMOTES[name] then return REMOTES[name] end
+    -- refresh folders and retry
+    _odyFolder = Net:FindFirstChild("Odyssey")
+    _advFolder = _odyFolder and _odyFolder:FindFirstChild("Adventure")
+    _stageMech = Net:FindFirstChild("StageMechanics")
+    REMOTES.OdysseyChest = _stageMech and _stageMech:FindFirstChild("OdysseyChest")
+    REMOTES.VoteEvent    = _advFolder  and _advFolder:FindFirstChild("VoteEvent")
+    return REMOTES[name]
+end
 
 -- --- Card discovery ---------------------------------------------------------
 -- Cards come from one of:
@@ -1541,19 +1569,11 @@ local function readOpenCardOptions()
 end
 
 local function closeMatchingUI(keywords)
-    for _,g in ipairs(playerGui:GetChildren()) do
-        if g ~= gui then  -- never touch OzWare's own GUI
-            local n = g.Name:lower()
-            local hit = false
-            for _,k in ipairs(keywords) do if n:find(k) then hit=true; break end end
-            if hit then
-                -- Safely hide the UI without firing any game button signals.
-                -- Firing firesignal on game close buttons can corrupt the game's
-                -- internal UI/button state and break manual summon/start buttons.
-                pcall(function() g.Enabled = false end)
-            end
-        end
-    end
+    -- NOTE: Do NOT set Enabled=false on game GUIs here.
+    -- The remote call already handles the server-side close.
+    -- Touching Enabled on game ScreenGuis breaks their internal
+    -- button signals and makes summon/mode buttons unresponsive.
+    -- This function is intentionally a no-op — kept for call-site compatibility.
 end
 
 -- Find narrow chest containers ONCE; never full-workspace scan in the hot loop.
@@ -1642,15 +1662,31 @@ local function chooseCardIndex(opts)
     return bestIdx, "basic"
 end
 
+-- requestNextRoom: votes for the first reachable node on the Odyssey Route Atlas.
+-- CONFIRMED: Networking.Odyssey.Adventure.VoteEvent:FireServer("Vote", nodeIndex)
+-- nodeIndex is the node number on the map (1-based). We request the snapshot first
+-- so the server knows we're ready, then vote for node 1 (first reachable path).
+-- If the run has multiple reachable nodes, the server accepts any valid index.
 local function requestNextRoom()
+    -- Skip any open card/unit-reward UI first
     local cardEv = getONet("CardPickEvent")
     if cardEv then pcall(function() cardEv:FireServer("Skip", 0) end) end
 
-    local roomEv = getONet("RoomEvent") or getONet("MapEvent") or getONet("AdventureEvent")
-    if roomEv then
-        pcall(function() roomEv:FireServer("Next") end)
-        pcall(function() roomEv:FireServer("NextRoom") end)
-        pcall(function() roomEv:FireServer("Continue") end)
+    -- Step 1: request map snapshot so server registers us as ready
+    local mapEv = getONet("MapEvent")
+    if mapEv then pcall(function() mapEv:FireServer("RequestSnapshot") end) end
+
+    task.wait(0.2)
+
+    -- Step 2: vote for first available node
+    -- CONFIRMED signature: VoteEvent:FireServer("Vote", nodeIndex)
+    -- The server logged nodeIndex=4 in testing — actual index depends on the map.
+    -- We try 1 first (most common first-path node), then fall back up to 5.
+    local voteEv = getONet("VoteEvent")
+    if not voteEv then return end
+    for _, idx in ipairs({1, 2, 3, 4, 5}) do
+        local ok = pcall(function() voteEv:FireServer("Vote", idx) end)
+        if ok then return end
     end
 end
 
@@ -1719,25 +1755,23 @@ do
     end)
 end
 
--- UI close loop: event-driven, only touches matching new children
+-- UI close loop: event-driven.
+-- We do NOT set Enabled=false on game GUIs — this breaks their internal
+-- button signals (summon UI, mode buttons all share the same handler chain).
+-- The shop/chest remotes already handle closing server-side.
+-- This listener is kept only to trigger requestNextRoom at the right moment.
 local function maybeCloseGui(g)
     if g == gui then return end
-    if not inGameMode() then return end  -- never touch game GUIs in the lobby
+    if not inGameMode() then return end
     local n = g.Name:lower()
-    -- Only act on GUIs whose names explicitly match chest or shop keywords,
-    -- and only when the corresponding auto-toggle is ON.
-    -- This prevents any unrelated game ScreenGui (summon UI, teleport UI, etc.)
-    -- from being accidentally disabled and breaking manual buttons.
     local isChest = n:find("treasure") or n:find("chest")
     local isShop  = n:find("shop")
     if isChest and getAutoCollectChests() then
-        pcall(function() g.Enabled = false end)
-        if getAutoNextRoom() then requestNextRoom() end
+        if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
         return
     end
     if isShop and getAutoSkipShop() then
-        pcall(function() g.Enabled = false end)
-        if getAutoNextRoom() then requestNextRoom() end
+        if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
         return
     end
 end
