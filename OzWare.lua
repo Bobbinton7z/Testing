@@ -42,10 +42,9 @@ local FONT_REG  = Enum.Font.Gotham
 -- ======================
 -- REMOTES
 -- ======================
-local function UnitEvent()   return Net:FindFirstChild("UnitEvent") end
-local function LobbyEvent()  return Net:FindFirstChild("LobbyEvent") end
-local function OdysseyNet()  local o = Net:FindFirstChild("Odyssey")  return o and o:FindFirstChild("Adventure") end
-local function AbilityEvent()return Net:FindFirstChild("AbilityEvent") end
+local function UnitEvent()    return Net:FindFirstChild("UnitEvent") end
+local function OdysseyNet()   local o = Net:FindFirstChild("Odyssey") return o and o:FindFirstChild("Adventure") end
+local function AbilityEvent() return Net:FindFirstChild("AbilityEvent") end
 local function SkipWaveEvent()return Net:FindFirstChild("SkipWaveEvent") end
 
 -- ======================
@@ -521,31 +520,42 @@ local sumSec = section(lobbyPage, "Auto Summoner", 1)
 label(sumSec, "Loops summon using the game's own max/current currency handling.", 1)
 
 -- Logger-confirmed signature (UPD 12.5):
---   ALL banners use ONE remote: Networking/Units/SummonEvent
+--   ALL banners use ONE remote: Networking.Units.SummonEvent
 --   SummonEvent:FireServer("SummonMany", bannerId, amount)
+--   amount = 50 for all banners — game uses max-pull and deducts from currency.
 --
---   bannerId / amount confirmed from live captures:
---     Selection       "Selection"       45
---     Special         "Special"         45
---     StandardMemoria "StandardMemoria" 47
---     Spring26        "Spring26"        1
---     Spring26Memoria "Spring26Memoria" 1
+--   bannerId confirmed from live captures:
+--     Selection       "Selection"
+--     Special         "Special"
+--     StandardMemoria "StandardMemoria"
+--     Spring26        "Spring26"
+--     Spring26Memoria "Spring26Memoria"
 
-local summonRemote = Net:WaitForChild("Units", 5) and Net.Units:WaitForChild("SummonEvent", 5)
+-- Lazy-resolved so a slow RS replication doesn't silently return nil at load time
+local function getSummonRemote()
+    local units = Net:FindFirstChild("Units")
+    return units and units:FindFirstChild("SummonEvent")
+end
 
-local function fireBanner(bannerId, amount)
-    if not summonRemote then return false end
+local function fireBanner(bannerId)
+    local remote = getSummonRemote()
+    if not remote then
+        notify("SummonEvent not found", false)
+        return false
+    end
+    -- amount=50: game accepts 50 as the max-pull value and deducts the correct
+    -- currency automatically, same as clicking the 10x/50x button manually.
     return pcall(function()
-        summonRemote:FireServer("SummonMany", bannerId, amount)
+        remote:FireServer("SummonMany", bannerId, 50)
     end)
 end
 
 local BANNERS = {
-    { name = "Selection",        id = "Selection",        amount = 45 },
-    { name = "Special",          id = "Special",          amount = 45 },
-    { name = "Standard Memoria", id = "StandardMemoria",  amount = 47 },
-    { name = "Spring Banner",    id = "Spring26",         amount = 1  },
-    { name = "Spring Memoria",   id = "Spring26Memoria",  amount = 1  },
+    { name = "Selection",        id = "Selection"        },
+    { name = "Special",          id = "Special"          },
+    { name = "Standard Memoria", id = "StandardMemoria"  },
+    { name = "Spring Banner",    id = "Spring26"         },
+    { name = "Spring Memoria",   id = "Spring26Memoria"  },
 }
 
 for i, b in ipairs(BANNERS) do
@@ -553,7 +563,7 @@ for i, b in ipairs(BANNERS) do
     task.spawn(function()
         while true do
             if getOn() and not inGameMode() then
-                fireBanner(b.id, b.amount)
+                fireBanner(b.id)
             end
             task.wait(1.25)
         end
@@ -629,23 +639,6 @@ end
 -- ======================
 do
 local joinerPage = tabPages["Joiner"]
-
--- Remote helpers (joiner only)
-local function callRemote(remote, args)
-    if remote:IsA("RemoteFunction") then
-        return remote:InvokeServer(table.unpack(args))
-    end
-    return remote:FireServer(table.unpack(args))
-end
-
-local function tryRemoteCandidates(tag, remote, candidates)
-    for _, args in ipairs(candidates) do
-        local ok, result = pcall(function() return callRemote(remote, args) end)
-        if ok then return true, result end
-        task.wait(0.05)
-    end
-    return false
-end
 
 -- Helper: build act lists of length n
 local function acts(n) local t={}; for i=1,n do t[i]="Act"..i end; return t end
@@ -734,8 +727,6 @@ local joinBtnSec = section(joinerPage, "", 3)
 local joinBtn = btn(joinBtnSec, "Join Match", C.GREEN, 1)
 joinBtn.MouseButton1Click:Connect(function()
     safeCall(function()
-        local LE = LobbyEvent()
-        if not LE then error("LobbyEvent not found") end
         local friendsOnly = getFriendsOnly()
         local payload = {
             Difficulty  = getNightmare() and "Nightmare" or "Normal",
@@ -745,24 +736,35 @@ joinBtn.MouseButton1Click:Connect(function()
             FriendsOnly = friendsOnly,
         }
 
-        -- Only fire candidates where the second argument is a bool, never a raw
-        -- Dictionary. Passing a Dictionary as arg 2 to LobbyEvent causes the
-        -- server's SummonButtonsHandler to throw "Unable to cast string to bool"
-        -- which breaks the game's own summon UI buttons for the rest of the session.
-        tryRemoteCandidates("Join Match", LE, {
-            {"AddMatch",    friendsOnly, payload},
-            {"CreateMatch", friendsOnly, payload},
-            {"JoinMatch",   friendsOnly, payload},
-        })
+        -- IMPORTANT: Do NOT use LobbyEvent here.
+        -- LobbyEvent is shared with SummonButtonsHandler on the server.
+        -- Firing it with string args crashes the summon UI for the entire session.
+        -- Instead look for dedicated join remotes only.
+        local joinRemoteNames = {"JoinMatch","CreateMatch","AddMatch","MatchEvent","LobbyMatchEvent"}
+        local fired = false
+        for _, name in ipairs(joinRemoteNames) do
+            local r = Net:FindFirstChild(name) or Net:FindFirstChild(name, true)
+            if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
+                local ok = pcall(function()
+                    if r:IsA("RemoteFunction") then
+                        r:InvokeServer(friendsOnly, payload)
+                    else
+                        r:FireServer(friendsOnly, payload)
+                    end
+                end)
+                if ok then fired = true; break end
+            end
+        end
+        if not fired then error("No join remote found") end
 
         if getAutoStart() then
             task.wait(0.5)
-            -- Only fire a dedicated StartMatch/PlayMatch remote.
-            -- Do NOT fall back to LobbyEvent with string args — that remote
-            -- is shared with the summon handler and crashes it with wrong types.
             local sm = Net:FindFirstChild("StartMatch", true) or Net:FindFirstChild("PlayMatch", true)
             if sm and (sm:IsA("RemoteEvent") or sm:IsA("RemoteFunction")) then
-                pcall(function() callRemote(sm, {friendsOnly}) end)
+                pcall(function()
+                    if sm:IsA("RemoteFunction") then sm:InvokeServer(friendsOnly)
+                    else sm:FireServer(friendsOnly) end
+                end)
             end
         end
     end, "Joining "..selType.." "..selStage.." "..selAct, "Join failed")
