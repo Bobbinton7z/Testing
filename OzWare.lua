@@ -56,12 +56,32 @@ local function getMapRoot()
         or workspace:FindFirstChild("Stage")
 end
 
-local function inGameMode()
-    if getMapRoot() then return true end
-    for _, name in ipairs({"OdysseyRoom","AdventureRoom","Adventure",
-                            "OdysseyMap","AdventureMap","Stage","Match"}) do
+local function isOdysseyMode()
+    -- Odyssey/Adventure runs use these workspace containers
+    for _, name in ipairs({
+        "OdysseyRoom","AdventureRoom","Adventure","OdysseyMap",
+        "AdventureMap","AdventureHolder","OdysseyHolder",
+        "Odyssey","OdysseyStage","AdventureStage",
+    }) do
         if workspace:FindFirstChild(name) then return true end
     end
+    -- Also check if any of the Odyssey remotes are actively resolving
+    -- (VoteEvent only exists during an Odyssey run in some games)
+    local ody = game:GetService("ReplicatedStorage"):FindFirstChild("Networking")
+    local advFolder = ody and ody:FindFirstChild("Odyssey") and ody:FindFirstChild("Odyssey"):FindFirstChild("Adventure")
+    if advFolder and advFolder:FindFirstChild("VoteEvent") then
+        -- VoteEvent exists — we're likely in an Odyssey context
+        -- but only count it if we're not in the lobby (no summon screen)
+        if not workspace:FindFirstChild("Lobby") and not workspace:FindFirstChild("LobbyMap") then
+            return true
+        end
+    end
+    return false
+end
+
+local function inGameMode()
+    if getMapRoot() then return true end
+    if isOdysseyMode() then return true end
     return false
 end
 
@@ -1330,17 +1350,19 @@ local function requestNextRoom()
 end
 
 
--- Card pick loop: choose basic/highest-rarity cards, with optional Ragnaw unit-card priority.
--- Uses a Heartbeat connection instead of a while-true loop so it never blocks other coroutines.
+-- Card pick loop
 do
-    local cardClock = 0
+    local cardClock   = 0
+    local nextRoomClock = 0
     RunSvc.Heartbeat:Connect(function()
         if os.clock() - cardClock < 1 then return end
         cardClock = os.clock()
         if not inGameMode() then return end
         if not (getAutoPick() or getAutoRagnawCards() or getAutoNextRoom()) then return end
+
         local ok, opts = pcall(readOpenCardOptions)
-        if ok and opts then
+        if ok and opts and #opts > 0 then
+            -- Cards are visible — pick or skip
             local chosenIdx, reason = chooseCardIndex(opts)
             if chosenIdx then
                 pickIndex(opts, chosenIdx)
@@ -1350,14 +1372,18 @@ do
                     ragnawPickCount = math.min(4, ragnawPickCount + 1)
                 end
             elseif reason == "skip-unit" then
-                local cardEv = getONet("CardPickEvent")
-                if cardEv then pcall(function() cardEv:FireServer("Skip", 0) end) end
-                if getAutoNextRoom() then requestNextRoom() end
-            elseif getAutoNextRoom() then
+                skipCards()
+            end
+            -- Reset next-room clock after any card action so we don't
+            -- fire VoteEvent immediately after picking
+            nextRoomClock = os.clock()
+        elseif getAutoNextRoom() then
+            -- No cards visible — try to advance to next room,
+            -- but only once every 5s to avoid spamming VoteEvent mid-wave
+            if os.clock() - nextRoomClock >= 5 then
+                nextRoomClock = os.clock()
                 requestNextRoom()
             end
-        elseif getAutoNextRoom() then
-            requestNextRoom()
         end
     end)
 end
