@@ -1089,8 +1089,8 @@ local _, getAutoPick           = toggle(autoSec, "Auto select cards", 3, true, "
 label(autoSec, "Will select basic cards and prioritize the highest rarity", 4)
 local _, getAutoRagnawCards    = toggle(autoSec, "Auto Select Unit Cards (Ragnaw Only)", 5, false, "odyssey.auto_ragnaw_unit_cards")
 label(autoSec, "Will select 4 cards that pair good with Ragnaw", 6)
-local _, getAutoSkipShop       = toggle(autoSec, "Auto skip shop", 7, false, "odyssey.auto_skip_shop.v2_safe")
-label(autoSec, "Will close shop UI; pair this with Auto Next Room", 8)
+local _, getAutoSkipShop       = toggle(autoSec, "Auto skip shop (advance past floor)", 7, false, "odyssey.auto_skip_shop.v2_safe")
+label(autoSec, "Shop floors have no GUI — enabling this with Auto Next Room skips past them", 8)
 local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect chest", 9, false, "odyssey.auto_collect_chest.v2_safe")
 label(autoSec, "Will collect chests and close the treasure UI; pair this with Auto Next Room", 10)
 
@@ -1205,25 +1205,6 @@ local function skipCards()
 end
 
 
--- Find narrow chest containers
-local CHEST_FOLDER_NAMES = {"Chests","OdysseyChests","Odyssey","AdventureChests","Adventure"}
-local function getChestRoots()
-    local roots = {}
-    for _, name in ipairs(CHEST_FOLDER_NAMES) do
-        local w = workspace:FindFirstChild(name)
-        if w then table.insert(roots, w) end
-    end
-    return roots
-end
-local openedChests = {}
-local UUID_PAT = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
-local function fireChest(chestRemote, uuid)
-    if not uuid or openedChests[uuid] then return end
-    if typeof(uuid) ~= "string" or not uuid:match(UUID_PAT) then return end
-    openedChests[uuid] = true
-    pcall(function() chestRemote:FireServer("OpenChest", uuid) end)
-end
-
 local RARITY_SCORE = {
     common=1, uncommon=2, rare=3, epic=4, legendary=5, mythic=6, mythical=6, secret=7, celestial=8, divine=9
 }
@@ -1273,133 +1254,218 @@ local function chooseCardIndex(opts)
     return bestIdx, "basic"
 end
 
--- Find the current open card-pick UI — confirmed name: CardPickPanel
--- CardPickEvent("Pick", index) — index is 1-based position of the card
+-- ── Card UI detection ───────────────────────────────────────────
+-- CONFIRMED from logger: card names are in TextLabels with Name="ModifierTitle"
+-- inside a parent Frame named "Main". Cards appear left-to-right = index 1,2,3.
+-- Basic card UI:     title "Choose a basic card",     buttons: Reroll, Skip
+-- Character card UI: title "Choose a character-specific card", buttons: Confirm Choice, Skip
+-- Both use CardPickEvent:FireServer("Pick", index) and ("Skip", 0)
+
 local function readOpenCardOptions()
-    -- Try confirmed name first, then fallback pattern
-    local targets = {}
     for _, g in ipairs(playerGui:GetChildren()) do
-        local n = g.Name
-        local ln = n:lower()
-        if n == "CardPickPanel" or ln:find("cardpick") or ln:find("card_pick") then
-            table.insert(targets, g)
-        end
-    end
-    -- Also check UnitRewardPanel (same remote, different UI)
-    for _, g in ipairs(playerGui:GetChildren()) do
-        if g.Name == "UnitRewardPanel" or g.Name:lower():find("unitreward") then
-            table.insert(targets, g)
-        end
-    end
+        if g == gui then continue end
+        if not g:IsA("ScreenGui") then continue end
 
-    for _, g in ipairs(targets) do
-        if g.Enabled == false then continue end
-        -- Collect all TextLabels that look like card names
-        -- In CardPickPanel the cards are typically in frames named Option1/2/3
-        -- or direct children of the panel
+        -- Find all ModifierTitle labels — these are the card names
+        local cards = {}
+        for _, d in ipairs(g:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Name == "ModifierTitle" then
+                local t = d.Text
+                if t and #t > 1 then
+                    table.insert(cards, {
+                        text = t,
+                        x    = d.AbsolutePosition.X,
+                    })
+                end
+            end
+        end
+
+        if #cards == 0 then continue end
+
+        -- Also verify this GUI has a Skip button so we don't
+        -- accidentally match other UIs that use ModifierTitle
+        local hasSkip = false
+        for _, d in ipairs(g:GetDescendants()) do
+            if (d:IsA("TextButton") or d:IsA("TextLabel"))
+            and d.Text and d.Text:lower() == "skip" then
+                hasSkip = true; break
+            end
+        end
+        if not hasSkip then continue end
+
+        -- Sort left-to-right to get correct 1/2/3 index order
+        table.sort(cards, function(a, b) return a.x < b.x end)
+
         local opts = {}
-        local optFrames = {}
-
-        -- Strategy 1: look for Option1, Option2, Option3 frames
-        for i = 1, 6 do
-            local f = g:FindFirstChild("Option"..i, true)
-                   or g:FindFirstChild("Card"..i, true)
-                   or g:FindFirstChild("Choice"..i, true)
-            if f then
-                optFrames[i] = f
-                -- Get the name label inside
-                for _, d in ipairs(f:GetDescendants()) do
-                    if d:IsA("TextLabel") and d.Text and #d.Text > 2 and #d.Text < 60 then
-                        opts[i] = d.Text
-                        break
-                    end
-                end
-            end
+        for _, c in ipairs(cards) do
+            table.insert(opts, c.text)
         end
-
-        -- Strategy 2: if no numbered frames found, collect all text labels
-        if #opts == 0 then
-            for _, d in ipairs(g:GetDescendants()) do
-                if d:IsA("TextLabel") and d.Text and #d.Text > 2 and #d.Text < 60
-                and not d.Text:find("^%d+$") -- skip pure numbers
-                and not d.Text:lower():find("skip")
-                and not d.Text:lower():find("choose")
-                and not d.Text:lower():find("select") then
-                    table.insert(opts, d.Text)
-                end
-            end
-        end
-
-        if #opts > 0 then return opts end
+        return opts
     end
     return nil
 end
 
--- Shop handler: fires ShopEvent("Close") when shop GUI appears
--- Event-driven via playerGui.ChildAdded — fires once per shop appearance
-playerGui.ChildAdded:Connect(function(g)
-    task.wait(0.2)
-    if not inGameMode() then return end
-    local n = g.Name
-    local ln = n:lower()
-
-    -- Shop
-    if (n == "ShopPanel" or ln:find("shop")) and getAutoSkipShop() then
-        local shopEv = getONet("ShopEvent")
-        if shopEv then pcall(function() shopEv:FireServer("Close") end) end
-        return
-    end
-
-    -- Treasure/Chest UI — close it and collect
-    if (n == "TreasurePanel" or ln:find("treasure") or ln:find("chest")) and getAutoCollectChests() then
-        -- Chest collection fires from workspace scan, not from GUI
-        -- Just close the UI by doing nothing (chest remote handles it server-side)
-        return
-    end
-end)
-
--- Chest handler: scans workspace for chest instances every 2s
-do
-    local chestClock = 0
-    RunSvc.Heartbeat:Connect(function()
-        if os.clock() - chestClock < 2 then return end
-        chestClock = os.clock()
-        if not inGameMode() then return end
-        if not getAutoCollectChests() then return end
-        local sm = Net:FindFirstChild("StageMechanics")
-        local chestRemote = sm and sm:FindFirstChild("OdysseyChest")
-        if not chestRemote then return end
-        for _, root in ipairs(getChestRoots()) do
-            for _, inst in ipairs(root:GetChildren()) do
-                fireChest(chestRemote, inst.Name)
-                fireChest(chestRemote, inst:GetAttribute("UUID"))
-                fireChest(chestRemote, inst:GetAttribute("Id"))
-                fireChest(chestRemote, inst:GetAttribute("ChestId"))
+-- ── Shop UI detection ────────────────────────────────────────────
+-- CONFIRMED: "Stitches' Shop" — small floating panel, not fullscreen
+-- Has items with ModifierTitle labels, a red X close button, Reroll button
+-- Close = click the X ImageButton/TextButton in the GUI
+-- We fire ShopEvent("Close") AND click the X button to be safe
+local function closeShopGui()
+    for _, g in ipairs(playerGui:GetChildren()) do
+        if g == gui then continue end
+        if not g:IsA("ScreenGui") then continue end
+        -- Detect by "Stitches' Shop" title or "Odyssey Coins" label
+        local isShop = false
+        for _, d in ipairs(g:GetDescendants()) do
+            if d:IsA("TextLabel") and (
+                d.Text == "Stitches' Shop" or
+                d.Text:find("Stitches") or
+                d.Text == "Odyssey Coins"
+            ) then
+                isShop = true; break
             end
         end
-    end)
+        if not isShop then continue end
+
+        -- Fire ShopEvent close
+        local shopEv = getONet("ShopEvent")
+        if shopEv then pcall(function() shopEv:FireServer("Close") end) end
+
+        -- Also simulate the X button click
+        for _, d in ipairs(g:GetDescendants()) do
+            if (d:IsA("TextButton") or d:IsA("ImageButton")) then
+                local t = (d.Text or ""):lower()
+                local n = d.Name:lower()
+                if t == "x" or t == "×" or t == "close"
+                or n == "close" or n == "exitbutton" or n == "closebutton"
+                or n == "x" then
+                    pcall(function() d.MouseButton1Click:Fire() end)
+                    break
+                end
+            end
+        end
+        return true
+    end
+    return false
 end
 
--- requestNextRoom: votes for the next floor.
--- CONFIRMED: Networking.Odyssey.Adventure.VoteEvent:FireServer("Vote", nodeIndex)
--- Only fires after wave end — guarded by the card loop (no cards visible = wave done)
+-- ── Treasure Room detection ──────────────────────────────────────
+-- CONFIRMED: "Treasure Room" GUI with subtitle "Open every chest for rewards!"
+-- Chests spawn around the map world — 6 total per room
+-- We scan workspace for chest models and fire OdysseyChest remote
+-- Also click the X to close the informational GUI
+local openedChests = {}
+local function collectAndCloseTreasure()
+    -- Close the Treasure Room info GUI via its X button
+    for _, g in ipairs(playerGui:GetChildren()) do
+        if g == gui then continue end
+        if not g:IsA("ScreenGui") then continue end
+        local isTreasure = false
+        for _, d in ipairs(g:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Text == "Treasure Room" then
+                isTreasure = true; break
+            end
+        end
+        if isTreasure then
+            for _, d in ipairs(g:GetDescendants()) do
+                if (d:IsA("TextButton") or d:IsA("ImageButton")) then
+                    local n = d.Name:lower()
+                    local t = (d.Text or ""):lower()
+                    if t == "x" or t == "×" or n == "close"
+                    or n == "exitbutton" or n == "closebutton" or n == "x" then
+                        pcall(function() d.MouseButton1Click:Fire() end)
+                        break
+                    end
+                end
+            end
+            break
+        end
+    end
+
+    -- Scan workspace for chest models — they spawn near the player
+    local chestRemote = getONet("OdysseyChest")
+    if not chestRemote then return end
+
+    local function tryOpen(inst)
+        -- Try every attribute that might be a chest UUID
+        for _, attr in ipairs({"UUID","Id","ChestId","Uuid","ID"}) do
+            local v = inst:GetAttribute(attr)
+            if v and typeof(v)=="string" and not openedChests[v] then
+                openedChests[v] = true
+                pcall(function() chestRemote:FireServer("OpenChest", v) end)
+            end
+        end
+        -- Also try the instance Name if it looks like a UUID or ID
+        local n = inst.Name
+        if n and not openedChests[n] and (n:find("-") or tonumber(n)) then
+            openedChests[n] = true
+            pcall(function() chestRemote:FireServer("OpenChest", n) end)
+        end
+    end
+
+    -- Scan all likely containers
+    for _, fname in ipairs({"Chests","OdysseyChests","TreasureChests","Treasure",
+                             "Adventure","Odyssey","Map","MapHolder"}) do
+        local f = workspace:FindFirstChild(fname)
+        if f then
+            for _, child in ipairs(f:GetChildren()) do tryOpen(child) end
+            -- One level deeper
+            for _, child in ipairs(f:GetDescendants()) do
+                if child:IsA("Model") or child:IsA("Part") then
+                    tryOpen(child)
+                end
+            end
+        end
+    end
+end
+
+-- ── requestNextRoom ──────────────────────────────────────────────
+-- MUST be defined before ChildAdded and the card loop use it
 local function requestNextRoom()
     local mapEv = getONet("MapEvent")
     if mapEv then pcall(function() mapEv:FireServer("RequestSnapshot") end) end
     task.wait(0.3)
     local voteEv = getONet("VoteEvent")
     if not voteEv then return end
-    -- Fire all valid indices — server will only act on reachable ones
-    -- We don't stop on first pcall success since pcall is always true for FireServer
     for _, idx in ipairs({1, 2, 3, 4, 5}) do
         pcall(function() voteEv:FireServer("Vote", idx) end)
         task.wait(0.05)
     end
 end
 
--- Card pick loop — 1s cadence
+-- ── Event-driven GUI handler ─────────────────────────────────────
+playerGui.ChildAdded:Connect(function(g)
+    task.wait(0.5)
+    if not inGameMode() then return end
+    if not g:IsA("ScreenGui") or g == gui then return end
+
+    -- Check for Treasure Room
+    for _, d in ipairs(g:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Text == "Treasure Room" then
+            if getAutoCollectChests() then
+                task.wait(0.5)
+                collectAndCloseTreasure()
+                if getAutoNextRoom() then task.wait(1); requestNextRoom() end
+            end
+            return
+        end
+    end
+
+    -- Check for Shop
+    for _, d in ipairs(g:GetDescendants()) do
+        if d:IsA("TextLabel") and (d.Text == "Stitches' Shop" or d.Text:find("Stitches")) then
+            if getAutoSkipShop() then
+                closeShopGui()
+                if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
+            end
+            return
+        end
+    end
+end)
+
+-- ── Card pick + Auto Next Room loop ──────────────────────────────
 do
-    local cardClock    = 0
+    local cardClock     = 0
     local nextRoomClock = 0
     RunSvc.Heartbeat:Connect(function()
         if os.clock() - cardClock < 1 then return end
@@ -1419,7 +1485,7 @@ do
             elseif reason == "skip-unit" then
                 skipCards()
             end
-            nextRoomClock = os.clock() + 2 -- hold off room advance after card pick
+            nextRoomClock = os.clock() + 2
         elseif getAutoNextRoom() then
             if os.clock() - nextRoomClock >= 5 then
                 nextRoomClock = os.clock()
