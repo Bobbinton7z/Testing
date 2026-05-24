@@ -1011,15 +1011,11 @@ local function tryFindCardsFolder()
     return nil
 end
 
--- Heuristic: any card whose name contains a unit name OR has UnitName attribute = unit-specific
+-- classifyCard: "generic" = basic card (single tap), "unit" = character card (double tap)
+-- Uses the confirmed BASIC_CARDS list — no guesswork needed
 local function classifyCard(name, obj)
-    local n = (name or ""):lower()
-    if obj and obj:GetAttribute("UnitName") then return "unit" end
-    -- typical unit-specific keywords (game-tunable)
-    for _,k in ipairs({"unit","goku","luffy","naruto","saitama","ichigo","gojo","sukuna","tanjiro","sasuke","vegeta"}) do
-        if n:find(k, 1, true) then return "unit" end
-    end
-    return "generic"
+    if not name or name == "" then return "generic" end
+    return isBasicCard(name) and "generic" or "unit"
 end
 
 local discoveredCards = { generic = {}, unit = {} }
@@ -1224,29 +1220,23 @@ local function isMaxedUnitCard(cardName)
     return false
 end
 
--- Detect if the current card GUI is character-specific (needs double-tap to confirm)
--- Character-specific UI has "Confirm Choice" button; basic UI has "Reroll"
-local function isUnitCardGui()
-    for _, g in ipairs(playerGui:GetChildren()) do
-        if g == gui or not g:IsA("ScreenGui") then continue end
-        for _, d in ipairs(g:GetDescendants()) do
-            if (d:IsA("TextButton") or d:IsA("TextLabel"))
-            and d.Text and d.Text:lower():find("confirm") then
-                return true
-            end
-        end
+-- isUnitCardGui: true if any of the visible card options are NOT basic cards
+-- (character-specific cards need double-fire to confirm)
+local function isUnitCardPick(opts)
+    if not opts then return false end
+    for _, name in ipairs(opts) do
+        if not isBasicCard(name) then return true end
     end
     return false
 end
 
-local function pickIndex(cards, indexHint)
+local function pickIndex(opts, indexHint)
     local ev = getONet("CardPickEvent")
     if not ev then return false end
     local idx = indexHint or 1
     pcall(function() ev:FireServer("Pick", idx) end)
-    -- Unit/character cards require a second "Pick" to confirm
-    -- (equivalent to double-tapping the card)
-    if isUnitCardGui() then
+    -- Character-specific cards need a second Pick to confirm (double-tap)
+    if isUnitCardPick(opts) then
         task.wait(0.3)
         pcall(function() ev:FireServer("Pick", idx) end)
     end
@@ -1261,8 +1251,31 @@ end
 
 
 local RARITY_SCORE = {
-    common=1, uncommon=2, rare=3, epic=4, legendary=5, mythic=6, mythical=6, secret=7, celestial=8, divine=9
+    common=1, uncommon=2, rare=3, epic=4, legendary=5,
+    mythic=6, mythical=6, secret=7, celestial=8, divine=9
 }
+
+-- All confirmed basic card names (from OdysseyCardIcons module, UPD 12.5)
+-- If a card name is in this set it's a BASIC card → single CardPickEvent("Pick", idx)
+-- If it's NOT in this set it's a CHARACTER card → double-fire to confirm
+local BASIC_CARDS = {
+    ["Adrenaline Shot"]=true, ["Serrated Tips"]=true, ["Boxing Gloves"]=true,
+    ["Precision Optics"]=true, ["Ambush"]=true, ["Essence Collector"]=true,
+    ["Concussive Blast"]=true, ["Slayer Rounds"]=true, ["Military Training"]=true,
+    ["Painful Gains"]=true, ["Volatile Demise"]=true, ["Infection"]=true,
+    ["Base Shield"]=true, ["Battle Frenzy"]=true, ["Treasure Map Fragment"]=true,
+    ["Quick Charge"]=true, ["Potent Toxins"]=true, ["Numbing Agent"]=true,
+    ["Extended Duration"]=true, ["The Best Defense\226\128\166"]=true,
+    ["The Best Defense..."]=true, -- display alias (ellipsis may render differently)
+    ["Resource Overflow"]=true, ["Delicate Flower"]=true, ["Affinity"]=true,
+    ["Double Tap"]=true, ["Unstoppable Force"]=true, ["Spoils of War"]=true,
+    ["Limit Break"]=true, ["Golden Age"]=true, ["Crippling Field"]=true,
+    ["Luckcatcher"]=true,
+}
+
+local function isBasicCard(name)
+    return BASIC_CARDS[name] == true
+end
 local RAGNAW_TARGET_CARDS = {
     ["rageful arrival"]        = true, ["legendaryplacementdamage"]  = true,
     ["elite conquest"]         = true, ["legendaryeliteplacement"]   = true,
@@ -1486,8 +1499,7 @@ do
             elseif reason == "skip-unit" then
                 skipCards()
             end
-            nextRoomClock = os.clock() + 2
-        elseif getAutoNextRoom() then
+            nextRoomClock = os.clock() + 2        elseif getAutoNextRoom() then
             if os.clock() - nextRoomClock >= 5 then
                 nextRoomClock = os.clock()
                 requestNextRoom()
