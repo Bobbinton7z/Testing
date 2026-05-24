@@ -951,10 +951,9 @@ local function refreshRemotes()
         REMOTES.CardPickEvent   = _advFolder:FindFirstChild("CardPickEvent")
         REMOTES.ShopEvent       = _advFolder:FindFirstChild("ShopEvent")
         REMOTES.TreasureEvent   = _advFolder:FindFirstChild("TreasureEvent")
-        REMOTES.BossRewardEvent = _advFolder:FindFirstChild("BossRewardEvent")
         REMOTES.VoteEvent       = _advFolder:FindFirstChild("VoteEvent")
         REMOTES.MapEvent        = _advFolder:FindFirstChild("MapEvent")
-            or Net:FindFirstChild("MapEvent") -- fallback to top-level
+            or Net:FindFirstChild("MapEvent")
     end
     if _stageMech then
         REMOTES.OdysseyChest = _stageMech:FindFirstChild("OdysseyChest")
@@ -962,10 +961,35 @@ local function refreshRemotes()
 end
 refreshRemotes()
 
+-- Clear REMOTES cache on respawn/teleport so they re-resolve for the next run
+game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
+    for k in pairs(REMOTES) do REMOTES[k] = nil end
+    task.wait(3); refreshRemotes()
+end)
+
 local function getONet(name)
+    -- If the remote is already cached, return it
     if REMOTES[name] then return REMOTES[name] end
+    -- Adventure folder only exists during a run — refresh every time we miss
     refreshRemotes()
     return REMOTES[name]
+end
+
+-- Re-resolve remotes when a new child appears under Networking
+-- (Adventure folder is added when the player enters a run)
+Net.ChildAdded:Connect(function()
+    refreshRemotes()
+end)
+local odyF = Net:FindFirstChild("Odyssey")
+if odyF then
+    odyF.ChildAdded:Connect(function() refreshRemotes() end)
+else
+    Net.ChildAdded:Connect(function(c)
+        if c.Name == "Odyssey" then
+            refreshRemotes()
+            c.ChildAdded:Connect(function() refreshRemotes() end)
+        end
+    end)
 end
 
 -- --- Card discovery ---------------------------------------------------------
@@ -1392,35 +1416,6 @@ local function collectAndCloseTreasure()
         end
     end
 end
-
--- ── Boss / Elite Reward ──────────────────────────────────────────
--- CONFIRMED: Networking.Odyssey.Adventure.BossRewardEvent
--- After clearing an elite room, a UI shows 3 unit choices + Skip.
--- Same ModifierTitle pattern as cards. We skip by default (don't
--- want random units) unless Ragnaw mode is on and a target is present.
-local function handleBossReward(opts)
-    local bossEv = getONet("BossRewardEvent")
-    if not bossEv then return end
-    if getAutoRagnawCards() and ragnawPickCount < 4 then
-        local bestIdx
-        for i, name in ipairs(opts or {}) do
-            if isRagnawTargetCard(name) and not ragnawPickedThisRun[name] then
-                bestIdx = i; break
-            end
-        end
-        if bestIdx then
-            -- Double-fire to confirm unit selection
-            pcall(function() bossEv:FireServer("Pick", bestIdx) end)
-            task.wait(0.3)
-            pcall(function() bossEv:FireServer("Pick", bestIdx) end)
-            ragnawPickCount = math.min(4, ragnawPickCount + 1)
-            return
-        end
-    end
-    -- Default: skip
-    pcall(function() bossEv:FireServer("Skip", 0) end)
-end
-
 -- ── requestNextRoom ──────────────────────────────────────────────
 -- MUST be defined before ChildAdded and the card loop use it
 local function requestNextRoom()
@@ -1469,45 +1464,16 @@ playerGui.ChildAdded:Connect(function(g)
     end
 end)
 
--- ── Card pick + Boss Reward + Auto Next Room loop ────────────────
+-- ── Card pick + Auto Next Room loop ────────────────────────────
 do
     local cardClock     = 0
     local nextRoomClock = 0
-    local lastBossCheck = 0
     RunSvc.Heartbeat:Connect(function()
         if os.clock() - cardClock < 1 then return end
         cardClock = os.clock()
         if not inGameMode() then return end
         if not (getAutoPick() or getAutoRagnawCards() or getAutoNextRoom()) then return end
 
-        -- Check for boss/elite reward GUI (has Skip + ModifierTitle but uses BossRewardEvent)
-        -- Detect by presence of "BossReward"-named GUI or unit-card UI with no "Reroll"
-        if os.clock() - lastBossCheck >= 2 then
-            lastBossCheck = os.clock()
-            for _, g in ipairs(playerGui:GetChildren()) do
-                if g == gui or not g:IsA("ScreenGui") then continue end
-                local hasMod, hasSkip, hasReroll, hasConfirm = false, false, false, false
-                for _, d in ipairs(g:GetDescendants()) do
-                    if d:IsA("TextLabel") and d.Name == "ModifierTitle" then hasMod = true end
-                    if (d:IsA("TextButton") or d:IsA("TextLabel")) and d.Text then
-                        local tl = d.Text:lower()
-                        if tl == "skip" then hasSkip = true end
-                        if tl:find("reroll") then hasReroll = true end
-                        if tl:find("confirm") then hasConfirm = true end
-                    end
-                end
-                -- Boss reward: has ModifierTitle + Skip, NO Reroll, NO Confirm Choice
-                -- (it's a unit-pick UI that uses BossRewardEvent not CardPickEvent)
-                if hasMod and hasSkip and not hasReroll and not hasConfirm then
-                    local opts = readOpenCardOptions()
-                    handleBossReward(opts)
-                    nextRoomClock = os.clock() + 2
-                    break
-                end
-            end
-        end
-
-        -- Regular card pick
         local ok, opts = pcall(readOpenCardOptions)
         if ok and opts and #opts > 0 then
             local chosenIdx, reason = chooseCardIndex(opts)
