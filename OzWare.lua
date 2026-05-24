@@ -1204,46 +1204,14 @@ local function skipCards()
     pcall(function() ev:FireServer("Skip", 0) end)
 end
 
--- Find the current open card-pick UI and scrape option names
-local function readOpenCardOptions()
-    for _,g in ipairs(playerGui:GetChildren()) do
-        local lname = g.Name:lower()
-        if (lname:find("card") or lname:find("odyssey")) and g.Enabled ~= false then
-            local opts = {}
-            for _,d in ipairs(g:GetDescendants()) do
-                if d:IsA("TextLabel") or d:IsA("TextButton") then
-                    local pn = (d.Parent and d.Parent.Name or ""):lower()
-                    if pn:find("card") or d.Name:lower():find("card") or d.Name:lower():find("option") then
-                        local t = d.Text
-                        if t and #t>2 and #t<40 then
-                            table.insert(opts, t)
-                        end
-                    end
-                end
-            end
-            if #opts > 0 then return opts end
-        end
-    end
-    return nil
-end
 
-local function closeMatchingUI(keywords)
-    -- NOTE: Do NOT set Enabled=false on game GUIs here.
-    -- The remote call already handles the server-side close.
-    -- Touching Enabled on game ScreenGuis breaks their internal
-    -- button signals and makes summon/mode buttons unresponsive.
-    -- This function is intentionally a no-op — kept for call-site compatibility.
-end
-
--- Find narrow chest containers ONCE; never full-workspace scan in the hot loop.
+-- Find narrow chest containers
 local CHEST_FOLDER_NAMES = {"Chests","OdysseyChests","Odyssey","AdventureChests","Adventure"}
 local function getChestRoots()
     local roots = {}
-    for _,name in ipairs(CHEST_FOLDER_NAMES) do
+    for _, name in ipairs(CHEST_FOLDER_NAMES) do
         local w = workspace:FindFirstChild(name)
         if w then table.insert(roots, w) end
-        local r = RS:FindFirstChild(name)
-        if r then table.insert(roots, r) end
     end
     return roots
 end
@@ -1259,100 +1227,179 @@ end
 local RARITY_SCORE = {
     common=1, uncommon=2, rare=3, epic=4, legendary=5, mythic=6, mythical=6, secret=7, celestial=8, divine=9
 }
--- Ragnaw (Regnaw / Rage) target cards. Match either DisplayName or CardId.
 local RAGNAW_TARGET_CARDS = {
-    ["rageful arrival"]         = true, ["legendaryplacementdamage"]   = true,
-    ["elite conquest"]          = true, ["legendaryeliteplacement"]    = true,
-    ["all-range rage"]          = true, ["all range rage"]             = true, ["mythicfullaoe"] = true,
-    ["monarch's breakthrough"]  = true, ["monarchs breakthrough"]      = true,
-    ["monarch breakthrough"]    = true, ["epicpermanentplacements"]    = true,
+    ["rageful arrival"]        = true, ["legendaryplacementdamage"]  = true,
+    ["elite conquest"]         = true, ["legendaryeliteplacement"]   = true,
+    ["all-range rage"]         = true, ["all range rage"]            = true, ["mythicfullaoe"] = true,
+    ["monarch's breakthrough"] = true, ["monarchs breakthrough"]     = true,
+    ["monarch breakthrough"]   = true, ["epicpermanentplacements"]   = true,
 }
-
 local function rarityScore(name)
     local n = (name or ""):lower()
     local best = 0
-    for key,score in pairs(RARITY_SCORE) do
+    for key, score in pairs(RARITY_SCORE) do
         if n:find(key, 1, true) and score > best then best = score end
     end
     return best
 end
-
 local function isRagnawTargetCard(name)
-    local n = (name or ""):lower():gsub("^%s+",""):gsub("%s+$","")
-    return RAGNAW_TARGET_CARDS[n] == true
+    return RAGNAW_TARGET_CARDS[(name or ""):lower():gsub("^%s+",""):gsub("%s+$","")] == true
 end
-
 local function chooseCardIndex(opts)
     local bestIdx, bestScore
-
     if getAutoRagnawCards() and ragnawPickCount < 4 then
-        for i,name in ipairs(opts) do
+        for i, name in ipairs(opts) do
             if isRagnawTargetCard(name) and not ragnawPickedThisRun[name] then
                 local score = 100 + rarityScore(name)
-                if not bestScore or score > bestScore then
-                    bestIdx, bestScore = i, score
-                end
+                if not bestScore or score > bestScore then bestIdx, bestScore = i, score end
             end
         end
         if bestIdx then return bestIdx, "ragnaw" end
     end
-
-    -- If Ragnaw mode active and quota filled (or no target card in this set),
-    -- skip any unit-card screen so the run keeps moving.
     if getAutoRagnawCards() then
         local allUnit = #opts > 0
-        for _,name in ipairs(opts) do
+        for _, name in ipairs(opts) do
             if classifyCard(name) ~= "unit" then allUnit = false; break end
         end
         if allUnit then return nil, "skip-unit" end
     end
-
     if getAutoPick() then
-        for i,name in ipairs(opts) do
-            local kind = classifyCard(name)
+        for i, name in ipairs(opts) do
             local score = rarityScore(name)
-            if kind == "generic" then score = score + 20 end
-            if not bestScore or score > bestScore then
-                bestIdx, bestScore = i, score
-            end
+            if classifyCard(name) == "generic" then score = score + 20 end
+            if not bestScore or score > bestScore then bestIdx, bestScore = i, score end
         end
     end
-
     return bestIdx, "basic"
 end
 
--- requestNextRoom: votes for the first reachable node on the Odyssey Route Atlas.
--- CONFIRMED: Networking.Odyssey.Adventure.VoteEvent:FireServer("Vote", nodeIndex)
--- nodeIndex is the node number on the map (1-based). We request the snapshot first
--- so the server knows we're ready, then vote for node 1 (first reachable path).
--- If the run has multiple reachable nodes, the server accepts any valid index.
-local function requestNextRoom()
-    -- Skip any open card/unit-reward UI first
-    local cardEv = getONet("CardPickEvent")
-    if cardEv then pcall(function() cardEv:FireServer("Skip", 0) end) end
+-- Find the current open card-pick UI — confirmed name: CardPickPanel
+-- CardPickEvent("Pick", index) — index is 1-based position of the card
+local function readOpenCardOptions()
+    -- Try confirmed name first, then fallback pattern
+    local targets = {}
+    for _, g in ipairs(playerGui:GetChildren()) do
+        local n = g.Name
+        local ln = n:lower()
+        if n == "CardPickPanel" or ln:find("cardpick") or ln:find("card_pick") then
+            table.insert(targets, g)
+        end
+    end
+    -- Also check UnitRewardPanel (same remote, different UI)
+    for _, g in ipairs(playerGui:GetChildren()) do
+        if g.Name == "UnitRewardPanel" or g.Name:lower():find("unitreward") then
+            table.insert(targets, g)
+        end
+    end
 
-    -- Step 1: request map snapshot so server registers us as ready
+    for _, g in ipairs(targets) do
+        if g.Enabled == false then continue end
+        -- Collect all TextLabels that look like card names
+        -- In CardPickPanel the cards are typically in frames named Option1/2/3
+        -- or direct children of the panel
+        local opts = {}
+        local optFrames = {}
+
+        -- Strategy 1: look for Option1, Option2, Option3 frames
+        for i = 1, 6 do
+            local f = g:FindFirstChild("Option"..i, true)
+                   or g:FindFirstChild("Card"..i, true)
+                   or g:FindFirstChild("Choice"..i, true)
+            if f then
+                optFrames[i] = f
+                -- Get the name label inside
+                for _, d in ipairs(f:GetDescendants()) do
+                    if d:IsA("TextLabel") and d.Text and #d.Text > 2 and #d.Text < 60 then
+                        opts[i] = d.Text
+                        break
+                    end
+                end
+            end
+        end
+
+        -- Strategy 2: if no numbered frames found, collect all text labels
+        if #opts == 0 then
+            for _, d in ipairs(g:GetDescendants()) do
+                if d:IsA("TextLabel") and d.Text and #d.Text > 2 and #d.Text < 60
+                and not d.Text:find("^%d+$") -- skip pure numbers
+                and not d.Text:lower():find("skip")
+                and not d.Text:lower():find("choose")
+                and not d.Text:lower():find("select") then
+                    table.insert(opts, d.Text)
+                end
+            end
+        end
+
+        if #opts > 0 then return opts end
+    end
+    return nil
+end
+
+-- Shop handler: fires ShopEvent("Close") when shop GUI appears
+-- Event-driven via playerGui.ChildAdded — fires once per shop appearance
+playerGui.ChildAdded:Connect(function(g)
+    task.wait(0.2)
+    if not inGameMode() then return end
+    local n = g.Name
+    local ln = n:lower()
+
+    -- Shop
+    if (n == "ShopPanel" or ln:find("shop")) and getAutoSkipShop() then
+        local shopEv = getONet("ShopEvent")
+        if shopEv then pcall(function() shopEv:FireServer("Close") end) end
+        return
+    end
+
+    -- Treasure/Chest UI — close it and collect
+    if (n == "TreasurePanel" or ln:find("treasure") or ln:find("chest")) and getAutoCollectChests() then
+        -- Chest collection fires from workspace scan, not from GUI
+        -- Just close the UI by doing nothing (chest remote handles it server-side)
+        return
+    end
+end)
+
+-- Chest handler: scans workspace for chest instances every 2s
+do
+    local chestClock = 0
+    RunSvc.Heartbeat:Connect(function()
+        if os.clock() - chestClock < 2 then return end
+        chestClock = os.clock()
+        if not inGameMode() then return end
+        if not getAutoCollectChests() then return end
+        local sm = Net:FindFirstChild("StageMechanics")
+        local chestRemote = sm and sm:FindFirstChild("OdysseyChest")
+        if not chestRemote then return end
+        for _, root in ipairs(getChestRoots()) do
+            for _, inst in ipairs(root:GetChildren()) do
+                fireChest(chestRemote, inst.Name)
+                fireChest(chestRemote, inst:GetAttribute("UUID"))
+                fireChest(chestRemote, inst:GetAttribute("Id"))
+                fireChest(chestRemote, inst:GetAttribute("ChestId"))
+            end
+        end
+    end)
+end
+
+-- requestNextRoom: votes for the next floor.
+-- CONFIRMED: Networking.Odyssey.Adventure.VoteEvent:FireServer("Vote", nodeIndex)
+-- Only fires after wave end — guarded by the card loop (no cards visible = wave done)
+local function requestNextRoom()
     local mapEv = getONet("MapEvent")
     if mapEv then pcall(function() mapEv:FireServer("RequestSnapshot") end) end
-
-    task.wait(0.2)
-
-    -- Step 2: vote for first available node
-    -- CONFIRMED signature: VoteEvent:FireServer("Vote", nodeIndex)
-    -- The server logged nodeIndex=4 in testing — actual index depends on the map.
-    -- We try 1 first (most common first-path node), then fall back up to 5.
+    task.wait(0.3)
     local voteEv = getONet("VoteEvent")
     if not voteEv then return end
+    -- Fire all valid indices — server will only act on reachable ones
+    -- We don't stop on first pcall success since pcall is always true for FireServer
     for _, idx in ipairs({1, 2, 3, 4, 5}) do
-        local ok = pcall(function() voteEv:FireServer("Vote", idx) end)
-        if ok then return end
+        pcall(function() voteEv:FireServer("Vote", idx) end)
+        task.wait(0.05)
     end
 end
 
-
--- Card pick loop
+-- Card pick loop — 1s cadence
 do
-    local cardClock   = 0
+    local cardClock    = 0
     local nextRoomClock = 0
     RunSvc.Heartbeat:Connect(function()
         if os.clock() - cardClock < 1 then return end
@@ -1362,24 +1409,18 @@ do
 
         local ok, opts = pcall(readOpenCardOptions)
         if ok and opts and #opts > 0 then
-            -- Cards are visible — pick or skip
             local chosenIdx, reason = chooseCardIndex(opts)
             if chosenIdx then
                 pickIndex(opts, chosenIdx)
                 if reason == "ragnaw" then
-                    local cardName = opts[chosenIdx]
-                    ragnawPickedThisRun[cardName] = true
+                    ragnawPickedThisRun[opts[chosenIdx]] = true
                     ragnawPickCount = math.min(4, ragnawPickCount + 1)
                 end
             elseif reason == "skip-unit" then
                 skipCards()
             end
-            -- Reset next-room clock after any card action so we don't
-            -- fire VoteEvent immediately after picking
-            nextRoomClock = os.clock()
+            nextRoomClock = os.clock() + 2 -- hold off room advance after card pick
         elseif getAutoNextRoom() then
-            -- No cards visible — try to advance to next room,
-            -- but only once every 5s to avoid spamming VoteEvent mid-wave
             if os.clock() - nextRoomClock >= 5 then
                 nextRoomClock = os.clock()
                 requestNextRoom()
@@ -1387,60 +1428,6 @@ do
         end
     end)
 end
-
--- Chest handler: event-driven via Heartbeat, only runs in-game, 2s cadence.
-do
-    local chestClock = 0
-    RunSvc.Heartbeat:Connect(function()
-        if os.clock() - chestClock < 2 then return end
-        chestClock = os.clock()
-        if not inGameMode() then return end
-        if getAutoCollectChests() then
-            local sm = Net:FindFirstChild("StageMechanics")
-            local chestRemote = sm and sm:FindFirstChild("OdysseyChest")
-            if chestRemote then
-                for _,root in ipairs(getChestRoots()) do
-                    for _,inst in ipairs(root:GetChildren()) do
-                        local n = inst.Name
-                        fireChest(chestRemote, n)
-                        fireChest(chestRemote, inst:GetAttribute("UUID"))
-                        fireChest(chestRemote, inst:GetAttribute("Id"))
-                        fireChest(chestRemote, inst:GetAttribute("ChestId"))
-                    end
-                end
-            end
-            closeMatchingUI({"treasure","chest"})
-            if getAutoNextRoom() then requestNextRoom() end
-        elseif getAutoSkipShop() then
-            local shopEv = getONet("ShopEvent")
-            if shopEv then pcall(function() shopEv:FireServer("Close") end) end
-            closeMatchingUI({"shop"})
-            if getAutoNextRoom() then requestNextRoom() end
-        end
-    end)
-end
-
--- UI close loop: event-driven.
--- We do NOT set Enabled=false on game GUIs — this breaks their internal
--- button signals (summon UI, mode buttons all share the same handler chain).
--- The shop/chest remotes already handle closing server-side.
--- This listener is kept only to trigger requestNextRoom at the right moment.
-local function maybeCloseGui(g)
-    if g == gui then return end
-    if not inGameMode() then return end
-    local n = g.Name:lower()
-    local isChest = n:find("treasure") or n:find("chest")
-    local isShop  = n:find("shop")
-    if isChest and getAutoCollectChests() then
-        if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
-        return
-    end
-    if isShop and getAutoSkipShop() then
-        if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
-        return
-    end
-end
-playerGui.ChildAdded:Connect(function(g) task.wait(0.1); pcall(maybeCloseGui, g) end)
 end -- close Odyssey do block
 
 -- ======================
