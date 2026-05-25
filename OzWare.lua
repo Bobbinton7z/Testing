@@ -958,6 +958,8 @@ local function refreshRemotes()
     if _stageMech then
         REMOTES.OdysseyChest = _stageMech:FindFirstChild("OdysseyChest")
     end
+    -- ModifierEvent: fires "ClientReady" after each vote to signal readiness
+    REMOTES.ModifierEvent = Net:FindFirstChild("ModifierEvent")
 end
 refreshRemotes()
 
@@ -1330,45 +1332,45 @@ end
 -- Both use CardPickEvent:FireServer("Pick", index) and ("Skip", 0)
 
 local function readOpenCardOptions()
+    -- Check all ScreenGui children of playerGui
+    -- Also check CoreGui descendants in case the card UI is injected there
+    local guisToCheck = {}
     for _, g in ipairs(playerGui:GetChildren()) do
-        if g == gui then continue end
-        if not g:IsA("ScreenGui") then continue end
+        if g ~= gui and g:IsA("ScreenGui") then
+            table.insert(guisToCheck, g)
+        end
+    end
 
-        -- Find all ModifierTitle labels — these are the card names
+    for _, g in ipairs(guisToCheck) do
+        -- Find all ModifierTitle labels — confirmed element name for card names
         local cards = {}
         for _, d in ipairs(g:GetDescendants()) do
             if d:IsA("TextLabel") and d.Name == "ModifierTitle" then
                 local t = d.Text
                 if t and #t > 1 then
-                    table.insert(cards, {
-                        text = t,
-                        x    = d.AbsolutePosition.X,
-                    })
+                    table.insert(cards, { text = t, x = d.AbsolutePosition.X })
                 end
             end
         end
-
         if #cards == 0 then continue end
 
-        -- Also verify this GUI has a Skip button so we don't
-        -- accidentally match other UIs that use ModifierTitle
-        local hasSkip = false
+        -- Verify this is a card pick GUI by checking for Skip button
+        -- Also accept "Confirm Choice" as a signal (character card UI)
+        local hasSkip, hasConfirm = false, false
         for _, d in ipairs(g:GetDescendants()) do
-            if (d:IsA("TextButton") or d:IsA("TextLabel"))
-            and d.Text and d.Text:lower() == "skip" then
-                hasSkip = true; break
+            if d:IsA("TextButton") and d.Text then
+                local tl = d.Text:lower()
+                if tl == "skip" then hasSkip = true end
+                if tl:find("confirm") then hasConfirm = true end
             end
         end
-        if not hasSkip then continue end
+        if not hasSkip and not hasConfirm then continue end
 
-        -- Sort left-to-right to get correct 1/2/3 index order
+        -- Sort left to right for correct index order
         table.sort(cards, function(a, b) return a.x < b.x end)
-
         local opts = {}
-        for _, c in ipairs(cards) do
-            table.insert(opts, c.text)
-        end
-        return opts
+        for _, c in ipairs(cards) do table.insert(opts, c.text) end
+        if #opts > 0 then return opts end
     end
     return nil
 end
@@ -1387,45 +1389,26 @@ end
 -- Also try OdysseyChest under StageMechanics as backup.
 local openedChests = {}
 local function collectAndCloseTreasure()
-    local treasureEv = getONet("TreasureEvent")
     local chestRemote = getONet("OdysseyChest")
+    if not chestRemote then return end
 
-    -- TreasureEvent: try "Open" / "OpenAll" / "Collect" actions first
-    if treasureEv then
-        pcall(function() treasureEv:FireServer("OpenAll") end)
-        pcall(function() treasureEv:FireServer("Collect") end)
-        -- Also try per-chest index 1-6
-        for i = 1, 6 do
-            pcall(function() treasureEv:FireServer("Open", i) end)
-            pcall(function() treasureEv:FireServer("OpenChest", i) end)
+    -- Scan entire workspace for chest instances — UUIDs are randomized per room
+    -- Chests are Models/Parts with a UUID attribute
+    local UUID_PAT = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
+    local function tryOpen(inst)
+        for _, attr in ipairs({"UUID","Id","ChestId","Uuid","ID","uuid"}) do
+            local v = inst:GetAttribute(attr)
+            if typeof(v) == "string" and v:match(UUID_PAT) and not openedChests[v] then
+                openedChests[v] = true
+                pcall(function() chestRemote:FireServer("OpenChest", v) end)
+            end
         end
     end
 
-    -- OdysseyChest backup: scan workspace for chest models
-    if chestRemote then
-        local function tryOpen(inst)
-            for _, attr in ipairs({"UUID","Id","ChestId","Uuid","ID"}) do
-                local v = inst:GetAttribute(attr)
-                if v and typeof(v)=="string" and not openedChests[v] then
-                    openedChests[v] = true
-                    pcall(function() chestRemote:FireServer("OpenChest", v) end)
-                end
-            end
-            local n = inst.Name
-            if n and not openedChests[n] and (n:find("-") or tonumber(n)) then
-                openedChests[n] = true
-                pcall(function() chestRemote:FireServer("OpenChest", n) end)
-            end
-        end
-        for _, fname in ipairs({"Chests","OdysseyChests","TreasureChests","Treasure",
-                                 "Adventure","Odyssey","Map","MapHolder"}) do
-            local f = workspace:FindFirstChild(fname)
-            if f then
-                for _, child in ipairs(f:GetChildren()) do tryOpen(child) end
-                for _, child in ipairs(f:GetDescendants()) do
-                    if child:IsA("Model") then tryOpen(child) end
-                end
-            end
+    -- Deep scan workspace — chests spawn near the player in the room
+    for _, inst in ipairs(workspace:GetDescendants()) do
+        if inst:IsA("Model") or inst:IsA("BasePart") then
+            tryOpen(inst)
         end
     end
 end
@@ -1441,11 +1424,14 @@ local function requestNextRoom()
         pcall(function() voteEv:FireServer("Vote", idx) end)
         task.wait(0.05)
     end
+    -- Signal readiness to server — confirmed from logger: fires after every vote
+    local modEv = getONet("ModifierEvent")
+    if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
 end
 
 -- ── Event-driven GUI handler ─────────────────────────────────────
 playerGui.ChildAdded:Connect(function(g)
-    task.wait(0.5)
+    task.wait(0.5) -- let GUI fully populate
     if not inGameMode() then return end
     if not g:IsA("ScreenGui") or g == gui then return end
 
@@ -1465,14 +1451,49 @@ playerGui.ChildAdded:Connect(function(g)
         return
     end
 
-    -- Shop ("Stitches' Shop")
-    for t, _ in pairs(texts) do
+    -- Shop
+    for t in pairs(texts) do
         if t:find("Stitches") or t == "Odyssey Coins" then
             if getAutoSkipShop() then
                 closeShopGui()
                 if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
             end
             return
+        end
+    end
+
+    -- Card pick — detected by ModifierTitle + Skip/Confirm
+    -- Wait an extra frame for AbsolutePosition to be valid
+    if getAutoPick() or getAutoRagnawCards() then
+        local hasMod, hasSkip, hasConfirm = false, false, false
+        for _, d in ipairs(g:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Name == "ModifierTitle" then hasMod = true end
+            if d:IsA("TextButton") and d.Text then
+                local tl = d.Text:lower()
+                if tl == "skip" then hasSkip = true end
+                if tl:find("confirm") then hasConfirm = true end
+            end
+        end
+        if hasMod and (hasSkip or hasConfirm) then
+            -- Wait for layout to render so AbsolutePosition.X is valid
+            RunSvc.RenderStepped:Wait()
+            RunSvc.RenderStepped:Wait()
+            local opts = readOpenCardOptions()
+            if opts and #opts > 0 then
+                local chosenIdx, reason = chooseCardIndex(opts)
+                if chosenIdx then
+                    pickIndex(opts, chosenIdx)
+                    if reason == "ragnaw" then
+                        ragnawPickedThisRun[opts[chosenIdx]] = true
+                        ragnawPickCount = math.min(4, ragnawPickCount + 1)
+                    end
+                elseif reason == "skip-unit" then
+                    skipCards()
+                end
+            elseif hasSkip then
+                -- GUI appeared but opts still nil — just skip
+                skipCards()
+            end
         end
     end
 end)
@@ -1500,7 +1521,7 @@ do
                 skipCards()
             end
             nextRoomClock = os.clock() + 2        elseif getAutoNextRoom() then
-            if os.clock() - nextRoomClock >= 5 then
+            if os.clock() - nextRoomClock >= 2 then
                 nextRoomClock = os.clock()
                 requestNextRoom()
             end
