@@ -836,6 +836,7 @@ onDeleteMap(function(on)
         if not isBasePart(d.Name) then
             if d:IsA("BasePart") and d.Transparency < 1 then
                 d.Transparency = 1
+                d.CanCollide   = false  -- let player phase through
                 count = count + 1
             elseif d:IsA("Decal") or d:IsA("Texture") or d:IsA("SpecialMesh") then
                 d.Transparency = 1
@@ -845,30 +846,60 @@ onDeleteMap(function(on)
     notify(("Map: hid %d parts"):format(count), true)
 end)
 
--- Delete Enemies: fires once on toggle-on, destroys permanently + watches for new ones
+-- Delete Enemies: scans ALL of workspace for NPC/enemy models, destroys them
+-- and watches every folder for new spawns
 local enemiesDeleted = false
+local watchedFolders = {}
+local function destroyIfEnemy(inst)
+    -- Enemy models typically have a Humanoid inside
+    if inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") then
+        pcall(function() inst:Destroy() end)
+    end
+end
 local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies", 3, false, "util.deletenemies")
 onDeleteEnemies(function(on)
-    if not on then enemiesDeleted = false; return end
+    if not on then
+        enemiesDeleted = false
+        watchedFolders = {}
+        return
+    end
     if enemiesDeleted then return end
     if not inGameMode() then notify("Must be in a match", false); return end
     enemiesDeleted = true
     local count = 0
-    for _, folder in ipairs({"Enemies","Mobs","EnemiesFolder","Zombies"}) do
-        local f = workspace:FindFirstChild(folder)
-        if f then
-            for _, e in ipairs(f:GetChildren()) do
-                pcall(function() e:Destroy(); count = count + 1 end)
+    -- Destroy all existing enemy models in workspace
+    for _, inst in ipairs(workspace:GetDescendants()) do
+        if inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") then
+            -- Don't destroy the local player's character
+            if inst ~= game:GetService("Players").LocalPlayer.Character then
+                pcall(function() inst:Destroy(); count = count + 1 end)
             end
-            -- Destroy new enemies as they spawn
-            f.ChildAdded:Connect(function(child)
-                if getDeleteEnemies() then
-                    task.wait(0.05)
-                    pcall(function() child:Destroy() end)
-                end
-            end)
         end
     end
+    -- Watch workspace and all its folders for new enemies
+    local function watchFolder(folder)
+        if watchedFolders[folder] then return end
+        watchedFolders[folder] = true
+        folder.ChildAdded:Connect(function(child)
+            if not getDeleteEnemies() then return end
+            task.wait(0.05)
+            destroyIfEnemy(child)
+        end)
+    end
+    watchFolder(workspace)
+    for _, child in ipairs(workspace:GetChildren()) do
+        if child:IsA("Folder") or child:IsA("Model") then
+            watchFolder(child)
+        end
+    end
+    workspace.ChildAdded:Connect(function(child)
+        if not getDeleteEnemies() then return end
+        if child:IsA("Folder") or child:IsA("Model") then
+            watchFolder(child)
+        end
+        task.wait(0.05)
+        destroyIfEnemy(child)
+    end)
     notify(("Deleted %d enemies"):format(count), true)
 end)
 
@@ -1042,27 +1073,8 @@ local function scanCardsFromFolder()
     return n
 end
 
--- Runtime scrape: watch PlayerGui for card-pick UIs and learn card names
--- Event-driven scrape: only scan a card-pick UI when it actually appears.
-local function scrapeGui(g)
-    local lname = g.Name:lower()
-    if not (lname:find("card") or lname:find("odyssey")) then return end
-    for _,d in ipairs(g:GetDescendants()) do
-        if d:IsA("TextLabel") or d:IsA("TextButton") then
-            local t = d.Text
-            if t and #t>2 and #t<40 and not t:find("%d%d%d") then
-                local parentName = d.Parent and d.Parent.Name or ""
-                if parentName:lower():find("card") or d.Name:lower():find("card") or d.Name:lower():find("option") then
-                    addCard(t, d)
-                end
-            end
-        end
-    end
-end
-playerGui.ChildAdded:Connect(function(g)
-    task.wait(0.3) -- let it populate
-    pcall(scrapeGui, g)
-end)
+-- Card names are populated from BASIC_CARDS table and runtime UI scraping
+-- in the ChildAdded handler below — no separate scrape needed here
 
 -- --- UI: card list builder --------------------------------------------------
 local function buildCardList(parent, kind, emptyMsg)
@@ -1332,48 +1344,102 @@ end
 -- Both use CardPickEvent:FireServer("Pick", index) and ("Skip", 0)
 
 local function readOpenCardOptions()
-    -- Check all ScreenGui children of playerGui
-    -- Also check CoreGui descendants in case the card UI is injected there
-    local guisToCheck = {}
+    -- Scan ALL ScreenGuis in PlayerGui for ModifierTitle labels.
+    -- The card GUI may be an existing GUI toggling Enabled, not a new child.
+    -- We don't filter by GUI name — just find the labels directly.
+    local allCards = {}
+
     for _, g in ipairs(playerGui:GetChildren()) do
-        if g ~= gui and g:IsA("ScreenGui") then
-            table.insert(guisToCheck, g)
-        end
-    end
+        if g == gui then continue end
+        if not g:IsA("ScreenGui") then continue end
+        if g.Enabled == false then continue end
 
-    for _, g in ipairs(guisToCheck) do
-        -- Find all ModifierTitle labels — confirmed element name for card names
         local cards = {}
-        for _, d in ipairs(g:GetDescendants()) do
-            if d:IsA("TextLabel") and d.Name == "ModifierTitle" then
-                local t = d.Text
-                if t and #t > 1 then
-                    table.insert(cards, { text = t, x = d.AbsolutePosition.X })
-                end
-            end
-        end
-        if #cards == 0 then continue end
-
-        -- Verify this is a card pick GUI by checking for Skip button
-        -- Also accept "Confirm Choice" as a signal (character card UI)
         local hasSkip, hasConfirm = false, false
+
         for _, d in ipairs(g:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Name == "ModifierTitle"
+            and d.Text and #d.Text > 1 then
+                table.insert(cards, {text = d.Text, x = d.AbsolutePosition.X})
+            end
             if d:IsA("TextButton") and d.Text then
                 local tl = d.Text:lower()
                 if tl == "skip" then hasSkip = true end
                 if tl:find("confirm") then hasConfirm = true end
             end
         end
-        if not hasSkip and not hasConfirm then continue end
 
-        -- Sort left to right for correct index order
-        table.sort(cards, function(a, b) return a.x < b.x end)
-        local opts = {}
-        for _, c in ipairs(cards) do table.insert(opts, c.text) end
-        if #opts > 0 then return opts end
+        -- Must have at least one card name AND a skip/confirm button
+        if #cards > 0 and (hasSkip or hasConfirm) then
+            for _, c in ipairs(cards) do
+                table.insert(allCards, c)
+            end
+        end
     end
-    return nil
+
+    if #allCards == 0 then return nil end
+
+    -- Sort left to right for correct index 1/2/3 order
+    table.sort(allCards, function(a, b) return a.x < b.x end)
+    local opts = {}
+    for _, c in ipairs(allCards) do
+        table.insert(opts, c.text)
+    end
+    return opts
 end
+
+-- Also watch for existing GUIs toggling their Enabled property
+-- (card GUI may already exist in PlayerGui and just becomes visible)
+task.spawn(function()
+    task.wait(2) -- wait for PlayerGui to fully populate
+    for _, g in ipairs(playerGui:GetChildren()) do
+        if g == gui or not g:IsA("ScreenGui") then continue end
+        g:GetPropertyChangedSignal("Enabled"):Connect(function()
+            if not g.Enabled then return end
+            if not inGameMode() then return end
+            if not (getAutoPick() or getAutoRagnawCards()) then return end
+            -- Small wait for layout to render
+            RunSvc.RenderStepped:Wait()
+            RunSvc.RenderStepped:Wait()
+            local opts = readOpenCardOptions()
+            if not opts or #opts == 0 then return end
+            local chosenIdx, reason = chooseCardIndex(opts)
+            if chosenIdx then
+                pickIndex(opts, chosenIdx)
+                if reason == "ragnaw" then
+                    ragnawPickedThisRun[opts[chosenIdx]] = true
+                    ragnawPickCount = math.min(4, ragnawPickCount + 1)
+                end
+            elseif reason == "skip-unit" then
+                skipCards()
+            end
+        end)
+    end
+    -- Also watch future GUIs added to PlayerGui
+    playerGui.ChildAdded:Connect(function(g)
+        if g == gui or not g:IsA("ScreenGui") then return end
+        task.wait(0.1)
+        g:GetPropertyChangedSignal("Enabled"):Connect(function()
+            if not g.Enabled then return end
+            if not inGameMode() then return end
+            if not (getAutoPick() or getAutoRagnawCards()) then return end
+            RunSvc.RenderStepped:Wait()
+            RunSvc.RenderStepped:Wait()
+            local opts = readOpenCardOptions()
+            if not opts or #opts == 0 then return end
+            local chosenIdx, reason = chooseCardIndex(opts)
+            if chosenIdx then
+                pickIndex(opts, chosenIdx)
+                if reason == "ragnaw" then
+                    ragnawPickedThisRun[opts[chosenIdx]] = true
+                    ragnawPickCount = math.min(4, ragnawPickCount + 1)
+                end
+            elseif reason == "skip-unit" then
+                skipCards()
+            end
+        end)
+    end)
+end)
 
 -- ── Shop ─────────────────────────────────────────────────────────
 -- CONFIRMED: Networking.Odyssey.Adventure.ShopEvent
@@ -1389,26 +1455,36 @@ end
 -- Also try OdysseyChest under StageMechanics as backup.
 local openedChests = {}
 local function collectAndCloseTreasure()
-    local chestRemote = getONet("OdysseyChest")
-    if not chestRemote then return end
-
-    -- Scan entire workspace for chest instances — UUIDs are randomized per room
-    -- Chests are Models/Parts with a UUID attribute
-    local UUID_PAT = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
-    local function tryOpen(inst)
-        for _, attr in ipairs({"UUID","Id","ChestId","Uuid","ID","uuid"}) do
-            local v = inst:GetAttribute(attr)
-            if typeof(v) == "string" and v:match(UUID_PAT) and not openedChests[v] then
-                openedChests[v] = true
-                pcall(function() chestRemote:FireServer("OpenChest", v) end)
+    -- CONFIRMED from TreasurePanel source:
+    -- Chests use integer indices 1-N (not UUIDs).
+    -- OnOpenChest(index) fires TreasureEvent:FireServer("OpenChest", index)
+    -- TotalChests can be up to 12; confirmed 6 in normal runs.
+    local treasureEv = getONet("TreasureEvent")
+    if treasureEv then
+        for i = 1, 12 do
+            if not openedChests[i] then
+                openedChests[i] = true
+                pcall(function() treasureEv:FireServer("OpenChest", i) end)
+                task.wait(0.05)
             end
         end
     end
 
-    -- Deep scan workspace — chests spawn near the player in the room
-    for _, inst in ipairs(workspace:GetDescendants()) do
-        if inst:IsA("Model") or inst:IsA("BasePart") then
-            tryOpen(inst)
+    -- Close the TreasurePanel by clicking its Close button.
+    -- The panel is a Frame named "TreasurePanel" inside an existing ScreenGui,
+    -- NOT a new ScreenGui child — so ChildAdded never fires for it.
+    -- We search all ScreenGuis for a Frame named "TreasurePanel".
+    for _, g in ipairs(playerGui:GetChildren()) do
+        if not g:IsA("ScreenGui") then continue end
+        local panel = g:FindFirstChild("TreasurePanel", true)
+        if panel then
+            -- Find the Close button (Name="Close", fires OnClose())
+            local closeBtn = panel:FindFirstChild("Close", true)
+            if closeBtn and (closeBtn:IsA("TextButton") or closeBtn:IsA("ImageButton")) then
+                pcall(function() closeBtn.Activated:Fire() end)
+                pcall(function() closeBtn.MouseButton1Click:Fire() end)
+            end
+            break
         end
     end
 end
@@ -1429,29 +1505,31 @@ local function requestNextRoom()
     if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
 end
 
--- ── Event-driven GUI handler ─────────────────────────────────────
+-- ── Event-driven GUI handler (shop + treasure) ───────────────────
+-- TreasurePanel is a Frame inside an existing ScreenGui — NOT a new ScreenGui.
+-- We watch DescendantAdded on playerGui to catch it.
+playerGui.DescendantAdded:Connect(function(d)
+    if not inGameMode() then return end
+    if d.Name == "TreasurePanel" and getAutoCollectChests() then
+        openedChests = {} -- reset for each new treasure room
+        task.wait(0.5)
+        collectAndCloseTreasure()
+        if getAutoNextRoom() then task.wait(1); requestNextRoom() end
+        return
+    end
+end)
+
+-- ScreenGui ChildAdded handles shop (which IS a new ScreenGui or frame)
 playerGui.ChildAdded:Connect(function(g)
-    task.wait(0.5) -- let GUI fully populate
+    task.wait(0.5)
     if not inGameMode() then return end
     if not g:IsA("ScreenGui") or g == gui then return end
 
-    -- Scan labels once
     local texts = {}
     for _, d in ipairs(g:GetDescendants()) do
         if d:IsA("TextLabel") then texts[d.Text] = true end
     end
 
-    -- Treasure Room
-    if texts["Treasure Room"] then
-        if getAutoCollectChests() then
-            task.wait(0.5)
-            collectAndCloseTreasure()
-            if getAutoNextRoom() then task.wait(1); requestNextRoom() end
-        end
-        return
-    end
-
-    -- Shop
     for t in pairs(texts) do
         if t:find("Stitches") or t == "Odyssey Coins" then
             if getAutoSkipShop() then
@@ -1459,41 +1537,6 @@ playerGui.ChildAdded:Connect(function(g)
                 if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
             end
             return
-        end
-    end
-
-    -- Card pick — detected by ModifierTitle + Skip/Confirm
-    -- Wait an extra frame for AbsolutePosition to be valid
-    if getAutoPick() or getAutoRagnawCards() then
-        local hasMod, hasSkip, hasConfirm = false, false, false
-        for _, d in ipairs(g:GetDescendants()) do
-            if d:IsA("TextLabel") and d.Name == "ModifierTitle" then hasMod = true end
-            if d:IsA("TextButton") and d.Text then
-                local tl = d.Text:lower()
-                if tl == "skip" then hasSkip = true end
-                if tl:find("confirm") then hasConfirm = true end
-            end
-        end
-        if hasMod and (hasSkip or hasConfirm) then
-            -- Wait for layout to render so AbsolutePosition.X is valid
-            RunSvc.RenderStepped:Wait()
-            RunSvc.RenderStepped:Wait()
-            local opts = readOpenCardOptions()
-            if opts and #opts > 0 then
-                local chosenIdx, reason = chooseCardIndex(opts)
-                if chosenIdx then
-                    pickIndex(opts, chosenIdx)
-                    if reason == "ragnaw" then
-                        ragnawPickedThisRun[opts[chosenIdx]] = true
-                        ragnawPickCount = math.min(4, ragnawPickCount + 1)
-                    end
-                elseif reason == "skip-unit" then
-                    skipCards()
-                end
-            elseif hasSkip then
-                -- GUI appeared but opts still nil — just skip
-                skipCards()
-            end
         end
     end
 end)
