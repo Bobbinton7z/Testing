@@ -812,8 +812,6 @@ end)
 -- ======================
 local utilSec = section(gamePage, "Utility", 2)
 
--- Delete Map: fires once on toggle-on, skips base/path/spawn parts
--- Base template parts are anything named with: base, spawn, path, road, floor, ground
 local BASE_KEYWORDS = {"base","spawn","path","road","floor","ground","terrain","plate"}
 local function isBasePart(name)
     local n = name:lower()
@@ -822,6 +820,10 @@ local function isBasePart(name)
     end
     return false
 end
+
+-- Delete Map: hides decorative structures only.
+-- Keeps floor/platform parts collidable so player doesn't fall.
+-- A part is "floor-level" if its Y center is within 8 studs of the character.
 local mapDeleted = false
 local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
@@ -831,76 +833,51 @@ onDeleteMap(function(on)
     local m = getMapRoot()
     if not m then notify("Map not found", false); return end
     mapDeleted = true
+    local char = game:GetService("Players").LocalPlayer.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local playerY = hrp and hrp.Position.Y or 0
     local count = 0
     for _, d in ipairs(m:GetDescendants()) do
-        if not isBasePart(d.Name) then
-            if d:IsA("BasePart") and d.Transparency < 1 then
-                d.Transparency = 1
-                d.CanCollide   = false  -- let player phase through
-                count = count + 1
-            elseif d:IsA("Decal") or d:IsA("Texture") or d:IsA("SpecialMesh") then
-                d.Transparency = 1
+        if isBasePart(d.Name) then continue end
+        if d:IsA("BasePart") and d.Transparency < 1 then
+            d.Transparency = 1
+            -- Only disable collision on parts clearly above floor level
+            -- Parts within 10 studs vertically of the player stay collidable
+            -- so the player doesn't fall through the platform
+            if math.abs(d.Position.Y - playerY) > 10 then
+                d.CanCollide = false
             end
+            count = count + 1
+        elseif d:IsA("Decal") or d:IsA("Texture") or d:IsA("SpecialMesh") then
+            d.Transparency = 1
         end
     end
     notify(("Map: hid %d parts"):format(count), true)
 end)
 
--- Delete Enemies: scans ALL of workspace for NPC/enemy models, destroys them
--- and watches every folder for new spawns
-local enemiesDeleted = false
-local watchedFolders = {}
-local function destroyIfEnemy(inst)
-    -- Enemy models typically have a Humanoid inside
-    if inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") then
-        pcall(function() inst:Destroy() end)
-    end
-end
+-- Delete Enemies: continuously destroys any Model with a Humanoid in workspace.
+-- Runs on a loop every 0.3s while the toggle is ON so newly spawned enemies
+-- are caught immediately without needing folder-specific ChildAdded hooks.
 local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies", 3, false, "util.deletenemies")
+local deletedSet = {}  -- track destroyed instances to avoid redundant pcalls
 onDeleteEnemies(function(on)
-    if not on then
-        enemiesDeleted = false
-        watchedFolders = {}
-        return
-    end
-    if enemiesDeleted then return end
-    if not inGameMode() then notify("Must be in a match", false); return end
-    enemiesDeleted = true
-    local count = 0
-    -- Destroy all existing enemy models in workspace
-    for _, inst in ipairs(workspace:GetDescendants()) do
-        if inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") then
-            -- Don't destroy the local player's character
-            if inst ~= game:GetService("Players").LocalPlayer.Character then
-                pcall(function() inst:Destroy(); count = count + 1 end)
+    if not on then deletedSet = {}; return end
+end)
+task.spawn(function()
+    local lp = game:GetService("Players").LocalPlayer
+    while true do
+        task.wait(0.3)
+        if not getDeleteEnemies() or not inGameMode() then continue end
+        local char = lp.Character
+        for _, inst in ipairs(workspace:GetDescendants()) do
+            if inst == char then continue end
+            if deletedSet[inst] then continue end
+            if inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") then
+                deletedSet[inst] = true
+                pcall(function() inst:Destroy() end)
             end
         end
     end
-    -- Watch workspace and all its folders for new enemies
-    local function watchFolder(folder)
-        if watchedFolders[folder] then return end
-        watchedFolders[folder] = true
-        folder.ChildAdded:Connect(function(child)
-            if not getDeleteEnemies() then return end
-            task.wait(0.05)
-            destroyIfEnemy(child)
-        end)
-    end
-    watchFolder(workspace)
-    for _, child in ipairs(workspace:GetChildren()) do
-        if child:IsA("Folder") or child:IsA("Model") then
-            watchFolder(child)
-        end
-    end
-    workspace.ChildAdded:Connect(function(child)
-        if not getDeleteEnemies() then return end
-        if child:IsA("Folder") or child:IsA("Model") then
-            watchFolder(child)
-        end
-        task.wait(0.05)
-        destroyIfEnemy(child)
-    end)
-    notify(("Deleted %d enemies"):format(count), true)
 end)
 
 -- FPS Boost: fires once on toggle-on, restores on toggle-off
@@ -1344,18 +1321,13 @@ end
 -- Both use CardPickEvent:FireServer("Pick", index) and ("Skip", 0)
 
 local function readOpenCardOptions()
-    -- Scan ALL ScreenGuis in PlayerGui for ModifierTitle labels.
-    -- The card GUI may be an existing GUI toggling Enabled, not a new child.
-    -- We don't filter by GUI name — just find the labels directly.
-    local allCards = {}
-
     for _, g in ipairs(playerGui:GetChildren()) do
         if g == gui then continue end
         if not g:IsA("ScreenGui") then continue end
         if g.Enabled == false then continue end
 
         local cards = {}
-        local hasSkip, hasConfirm = false, false
+        local hasSkip, hasConfirm, hasReroll = false, false, false
 
         for _, d in ipairs(g:GetDescendants()) do
             if d:IsA("TextLabel") and d.Name == "ModifierTitle"
@@ -1366,26 +1338,24 @@ local function readOpenCardOptions()
                 local tl = d.Text:lower()
                 if tl == "skip" then hasSkip = true end
                 if tl:find("confirm") then hasConfirm = true end
+                if tl:find("reroll") then hasReroll = true end
             end
         end
 
-        -- Must have at least one card name AND a skip/confirm button
-        if #cards > 0 and (hasSkip or hasConfirm) then
-            for _, c in ipairs(cards) do
-                table.insert(allCards, c)
-            end
-        end
-    end
+        if #cards == 0 then continue end
 
-    if #allCards == 0 then return nil end
+        -- Stage Info panel has ModifierTitle labels but NO Reroll/Skip/Confirm buttons
+        -- Card pick GUI always has Skip + either Reroll (basic) or Confirm (character)
+        -- Require Skip AND (Reroll OR Confirm) to be certain it's a card pick UI
+        if not hasSkip then continue end
+        if not hasReroll and not hasConfirm then continue end
 
-    -- Sort left to right for correct index 1/2/3 order
-    table.sort(allCards, function(a, b) return a.x < b.x end)
-    local opts = {}
-    for _, c in ipairs(allCards) do
-        table.insert(opts, c.text)
+        table.sort(cards, function(a, b) return a.x < b.x end)
+        local opts = {}
+        for _, c in ipairs(cards) do table.insert(opts, c.text) end
+        if #opts > 0 then return opts end
     end
-    return opts
+    return nil
 end
 
 -- Also watch for existing GUIs toggling their Enabled property
@@ -1508,14 +1478,18 @@ end
 -- ── Event-driven GUI handler (shop + treasure) ───────────────────
 -- TreasurePanel is a Frame inside an existing ScreenGui — NOT a new ScreenGui.
 -- We watch DescendantAdded on playerGui to catch it.
+local treasureHandled = false
 playerGui.DescendantAdded:Connect(function(d)
     if not inGameMode() then return end
-    if d.Name == "TreasurePanel" and getAutoCollectChests() then
-        openedChests = {} -- reset for each new treasure room
+    if d.Name ~= "TreasurePanel" then return end
+    if treasureHandled then return end
+    treasureHandled = true
+    task.delay(10, function() treasureHandled = false end) -- reset after 10s
+    if getAutoCollectChests() then
+        openedChests = {}
         task.wait(0.5)
         collectAndCloseTreasure()
         if getAutoNextRoom() then task.wait(1); requestNextRoom() end
-        return
     end
 end)
 
