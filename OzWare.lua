@@ -812,6 +812,49 @@ local function isBasePart(name)
     return false
 end
 
+local Players = game:GetService("Players")
+local lp      = Players.LocalPlayer
+
+-- Shared helper: classify every top-level Model in workspace
+-- Returns: isPlayerUnit (owned by any player), isEnemy (has BillboardGui/Humanoid, not owned by player)
+local function classifyModel(model, charSet, unitSet)
+    if charSet[model] then return "playerchar" end
+    if unitSet[model]  then return "unit" end
+    -- Enemies: have a BillboardGui (health bar) or Humanoid, not a player character
+    if model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("BillboardGui") then
+        return "enemy"
+    end
+    return "map"
+end
+
+-- Build sets of player characters and placed units at call time
+local function buildCharAndUnitSets()
+    local charSet, unitSet = {}, {}
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl.Character then
+            charSet[pl.Character] = true
+            -- Units placed by players are direct children of the character or
+            -- Models parented to workspace that contain a part named after the player
+            -- In this game, placed units are Models in workspace tagged with the owner
+            for _, child in ipairs(workspace:GetChildren()) do
+                if child:IsA("Model") then
+                    -- Check for owner attribute or a part linking to this player
+                    local owner = child:GetAttribute("Owner")
+                        or child:GetAttribute("PlayerId")
+                        or child:GetAttribute("UserId")
+                    if owner and (tostring(owner) == tostring(pl.UserId)
+                               or tostring(owner) == pl.Name) then
+                        unitSet[child] = true
+                    end
+                end
+            end
+        end
+    end
+    return charSet, unitSet
+end
+
+-- ── Delete Map Structures ─────────────────────────────────────────
+-- Hides map BaseParts only. Units turn green, enemies turn red (if delete enemies is off).
 local mapDeleted = false
 local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
@@ -819,99 +862,104 @@ onDeleteMap(function(on)
     if mapDeleted then return end
     if not inGameMode() then notify("Must be in a match", false); return end
     mapDeleted = true
-    local lp      = game:GetService("Players").LocalPlayer
-    local char    = lp.Character
-    local hrp     = char and char:FindFirstChild("HumanoidRootPart")
-    local pY      = hrp and hrp.Position.Y or 0
-    local Players = game:GetService("Players")
-    local count   = 0
 
-    for _, d in ipairs(workspace:GetDescendants()) do
-        -- Player characters: tint green so they're visible but simplified
-        local isPlayerChar = false
-        for _, pl in ipairs(Players:GetPlayers()) do
-            if pl.Character and d:IsDescendantOf(pl.Character) then
-                isPlayerChar = true; break
-            end
-        end
-        if isPlayerChar then
-            if d:IsA("BasePart") then
-                pcall(function() d.BrickColor = BrickColor.new("Bright green") end)
+    local hrp  = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    local pY   = hrp and hrp.Position.Y or 0
+    local charSet, unitSet = buildCharAndUnitSets()
+    local count = 0
+
+    for _, model in ipairs(workspace:GetChildren()) do
+        if not model:IsA("Model") then
+            -- Non-model workspace children (Terrain, script-spawned parts): hide them
+            if model:IsA("BasePart") and not isBasePart(model.Name) then
+                model.Transparency = 1
+                model.CanCollide   = false
             end
             continue
         end
-        if isBasePart(d.Name) then continue end
-        if d:IsA("BasePart") and d.Transparency < 1 then
-            d.Transparency = 1
-            local isFloor = (pY - d.Position.Y) >= 0 and (pY - d.Position.Y) <= 6
-            if not isFloor then d.CanCollide = false end
-            pcall(function()
-                local m = d:FindFirstChildOfClass("SpecialMesh")
-                if m then m.MeshType = Enum.MeshType.Block end
-            end)
-            count = count + 1
-        elseif d:IsA("Decal") or d:IsA("Texture") then
-            d.Transparency = 1
-        elseif d:IsA("SpecialMesh") then
-            pcall(function() d.MeshType = Enum.MeshType.Block end)
+
+        local kind = classifyModel(model, charSet, unitSet)
+
+        if kind == "playerchar" or kind == "unit" then
+            -- Tint units green so they're still visible
+            for _, p in ipairs(model:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    pcall(function()
+                        p.BrickColor  = BrickColor.new("Bright green")
+                        p.Material    = Enum.Material.Neon
+                        p.CastShadow  = false
+                    end)
+                elseif p:IsA("Decal") or p:IsA("Texture") or p:IsA("ParticleEmitter")
+                    or p:IsA("Trail") or p:IsA("Beam") or p:IsA("BillboardGui")
+                    or p:IsA("SurfaceGui") then
+                    pcall(function()
+                        if p:FindFirstProperty("Enabled") then p.Enabled = false
+                        elseif p:IsA("Decal") or p:IsA("Texture") then p.Transparency = 1 end
+                    end)
+                end
+            end
+
+        elseif kind == "enemy" then
+            -- Tint enemies red so they're still visible (unless delete enemies is on)
+            if not getDeleteEnemies() then
+                for _, p in ipairs(model:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        pcall(function()
+                            p.BrickColor  = BrickColor.new("Bright red")
+                            p.Material    = Enum.Material.Neon
+                            p.CastShadow  = false
+                        end)
+                    end
+                end
+            end
+
+        else
+            -- Map structure: hide it
+            for _, p in ipairs(model:GetDescendants()) do
+                if isBasePart(p.Name) then continue end
+                if p:IsA("BasePart") and p.Transparency < 1 then
+                    p.Transparency = 1
+                    local isFloor = (pY - p.Position.Y) >= 0 and (pY - p.Position.Y) <= 6
+                    if not isFloor then p.CanCollide = false end
+                    pcall(function()
+                        local m = p:FindFirstChildOfClass("SpecialMesh")
+                        if m then m.MeshType = Enum.MeshType.Block end
+                    end)
+                    count = count + 1
+                elseif p:IsA("Decal") or p:IsA("Texture") then
+                    p.Transparency = 1
+                end
+            end
         end
     end
     notify(("Map: hid %d parts"):format(count), true)
 end)
 
+-- ── Delete Enemies ────────────────────────────────────────────────
+-- Destroys enemy models. Leaves player characters and placed units alone.
 local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies", 3, false, "util.deletenemies")
-local redSet = {}  -- enemies already turned red
+local destroyedEnemies = {}
 onDeleteEnemies(function(on)
-    if not on then
-        -- Restore all turned-red enemies to original color when toggled off
-        for inst, _ in pairs(redSet) do
-            pcall(function()
-                for _, p in ipairs(inst:GetDescendants()) do
-                    if p:IsA("BasePart") then p.BrickColor = BrickColor.new("Medium red") end
-                end
-            end)
-        end
-        redSet = {}
-    end
+    if not on then destroyedEnemies = {} end
 end)
 task.spawn(function()
-    local lp      = game:GetService("Players").LocalPlayer
-    local Players = game:GetService("Players")
     while true do
-        task.wait(0.25)
+        task.wait(0.2)
         if not getDeleteEnemies() or not inGameMode() then continue end
-        local charSet = {}
-        for _, pl in ipairs(Players:GetPlayers()) do
-            if pl.Character then charSet[pl.Character] = true end
-        end
-        for _, inst in ipairs(workspace:GetDescendants()) do
-            if charSet[inst] then continue end
-            if redSet[inst] then continue end
-            if not inst:IsA("Model") then continue end
-            local isEnemy = inst:FindFirstChildOfClass("Humanoid") ~= nil
-                         or inst:FindFirstChildOfClass("BillboardGui") ~= nil
-            if isEnemy then
-                redSet[inst] = true
-                -- Turn red and shrink to a small floating box instead of destroying
-                pcall(function()
-                    for _, p in ipairs(inst:GetDescendants()) do
-                        if p:IsA("BasePart") then
-                            p.BrickColor  = BrickColor.new("Bright red")
-                            p.Material    = Enum.Material.Neon
-                            p.CastShadow  = false
-                        end
-                        if p:IsA("Decal") or p:IsA("Texture") then p.Transparency = 1 end
-                        if p:IsA("ParticleEmitter") or p:IsA("Trail") or p:IsA("Beam") then
-                            p.Enabled = false
-                        end
-                    end
-                end)
+        local charSet, unitSet = buildCharAndUnitSets()
+        for _, model in ipairs(workspace:GetChildren()) do
+            if not model:IsA("Model") then continue end
+            if destroyedEnemies[model] then continue end
+            local kind = classifyModel(model, charSet, unitSet)
+            if kind == "enemy" then
+                destroyedEnemies[model] = true
+                pcall(function() model:Destroy() end)
             end
         end
     end
 end)
 
--- FPS Boost: based on community-proven optimization script
+-- ── FPS Boost ─────────────────────────────────────────────────────
 local fpsApplied = false
 local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.fpsbst")
 onBoostFPS(function(on)
@@ -919,75 +967,57 @@ onBoostFPS(function(on)
         fpsApplied = true
         local Lighting = game:GetService("Lighting")
 
-        -- Max quality reduction
-        settings().Rendering.QualityLevel       = Enum.QualityLevel.Level01
-        settings().Rendering.EagerBulkExecution = true
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
 
-        -- Lighting: completely flat, no atmosphere
-        Lighting.GlobalShadows         = false
-        Lighting.FogEnd                = 9e9
-        Lighting.FogStart              = 9e9
-        Lighting.Brightness            = 0
-        Lighting.Ambient               = Color3.fromRGB(178, 178, 178)
-        Lighting.OutdoorAmbient        = Color3.fromRGB(178, 178, 178)
-        Lighting.ClockTime             = 14 -- midday, no sunset colors
-        Lighting.GeographicLatitude    = 0
-        Lighting.ExposureCompensation  = 0
-
-        -- Remove sky box
+        -- Flat grey lighting, no sky, no atmosphere
+        Lighting.GlobalShadows        = false
+        Lighting.FogEnd               = 9e9
+        Lighting.FogStart             = 9e9
+        Lighting.Brightness           = 0
+        Lighting.Ambient              = Color3.fromRGB(180,180,180)
+        Lighting.OutdoorAmbient       = Color3.fromRGB(180,180,180)
+        Lighting.ClockTime            = 14
+        Lighting.ExposureCompensation = 0
         for _, c in ipairs(Lighting:GetChildren()) do
-            if c:IsA("Sky") or c:IsA("Atmosphere") or c:IsA("PostEffect") then
-                pcall(function() c:Destroy() end)
-            end
+            pcall(function() c:Destroy() end) -- removes Sky, Atmosphere, all PostEffects
         end
 
-        -- Terrain
         local Terrain = workspace:FindFirstChildOfClass("Terrain")
         if Terrain then
-            Terrain.WaterWaveSize     = 0
-            Terrain.WaterWaveSpeed    = 0
-            Terrain.WaterReflectance  = 0
-            Terrain.WaterTransparency = 1
-            Terrain.Decoration        = false
-            pcall(function() Terrain.Material = Enum.Material.SmoothPlastic end)
+            Terrain.WaterWaveSize    = 0; Terrain.WaterWaveSpeed   = 0
+            Terrain.WaterReflectance = 0; Terrain.WaterTransparency = 1
+            Terrain.Decoration       = false
         end
 
-        -- Disable all effects on existing instances
-        local toDisable = {"ParticleEmitter","Trail","Beam","Smoke","Fire","Sparkles","SelectionBox","BillboardGui"}
-        local function disableInst(inst)
-            for _, cls in ipairs(toDisable) do
-                if inst:IsA(cls) then
-                    pcall(function() inst.Enabled = false end)
-                    return
-                end
-            end
+        local function simplify(inst)
             if inst:IsA("BasePart") then
                 pcall(function()
-                    inst.CastShadow = false
                     inst.Material   = Enum.Material.SmoothPlastic
+                    inst.CastShadow = false
+                    inst.Reflectance = 0
                 end)
+            end
+            local cls = inst.ClassName
+            if cls == "ParticleEmitter" or cls == "Trail" or cls == "Beam"
+            or cls == "Smoke" or cls == "Fire" or cls == "Sparkles"
+            or cls == "SelectionBox" or cls == "Atmosphere" or cls == "Sky" then
+                pcall(function() inst:Destroy() end)
             elseif inst:IsA("Decal") or inst:IsA("Texture") then
                 pcall(function() inst.Transparency = 1 end)
+            elseif inst:IsA("SpecialMesh") then
+                pcall(function() inst.MeshType = Enum.MeshType.Block end)
             end
         end
-        for _, inst in ipairs(workspace:GetDescendants()) do disableInst(inst) end
 
-        -- Catch new instances
+        for _, inst in ipairs(workspace:GetDescendants()) do simplify(inst) end
         workspace.DescendantAdded:Connect(function(inst)
-            if getBoostFPS() then disableInst(inst) end
+            if getBoostFPS() then simplify(inst) end
         end)
 
         notify("FPS Boost ON", true)
-
     elseif not on and fpsApplied then
         fpsApplied = false
-        local Lighting = game:GetService("Lighting")
-        Lighting.GlobalShadows = true
-        Lighting.FogEnd        = 100000
-        Lighting.FogStart      = 0
-        Lighting.Brightness    = 1
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
-        notify("FPS Boost OFF — rejoin to fully restore visuals", true)
+        notify("FPS Boost OFF — rejoin to fully restore", true)
     end
 end)
 
@@ -1383,251 +1413,196 @@ end
 -- Character card UI: title "Choose a character-specific card", buttons: Confirm Choice, Skip
 -- Both use CardPickEvent:FireServer("Pick", index) and ("Skip", 0)
 
-local function readOpenCardOptions()
+
+local function findGuiWithText(text, exact)
     for _, g in ipairs(playerGui:GetChildren()) do
-        if g == gui then continue end
-        if not g:IsA("ScreenGui") then continue end
-        if g.Enabled == false then continue end
-
-        local cards = {}
-        local hasSkip, hasConfirm, hasReroll = false, false, false
-
+        if g == gui or not g:IsA("ScreenGui") then continue end
         for _, d in ipairs(g:GetDescendants()) do
-            if d:IsA("TextLabel") and d.Name == "ModifierTitle"
-            and d.Text and #d.Text > 1 then
-                table.insert(cards, {text = d.Text, x = d.AbsolutePosition.X})
-            end
-            if d:IsA("TextButton") and d.Text then
-                local tl = d.Text:lower()
-                if tl == "skip" then hasSkip = true end
-                if tl:find("confirm") then hasConfirm = true end
-                if tl:find("reroll") then hasReroll = true end
+            if d:IsA("TextLabel") then
+                if exact and d.Text == text then return g end
+                if not exact and d.Text:find(text, 1, true) then return g end
             end
         end
-
-        if #cards == 0 then continue end
-
-        -- Stage Info panel has ModifierTitle labels but NO Reroll/Skip/Confirm buttons
-        -- Card pick GUI always has Skip + either Reroll (basic) or Confirm (character)
-        -- Require Skip AND (Reroll OR Confirm) to be certain it's a card pick UI
-        if not hasSkip then continue end
-        if not hasReroll and not hasConfirm then continue end
-
-        table.sort(cards, function(a, b) return a.x < b.x end)
-        local opts = {}
-        for _, c in ipairs(cards) do table.insert(opts, c.text) end
-        if #opts > 0 then return opts end
     end
     return nil
 end
 
--- Also watch for existing GUIs toggling their Enabled property
--- (card GUI may already exist in PlayerGui and just becomes visible)
-task.spawn(function()
-    task.wait(2) -- wait for PlayerGui to fully populate
+local function findFrameInGui(frameName)
+    for _, g in ipairs(playerGui:GetChildren()) do
+        if g == gui then continue end
+        local f = g:FindFirstChild(frameName, true)
+        if f then return f, g end
+    end
+    return nil, nil
+end
+
+-- ── Card pick ────────────────────────────────────────────────────
+local function readOpenCardOptions()
     for _, g in ipairs(playerGui:GetChildren()) do
         if g == gui or not g:IsA("ScreenGui") then continue end
-        g:GetPropertyChangedSignal("Enabled"):Connect(function()
-            if not g.Enabled then return end
-            if not inGameMode() then return end
-            if not (getAutoPick() or getAutoRagnawCards()) then return end
-            -- Small wait for layout to render
-            RunSvc.RenderStepped:Wait()
-            RunSvc.RenderStepped:Wait()
-            local opts = readOpenCardOptions()
-            if not opts or #opts == 0 then return end
-            local chosenIdx, reason = chooseCardIndex(opts)
-            if chosenIdx then
-                pickIndex(opts, chosenIdx)
-                if reason == "ragnaw" then
-                    ragnawPickedThisRun[opts[chosenIdx]] = true
-                    ragnawPickCount = math.min(4, ragnawPickCount + 1)
-                end
-            elseif reason == "skip-unit" then
-                skipCards()
+        if g.Enabled == false then continue end
+        local cards = {}
+        local hasSkip, hasReroll, hasConfirm = false, false, false
+        for _, d in ipairs(g:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Name == "ModifierTitle" and d.Text and #d.Text > 1 then
+                table.insert(cards, {text = d.Text, x = d.AbsolutePosition.X})
             end
-        end)
+            if d:IsA("TextButton") and d.Text then
+                local tl = d.Text:lower()
+                if tl == "skip"           then hasSkip    = true end
+                if tl:find("reroll")      then hasReroll  = true end
+                if tl:find("confirm")     then hasConfirm = true end
+            end
+        end
+        -- Must have cards + Skip + (Reroll or Confirm) — excludes Stage Info
+        if #cards > 0 and hasSkip and (hasReroll or hasConfirm) then
+            table.sort(cards, function(a, b) return a.x < b.x end)
+            local opts = {}
+            for _, c in ipairs(cards) do table.insert(opts, c.text) end
+            return opts
+        end
     end
-    -- Also watch future GUIs added to PlayerGui
-    playerGui.ChildAdded:Connect(function(g)
-        if g == gui or not g:IsA("ScreenGui") then return end
-        task.wait(0.1)
-        g:GetPropertyChangedSignal("Enabled"):Connect(function()
-            if not g.Enabled then return end
-            if not inGameMode() then return end
-            if not (getAutoPick() or getAutoRagnawCards()) then return end
-            RunSvc.RenderStepped:Wait()
-            RunSvc.RenderStepped:Wait()
-            local opts = readOpenCardOptions()
-            if not opts or #opts == 0 then return end
-            local chosenIdx, reason = chooseCardIndex(opts)
-            if chosenIdx then
-                pickIndex(opts, chosenIdx)
-                if reason == "ragnaw" then
-                    ragnawPickedThisRun[opts[chosenIdx]] = true
-                    ragnawPickCount = math.min(4, ragnawPickCount + 1)
-                end
-            elseif reason == "skip-unit" then
-                skipCards()
-            end
-        end)
-    end)
-end)
+    return nil
+end
 
--- ── Shop ─────────────────────────────────────────────────────────
--- CONFIRMED: Networking.Odyssey.Adventure.ShopEvent
--- "Stitches' Shop" GUI — close by firing ShopEvent("Close")
+-- ── Shop detection ───────────────────────────────────────────────
+local function isShopOpen()
+    -- Check for TreasurePanel's sibling ShopPanel, or any GUI with Stitches text
+    local f = findFrameInGui("ShopPanel")
+    if f then return true end
+    return findGuiWithText("Stitches", false) ~= nil
+        or findGuiWithText("Odyssey Coins", true) ~= nil
+end
+
+-- ── Treasure detection ───────────────────────────────────────────
+local function isTreasureOpen()
+    local f = findFrameInGui("TreasurePanel")
+    return f ~= nil
+end
+
+-- ── Shop close ───────────────────────────────────────────────────
 local function closeShopGui()
+    refreshRemotes()
     local shopEv = getONet("ShopEvent")
     if shopEv then pcall(function() shopEv:FireServer("Close") end) end
 end
 
--- ── Treasure Room ────────────────────────────────────────────────
--- CONFIRMED: Networking.Odyssey.Adventure.TreasureEvent
--- 6 chests spawn in the world. Fire TreasureEvent to collect each.
--- Also try OdysseyChest under StageMechanics as backup.
+-- ── Treasure collect ─────────────────────────────────────────────
 local openedChests = {}
 local function collectAndCloseTreasure()
-    -- CONFIRMED from TreasurePanel source:
-    -- Chests use integer indices 1-N (not UUIDs).
-    -- OnOpenChest(index) fires TreasureEvent:FireServer("OpenChest", index)
-    -- TotalChests can be up to 12; confirmed 6 in normal runs.
+    refreshRemotes()
     local treasureEv = getONet("TreasureEvent")
     if treasureEv then
         for i = 1, 12 do
             if not openedChests[i] then
                 openedChests[i] = true
                 pcall(function() treasureEv:FireServer("OpenChest", i) end)
-                task.wait(0.05)
+                task.wait(0.08)
             end
         end
     end
-
-    -- Close the TreasurePanel by clicking its Close button.
-    -- The panel is a Frame named "TreasurePanel" inside an existing ScreenGui,
-    -- NOT a new ScreenGui child — so ChildAdded never fires for it.
-    -- We search all ScreenGuis for a Frame named "TreasurePanel".
-    for _, g in ipairs(playerGui:GetChildren()) do
-        if not g:IsA("ScreenGui") then continue end
-        local panel = g:FindFirstChild("TreasurePanel", true)
-        if panel then
-            -- Find the Close button (Name="Close", fires OnClose())
-            local closeBtn = panel:FindFirstChild("Close", true)
-            if closeBtn and (closeBtn:IsA("TextButton") or closeBtn:IsA("ImageButton")) then
-                pcall(function() closeBtn.Activated:Fire() end)
-                pcall(function() closeBtn.MouseButton1Click:Fire() end)
-            end
-            break
+    -- Click the Close button on TreasurePanel
+    local panel = findFrameInGui("TreasurePanel")
+    if panel then
+        local closeBtn = panel:FindFirstChild("Close", true)
+        if closeBtn then
+            pcall(function() closeBtn.Activated:Fire() end)
+            pcall(function() closeBtn.MouseButton1Click:Fire() end)
         end
     end
 end
+
 -- ── requestNextRoom ──────────────────────────────────────────────
--- MUST be defined before ChildAdded and the card loop use it
 local function requestNextRoom()
+    refreshRemotes()
     local mapEv = getONet("MapEvent")
     if mapEv then pcall(function() mapEv:FireServer("RequestSnapshot") end) end
-    task.wait(0.3)
+    task.wait(0.2)
     local voteEv = getONet("VoteEvent")
     if not voteEv then return end
     for _, idx in ipairs({1, 2, 3, 4, 5}) do
         pcall(function() voteEv:FireServer("Vote", idx) end)
         task.wait(0.05)
     end
-    -- Signal readiness to server — confirmed from logger: fires after every vote
     local modEv = getONet("ModifierEvent")
     if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
 end
 
--- ── GUI event handlers (shop + treasure) ─────────────────────────
--- Both panels are Frames inside existing ScreenGuis, not new ScreenGui children.
--- Use DescendantAdded on playerGui to catch them.
-local treasureHandled = false
-local shopHandled     = false
+-- ── Master automation loop ───────────────────────────────────────
+-- Single Heartbeat poll handles everything. No DescendantAdded, no Enabled watchers.
+-- Each action has its own cooldown so they don't interfere with each other.
+do
+    local clocks = {card=0, shop=0, treasure=0, room=0}
+    local shopDone, treasureDone = false, false
 
-playerGui.DescendantAdded:Connect(function(d)
-    if not inGameMode() then return end
-    local name = d.Name
-
-    -- Treasure Room panel
-    if name == "TreasurePanel" or name:find("Treasure") then
-        if treasureHandled then return end
-        treasureHandled = true
-        task.delay(15, function() treasureHandled = false end)
-        if getAutoCollectChests() then
-            openedChests = {}
-            refreshRemotes() -- ensure remotes are resolved for this run
-            task.wait(0.8)   -- let chests populate
-            collectAndCloseTreasure()
-            if getAutoNextRoom() then task.wait(1); requestNextRoom() end
-        end
-        return
-    end
-
-    -- Shop panel — "ShopPanel", "StitchesShop", or any frame containing "Shop"
-    if name == "ShopPanel" or name:find("Shop") or name:find("Stitches") then
-        if shopHandled then return end
-        shopHandled = true
-        task.delay(15, function() shopHandled = false end)
-        if getAutoSkipShop() then
-            refreshRemotes()
-            task.wait(0.3)
-            closeShopGui()
-            if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
-        end
-        return
-    end
-end)
-
--- Also catch shop as a new ScreenGui child (covers both cases)
-playerGui.ChildAdded:Connect(function(g)
-    task.wait(0.5)
-    if not inGameMode() then return end
-    if not g:IsA("ScreenGui") or g == gui then return end
-    -- Quick label scan for shop detection
-    for _, d in ipairs(g:GetDescendants()) do
-        if d:IsA("TextLabel") and d.Text
-        and (d.Text:find("Stitches") or d.Text == "Odyssey Coins") then
-            if getAutoSkipShop() and not shopHandled then
-                shopHandled = true
-                task.delay(15, function() shopHandled = false end)
-                refreshRemotes()
-                task.wait(0.3)
-                closeShopGui()
-                if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
-            end
+    RunSvc.Heartbeat:Connect(function()
+        local now = os.clock()
+        if not inGameMode() then
+            shopDone = false; treasureDone = false
             return
         end
-    end
-end)
 
--- ── Card pick + Auto Next Room loop ────────────────────────────
-do
-    local cardClock     = 0
-    local nextRoomClock = 0
-    RunSvc.Heartbeat:Connect(function()
-        if os.clock() - cardClock < 1 then return end
-        cardClock = os.clock()
-        if not inGameMode() then return end
-        if not (getAutoPick() or getAutoRagnawCards() or getAutoNextRoom()) then return end
-
-        local ok, opts = pcall(readOpenCardOptions)
-        if ok and opts and #opts > 0 then
-            local chosenIdx, reason = chooseCardIndex(opts)
-            if chosenIdx then
-                pickIndex(opts, chosenIdx)
-                if reason == "ragnaw" then
-                    ragnawPickedThisRun[opts[chosenIdx]] = true
-                    ragnawPickCount = math.min(4, ragnawPickCount + 1)
+        -- Card pick (check every 0.5s)
+        if (getAutoPick() or getAutoRagnawCards()) and now - clocks.card >= 0.5 then
+            clocks.card = now
+            local opts = readOpenCardOptions()
+            if opts and #opts > 0 then
+                local chosenIdx, reason = chooseCardIndex(opts)
+                if chosenIdx then
+                    pickIndex(opts, chosenIdx)
+                    if reason == "ragnaw" then
+                        ragnawPickedThisRun[opts[chosenIdx]] = true
+                        ragnawPickCount = math.min(4, ragnawPickCount + 1)
+                    end
+                elseif reason == "skip-unit" then
+                    skipCards()
                 end
-            elseif reason == "skip-unit" then
-                skipCards()
+                clocks.room = now + 2 -- hold off room advance after picking
+                return
             end
-            nextRoomClock = os.clock() + 2
-        elseif getAutoNextRoom() then
-            if os.clock() - nextRoomClock >= 2 then
-                nextRoomClock = os.clock()
-                requestNextRoom()
+        end
+
+        -- Shop (check every 1s, fire once per appearance)
+        if getAutoSkipShop() and now - clocks.shop >= 1 then
+            clocks.shop = now
+            if isShopOpen() then
+                if not shopDone then
+                    shopDone = true
+                    task.spawn(function()
+                        closeShopGui()
+                        if getAutoNextRoom() then
+                            task.wait(0.5); requestNextRoom()
+                        end
+                    end)
+                end
+            else
+                shopDone = false
             end
+        end
+
+        -- Treasure (check every 1s, fire once per appearance)
+        if getAutoCollectChests() and now - clocks.treasure >= 1 then
+            clocks.treasure = now
+            if isTreasureOpen() then
+                if not treasureDone then
+                    treasureDone = true
+                    openedChests = {}
+                    task.spawn(function()
+                        collectAndCloseTreasure()
+                        if getAutoNextRoom() then
+                            task.wait(1); requestNextRoom()
+                        end
+                    end)
+                end
+            else
+                treasureDone = false
+            end
+        end
+
+        -- Auto Next Room (check every 2s when nothing else is happening)
+        if getAutoNextRoom() and now - clocks.room >= 2 then
+            clocks.room = now
+            task.spawn(requestNextRoom)
         end
     end)
 end
