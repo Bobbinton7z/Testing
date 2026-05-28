@@ -56,32 +56,23 @@ local function getMapRoot()
         or workspace:FindFirstChild("Stage")
 end
 
-local function isOdysseyMode()
-    -- Odyssey/Adventure runs use these workspace containers
+local function inGameMode()
+    -- Regular match: map folder exists in workspace
+    if getMapRoot() then return true end
+    -- Odyssey run: Adventure subfolder with VoteEvent exists under Networking
+    -- This is the most reliable signal — VoteEvent only exists during an active run
+    local net = RS:FindFirstChild("Networking")
+    local ody = net and net:FindFirstChild("Odyssey")
+    local adv = ody and ody:FindFirstChild("Adventure")
+    if adv and adv:FindFirstChild("VoteEvent") then return true end
+    -- Fallback: any of these workspace folders indicate an active match
     for _, name in ipairs({
-        "OdysseyRoom","AdventureRoom","Adventure","OdysseyMap",
-        "AdventureMap","AdventureHolder","OdysseyHolder",
-        "Odyssey","OdysseyStage","AdventureStage",
+        "OdysseyRoom","AdventureRoom","Adventure","OdysseyMap","AdventureMap",
+        "Odyssey","OdysseyStage","AdventureStage","OdysseyHolder","AdventureHolder",
+        "GameMap","GameFolder","BattleMap","Match","MatchFolder",
     }) do
         if workspace:FindFirstChild(name) then return true end
     end
-    -- Also check if any of the Odyssey remotes are actively resolving
-    -- (VoteEvent only exists during an Odyssey run in some games)
-    local ody = game:GetService("ReplicatedStorage"):FindFirstChild("Networking")
-    local advFolder = ody and ody:FindFirstChild("Odyssey") and ody:FindFirstChild("Odyssey"):FindFirstChild("Adventure")
-    if advFolder and advFolder:FindFirstChild("VoteEvent") then
-        -- VoteEvent exists — we're likely in an Odyssey context
-        -- but only count it if we're not in the lobby (no summon screen)
-        if not workspace:FindFirstChild("Lobby") and not workspace:FindFirstChild("LobbyMap") then
-            return true
-        end
-    end
-    return false
-end
-
-local function inGameMode()
-    if getMapRoot() then return true end
-    if isOdysseyMode() then return true end
     return false
 end
 
@@ -828,38 +819,35 @@ onDeleteMap(function(on)
     if mapDeleted then return end
     if not inGameMode() then notify("Must be in a match", false); return end
     mapDeleted = true
-    local char  = game:GetService("Players").LocalPlayer.Character
-    local hrp   = char and char:FindFirstChild("HumanoidRootPart")
-    local pY    = hrp and hrp.Position.Y or 0
-    local count = 0
+    local lp      = game:GetService("Players").LocalPlayer
+    local char    = lp.Character
+    local hrp     = char and char:FindFirstChild("HumanoidRootPart")
+    local pY      = hrp and hrp.Position.Y or 0
+    local Players = game:GetService("Players")
+    local count   = 0
 
-    -- Collect all BaseParts across entire workspace (not just a Map folder)
     for _, d in ipairs(workspace:GetDescendants()) do
-        -- Skip anything related to characters, UI, or base keywords
-        if isBasePart(d.Name) then continue end
-        -- Skip parts that belong to any player character
-        local skipThis = false
-        for _, pl in ipairs(game:GetService("Players"):GetPlayers()) do
+        -- Player characters: tint green so they're visible but simplified
+        local isPlayerChar = false
+        for _, pl in ipairs(Players:GetPlayers()) do
             if pl.Character and d:IsDescendantOf(pl.Character) then
-                skipThis = true; break
+                isPlayerChar = true; break
             end
         end
-        if skipThis then continue end
-
+        if isPlayerChar then
+            if d:IsA("BasePart") then
+                pcall(function() d.BrickColor = BrickColor.new("Bright green") end)
+            end
+            continue
+        end
+        if isBasePart(d.Name) then continue end
         if d:IsA("BasePart") and d.Transparency < 1 then
             d.Transparency = 1
-            -- Keep collision on floor-level parts so player doesn't fall
-            -- Floor parts: within 6 studs below player Y
-            local partY = d.Position.Y
-            local isFloor = (pY - partY) >= 0 and (pY - partY) <= 6
-            if not isFloor then
-                d.CanCollide = false
-            end
-            -- Simplify mesh/texture for FPS
+            local isFloor = (pY - d.Position.Y) >= 0 and (pY - d.Position.Y) <= 6
+            if not isFloor then d.CanCollide = false end
             pcall(function()
-                if d:FindFirstChildOfClass("SpecialMesh") then
-                    d:FindFirstChildOfClass("SpecialMesh").MeshType = Enum.MeshType.Block
-                end
+                local m = d:FindFirstChildOfClass("SpecialMesh")
+                if m then m.MeshType = Enum.MeshType.Block end
             end)
             count = count + 1
         elseif d:IsA("Decal") or d:IsA("Texture") then
@@ -872,32 +860,52 @@ onDeleteMap(function(on)
 end)
 
 local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies", 3, false, "util.deletenemies")
-local deletedSet = {}
+local redSet = {}  -- enemies already turned red
 onDeleteEnemies(function(on)
-    if not on then deletedSet = {}; return end
+    if not on then
+        -- Restore all turned-red enemies to original color when toggled off
+        for inst, _ in pairs(redSet) do
+            pcall(function()
+                for _, p in ipairs(inst:GetDescendants()) do
+                    if p:IsA("BasePart") then p.BrickColor = BrickColor.new("Medium red") end
+                end
+            end)
+        end
+        redSet = {}
+    end
 end)
 task.spawn(function()
-    local lp  = game:GetService("Players").LocalPlayer
+    local lp      = game:GetService("Players").LocalPlayer
     local Players = game:GetService("Players")
     while true do
         task.wait(0.25)
         if not getDeleteEnemies() or not inGameMode() then continue end
-        local char = lp.Character
-        -- Build set of all player characters to never destroy
         local charSet = {}
         for _, pl in ipairs(Players:GetPlayers()) do
             if pl.Character then charSet[pl.Character] = true end
         end
         for _, inst in ipairs(workspace:GetDescendants()) do
             if charSet[inst] then continue end
-            if deletedSet[inst] then continue end
+            if redSet[inst] then continue end
             if not inst:IsA("Model") then continue end
-            -- Detect enemy by: has Humanoid, OR has a BillboardGui (health bar overhead)
             local isEnemy = inst:FindFirstChildOfClass("Humanoid") ~= nil
                          or inst:FindFirstChildOfClass("BillboardGui") ~= nil
             if isEnemy then
-                deletedSet[inst] = true
-                pcall(function() inst:Destroy() end)
+                redSet[inst] = true
+                -- Turn red and shrink to a small floating box instead of destroying
+                pcall(function()
+                    for _, p in ipairs(inst:GetDescendants()) do
+                        if p:IsA("BasePart") then
+                            p.BrickColor  = BrickColor.new("Bright red")
+                            p.Material    = Enum.Material.Neon
+                            p.CastShadow  = false
+                        end
+                        if p:IsA("Decal") or p:IsA("Texture") then p.Transparency = 1 end
+                        if p:IsA("ParticleEmitter") or p:IsA("Trail") or p:IsA("Beam") then
+                            p.Enabled = false
+                        end
+                    end
+                end)
             end
         end
     end
@@ -909,91 +917,77 @@ local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.
 onBoostFPS(function(on)
     if on and not fpsApplied then
         fpsApplied = true
-        local Lighting    = game:GetService("Lighting")
-        local RunService  = game:GetService("RunService")
-        local Players     = game:GetService("Players")
+        local Lighting = game:GetService("Lighting")
 
-        -- Rendering quality
+        -- Max quality reduction
         settings().Rendering.QualityLevel       = Enum.QualityLevel.Level01
         settings().Rendering.EagerBulkExecution = true
 
-        -- Lighting
-        Lighting.GlobalShadows    = false
-        Lighting.FogEnd           = 9e9
-        Lighting.Brightness       = 0
+        -- Lighting: completely flat, no atmosphere
+        Lighting.GlobalShadows         = false
+        Lighting.FogEnd                = 9e9
+        Lighting.FogStart              = 9e9
+        Lighting.Brightness            = 0
+        Lighting.Ambient               = Color3.fromRGB(178, 178, 178)
+        Lighting.OutdoorAmbient        = Color3.fromRGB(178, 178, 178)
+        Lighting.ClockTime             = 14 -- midday, no sunset colors
+        Lighting.GeographicLatitude    = 0
+        Lighting.ExposureCompensation  = 0
 
-        -- Disable all post-processing effects
-        for _, e in ipairs(Lighting:GetChildren()) do
-            if e:IsA("PostEffect") then e.Enabled = false end
+        -- Remove sky box
+        for _, c in ipairs(Lighting:GetChildren()) do
+            if c:IsA("Sky") or c:IsA("Atmosphere") or c:IsA("PostEffect") then
+                pcall(function() c:Destroy() end)
+            end
         end
 
-        -- Terrain water
+        -- Terrain
         local Terrain = workspace:FindFirstChildOfClass("Terrain")
         if Terrain then
-            Terrain.WaterWaveSize    = 0
-            Terrain.WaterWaveSpeed   = 0
-            Terrain.WaterReflectance = 0
+            Terrain.WaterWaveSize     = 0
+            Terrain.WaterWaveSpeed    = 0
+            Terrain.WaterReflectance  = 0
             Terrain.WaterTransparency = 1
-            Terrain.Decoration       = false
+            Terrain.Decoration        = false
+            pcall(function() Terrain.Material = Enum.Material.SmoothPlastic end)
         end
 
-        -- Disable particles, trails, beams on all existing instances
-        local toDisable = {
-            "ParticleEmitter","Trail","Beam",
-            "Smoke","Fire","Sparkles","SelectionBox"
-        }
-        for _, inst in ipairs(workspace:GetDescendants()) do
+        -- Disable all effects on existing instances
+        local toDisable = {"ParticleEmitter","Trail","Beam","Smoke","Fire","Sparkles","SelectionBox","BillboardGui"}
+        local function disableInst(inst)
             for _, cls in ipairs(toDisable) do
                 if inst:IsA(cls) then
-                    pcall(function()
-                        if inst:FindFirstProperty("Enabled") ~= nil then
-                            inst.Enabled = false
-                        end
-                    end)
-                    break
+                    pcall(function() inst.Enabled = false end)
+                    return
                 end
             end
-        end
-
-        -- Watch for new instances and disable immediately
-        workspace.DescendantAdded:Connect(function(inst)
-            if not getBoostFPS() then return end
-            for _, cls in ipairs(toDisable) do
-                if inst:IsA(cls) then
-                    pcall(function()
-                        if inst:FindFirstProperty("Enabled") ~= nil then
-                            inst.Enabled = false
-                        end
-                    end)
-                    break
-                end
-            end
-        end)
-
-        -- Reduce shadow/texture detail on all BaseParts
-        for _, inst in ipairs(workspace:GetDescendants()) do
             if inst:IsA("BasePart") then
                 pcall(function()
                     inst.CastShadow = false
                     inst.Material   = Enum.Material.SmoothPlastic
                 end)
+            elseif inst:IsA("Decal") or inst:IsA("Texture") then
+                pcall(function() inst.Transparency = 1 end)
             end
         end
+        for _, inst in ipairs(workspace:GetDescendants()) do disableInst(inst) end
+
+        -- Catch new instances
+        workspace.DescendantAdded:Connect(function(inst)
+            if getBoostFPS() then disableInst(inst) end
+        end)
 
         notify("FPS Boost ON", true)
 
     elseif not on and fpsApplied then
         fpsApplied = false
-        -- Restore lighting
         local Lighting = game:GetService("Lighting")
         Lighting.GlobalShadows = true
         Lighting.FogEnd        = 100000
+        Lighting.FogStart      = 0
         Lighting.Brightness    = 1
-        for _, e in ipairs(Lighting:GetChildren()) do
-            if e:IsA("PostEffect") then e.Enabled = true end
-        end
         settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
-        notify("FPS Boost OFF", true)
+        notify("FPS Boost OFF — rejoin to fully restore visuals", true)
     end
 end)
 
