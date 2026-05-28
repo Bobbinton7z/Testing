@@ -821,58 +821,81 @@ local function isBasePart(name)
     return false
 end
 
--- Delete Map: hides decorative structures only.
--- Keeps floor/platform parts collidable so player doesn't fall.
--- A part is "floor-level" if its Y center is within 8 studs of the character.
 local mapDeleted = false
 local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
     if not on then mapDeleted = false; return end
     if mapDeleted then return end
     if not inGameMode() then notify("Must be in a match", false); return end
-    local m = getMapRoot()
-    if not m then notify("Map not found", false); return end
     mapDeleted = true
-    local char = game:GetService("Players").LocalPlayer.Character
-    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-    local playerY = hrp and hrp.Position.Y or 0
+    local char  = game:GetService("Players").LocalPlayer.Character
+    local hrp   = char and char:FindFirstChild("HumanoidRootPart")
+    local pY    = hrp and hrp.Position.Y or 0
     local count = 0
-    for _, d in ipairs(m:GetDescendants()) do
+
+    -- Collect all BaseParts across entire workspace (not just a Map folder)
+    for _, d in ipairs(workspace:GetDescendants()) do
+        -- Skip anything related to characters, UI, or base keywords
         if isBasePart(d.Name) then continue end
+        -- Skip parts that belong to any player character
+        local skipThis = false
+        for _, pl in ipairs(game:GetService("Players"):GetPlayers()) do
+            if pl.Character and d:IsDescendantOf(pl.Character) then
+                skipThis = true; break
+            end
+        end
+        if skipThis then continue end
+
         if d:IsA("BasePart") and d.Transparency < 1 then
             d.Transparency = 1
-            -- Only disable collision on parts clearly above floor level
-            -- Parts within 10 studs vertically of the player stay collidable
-            -- so the player doesn't fall through the platform
-            if math.abs(d.Position.Y - playerY) > 10 then
+            -- Keep collision on floor-level parts so player doesn't fall
+            -- Floor parts: within 6 studs below player Y
+            local partY = d.Position.Y
+            local isFloor = (pY - partY) >= 0 and (pY - partY) <= 6
+            if not isFloor then
                 d.CanCollide = false
             end
+            -- Simplify mesh/texture for FPS
+            pcall(function()
+                if d:FindFirstChildOfClass("SpecialMesh") then
+                    d:FindFirstChildOfClass("SpecialMesh").MeshType = Enum.MeshType.Block
+                end
+            end)
             count = count + 1
-        elseif d:IsA("Decal") or d:IsA("Texture") or d:IsA("SpecialMesh") then
+        elseif d:IsA("Decal") or d:IsA("Texture") then
             d.Transparency = 1
+        elseif d:IsA("SpecialMesh") then
+            pcall(function() d.MeshType = Enum.MeshType.Block end)
         end
     end
     notify(("Map: hid %d parts"):format(count), true)
 end)
 
--- Delete Enemies: continuously destroys any Model with a Humanoid in workspace.
--- Runs on a loop every 0.3s while the toggle is ON so newly spawned enemies
--- are caught immediately without needing folder-specific ChildAdded hooks.
 local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies", 3, false, "util.deletenemies")
-local deletedSet = {}  -- track destroyed instances to avoid redundant pcalls
+local deletedSet = {}
 onDeleteEnemies(function(on)
     if not on then deletedSet = {}; return end
 end)
 task.spawn(function()
-    local lp = game:GetService("Players").LocalPlayer
+    local lp  = game:GetService("Players").LocalPlayer
+    local Players = game:GetService("Players")
     while true do
-        task.wait(0.3)
+        task.wait(0.25)
         if not getDeleteEnemies() or not inGameMode() then continue end
         local char = lp.Character
+        -- Build set of all player characters to never destroy
+        local charSet = {}
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl.Character then charSet[pl.Character] = true end
+        end
         for _, inst in ipairs(workspace:GetDescendants()) do
-            if inst == char then continue end
+            if charSet[inst] then continue end
             if deletedSet[inst] then continue end
-            if inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") then
+            if not inst:IsA("Model") then continue end
+            -- Detect enemy by: has Humanoid, OR has a BillboardGui (health bar overhead)
+            local isEnemy = inst:FindFirstChildOfClass("Humanoid") ~= nil
+                         or inst:FindFirstChildOfClass("BillboardGui") ~= nil
+            if isEnemy then
                 deletedSet[inst] = true
                 pcall(function() inst:Destroy() end)
             end
@@ -880,50 +903,96 @@ task.spawn(function()
     end
 end)
 
--- FPS Boost: fires once on toggle-on, restores on toggle-off
+-- FPS Boost: based on community-proven optimization script
 local fpsApplied = false
-local oldGfx = {}
 local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.fpsbst")
 onBoostFPS(function(on)
-    local Lighting = game:GetService("Lighting")
-    local Terrain  = workspace:FindFirstChildOfClass("Terrain")
     if on and not fpsApplied then
         fpsApplied = true
-        pcall(function()
-            oldGfx.GlobalShadows = Lighting.GlobalShadows
-            oldGfx.FogEnd        = Lighting.FogEnd
-            oldGfx.Brightness    = Lighting.Brightness
-            Lighting.GlobalShadows = false
-            Lighting.FogEnd        = 1e9
-            for _, e in ipairs(Lighting:GetDescendants()) do
-                if e:IsA("BloomEffect") or e:IsA("BlurEffect")
-                or e:IsA("SunRaysEffect") or e:IsA("DepthOfFieldEffect")
-                or e:IsA("ColorCorrectionEffect") then
-                    e.Enabled = false
+        local Lighting    = game:GetService("Lighting")
+        local RunService  = game:GetService("RunService")
+        local Players     = game:GetService("Players")
+
+        -- Rendering quality
+        settings().Rendering.QualityLevel       = Enum.QualityLevel.Level01
+        settings().Rendering.EagerBulkExecution = true
+
+        -- Lighting
+        Lighting.GlobalShadows    = false
+        Lighting.FogEnd           = 9e9
+        Lighting.Brightness       = 0
+
+        -- Disable all post-processing effects
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("PostEffect") then e.Enabled = false end
+        end
+
+        -- Terrain water
+        local Terrain = workspace:FindFirstChildOfClass("Terrain")
+        if Terrain then
+            Terrain.WaterWaveSize    = 0
+            Terrain.WaterWaveSpeed   = 0
+            Terrain.WaterReflectance = 0
+            Terrain.WaterTransparency = 1
+            Terrain.Decoration       = false
+        end
+
+        -- Disable particles, trails, beams on all existing instances
+        local toDisable = {
+            "ParticleEmitter","Trail","Beam",
+            "Smoke","Fire","Sparkles","SelectionBox"
+        }
+        for _, inst in ipairs(workspace:GetDescendants()) do
+            for _, cls in ipairs(toDisable) do
+                if inst:IsA(cls) then
+                    pcall(function()
+                        if inst:FindFirstProperty("Enabled") ~= nil then
+                            inst.Enabled = false
+                        end
+                    end)
+                    break
                 end
             end
-            if Terrain then
-                Terrain.WaterWaveSize     = 0
-                Terrain.WaterWaveSpeed    = 0
-                Terrain.WaterReflectance  = 0
-                Terrain.WaterTransparency = 1
+        end
+
+        -- Watch for new instances and disable immediately
+        workspace.DescendantAdded:Connect(function(inst)
+            if not getBoostFPS() then return end
+            for _, cls in ipairs(toDisable) do
+                if inst:IsA(cls) then
+                    pcall(function()
+                        if inst:FindFirstProperty("Enabled") ~= nil then
+                            inst.Enabled = false
+                        end
+                    end)
+                    break
+                end
             end
-            settings().Rendering.QualityLevel = 1
         end)
-        for _, d in ipairs(workspace:GetDescendants()) do
-            if d:IsA("ParticleEmitter") or d:IsA("Trail")
-            or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles") then
-                d.Enabled = false
+
+        -- Reduce shadow/texture detail on all BaseParts
+        for _, inst in ipairs(workspace:GetDescendants()) do
+            if inst:IsA("BasePart") then
+                pcall(function()
+                    inst.CastShadow = false
+                    inst.Material   = Enum.Material.SmoothPlastic
+                end)
             end
         end
+
         notify("FPS Boost ON", true)
+
     elseif not on and fpsApplied then
         fpsApplied = false
-        pcall(function()
-            if oldGfx.GlobalShadows ~= nil then Lighting.GlobalShadows = oldGfx.GlobalShadows end
-            if oldGfx.FogEnd        ~= nil then Lighting.FogEnd        = oldGfx.FogEnd        end
-            if oldGfx.Brightness    ~= nil then Lighting.Brightness    = oldGfx.Brightness    end
-        end)
+        -- Restore lighting
+        local Lighting = game:GetService("Lighting")
+        Lighting.GlobalShadows = true
+        Lighting.FogEnd        = 100000
+        Lighting.Brightness    = 1
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("PostEffect") then e.Enabled = true end
+        end
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
         notify("FPS Boost OFF", true)
     end
 end)
@@ -1475,38 +1544,60 @@ local function requestNextRoom()
     if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
 end
 
--- ── Event-driven GUI handler (shop + treasure) ───────────────────
--- TreasurePanel is a Frame inside an existing ScreenGui — NOT a new ScreenGui.
--- We watch DescendantAdded on playerGui to catch it.
+-- ── GUI event handlers (shop + treasure) ─────────────────────────
+-- Both panels are Frames inside existing ScreenGuis, not new ScreenGui children.
+-- Use DescendantAdded on playerGui to catch them.
 local treasureHandled = false
+local shopHandled     = false
+
 playerGui.DescendantAdded:Connect(function(d)
     if not inGameMode() then return end
-    if d.Name ~= "TreasurePanel" then return end
-    if treasureHandled then return end
-    treasureHandled = true
-    task.delay(10, function() treasureHandled = false end) -- reset after 10s
-    if getAutoCollectChests() then
-        openedChests = {}
-        task.wait(0.5)
-        collectAndCloseTreasure()
-        if getAutoNextRoom() then task.wait(1); requestNextRoom() end
+    local name = d.Name
+
+    -- Treasure Room panel
+    if name == "TreasurePanel" or name:find("Treasure") then
+        if treasureHandled then return end
+        treasureHandled = true
+        task.delay(15, function() treasureHandled = false end)
+        if getAutoCollectChests() then
+            openedChests = {}
+            refreshRemotes() -- ensure remotes are resolved for this run
+            task.wait(0.8)   -- let chests populate
+            collectAndCloseTreasure()
+            if getAutoNextRoom() then task.wait(1); requestNextRoom() end
+        end
+        return
+    end
+
+    -- Shop panel — "ShopPanel", "StitchesShop", or any frame containing "Shop"
+    if name == "ShopPanel" or name:find("Shop") or name:find("Stitches") then
+        if shopHandled then return end
+        shopHandled = true
+        task.delay(15, function() shopHandled = false end)
+        if getAutoSkipShop() then
+            refreshRemotes()
+            task.wait(0.3)
+            closeShopGui()
+            if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
+        end
+        return
     end
 end)
 
--- ScreenGui ChildAdded handles shop (which IS a new ScreenGui or frame)
+-- Also catch shop as a new ScreenGui child (covers both cases)
 playerGui.ChildAdded:Connect(function(g)
     task.wait(0.5)
     if not inGameMode() then return end
     if not g:IsA("ScreenGui") or g == gui then return end
-
-    local texts = {}
+    -- Quick label scan for shop detection
     for _, d in ipairs(g:GetDescendants()) do
-        if d:IsA("TextLabel") then texts[d.Text] = true end
-    end
-
-    for t in pairs(texts) do
-        if t:find("Stitches") or t == "Odyssey Coins" then
-            if getAutoSkipShop() then
+        if d:IsA("TextLabel") and d.Text
+        and (d.Text:find("Stitches") or d.Text == "Odyssey Coins") then
+            if getAutoSkipShop() and not shopHandled then
+                shopHandled = true
+                task.delay(15, function() shopHandled = false end)
+                refreshRemotes()
+                task.wait(0.3)
                 closeShopGui()
                 if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
             end
@@ -1537,7 +1628,8 @@ do
             elseif reason == "skip-unit" then
                 skipCards()
             end
-            nextRoomClock = os.clock() + 2        elseif getAutoNextRoom() then
+            nextRoomClock = os.clock() + 2
+        elseif getAutoNextRoom() then
             if os.clock() - nextRoomClock >= 2 then
                 nextRoomClock = os.clock()
                 requestNextRoom()
