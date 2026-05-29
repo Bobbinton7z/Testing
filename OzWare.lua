@@ -812,49 +812,9 @@ local function isBasePart(name)
     return false
 end
 
-local Players = game:GetService("Players")
-local lp      = Players.LocalPlayer
-
--- Shared helper: classify every top-level Model in workspace
--- Returns: isPlayerUnit (owned by any player), isEnemy (has BillboardGui/Humanoid, not owned by player)
-local function classifyModel(model, charSet, unitSet)
-    if charSet[model] then return "playerchar" end
-    if unitSet[model]  then return "unit" end
-    -- Enemies: have a BillboardGui (health bar) or Humanoid, not a player character
-    if model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("BillboardGui") then
-        return "enemy"
-    end
-    return "map"
-end
-
--- Build sets of player characters and placed units at call time
-local function buildCharAndUnitSets()
-    local charSet, unitSet = {}, {}
-    for _, pl in ipairs(Players:GetPlayers()) do
-        if pl.Character then
-            charSet[pl.Character] = true
-            -- Units placed by players are direct children of the character or
-            -- Models parented to workspace that contain a part named after the player
-            -- In this game, placed units are Models in workspace tagged with the owner
-            for _, child in ipairs(workspace:GetChildren()) do
-                if child:IsA("Model") then
-                    -- Check for owner attribute or a part linking to this player
-                    local owner = child:GetAttribute("Owner")
-                        or child:GetAttribute("PlayerId")
-                        or child:GetAttribute("UserId")
-                    if owner and (tostring(owner) == tostring(pl.UserId)
-                               or tostring(owner) == pl.Name) then
-                        unitSet[child] = true
-                    end
-                end
-            end
-        end
-    end
-    return charSet, unitSet
-end
-
 -- ── Delete Map Structures ─────────────────────────────────────────
--- Hides map BaseParts only. Units turn green, enemies turn red (if delete enemies is off).
+-- Hides all workspace descendants EXCEPT Entities folder (enemies) and player characters.
+-- Units (non-Entities models with player owner) turn green.
 local mapDeleted = false
 local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
@@ -863,80 +823,60 @@ onDeleteMap(function(on)
     if not inGameMode() then notify("Must be in a match", false); return end
     mapDeleted = true
 
-    local hrp  = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
-    local pY   = hrp and hrp.Position.Y or 0
-    local charSet, unitSet = buildCharAndUnitSets()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    local pY  = hrp and hrp.Position.Y or 0
     local count = 0
 
-    for _, model in ipairs(workspace:GetChildren()) do
-        if not model:IsA("Model") then
-            -- Non-model workspace children (Terrain, script-spawned parts): hide them
-            if model:IsA("BasePart") and not isBasePart(model.Name) then
-                model.Transparency = 1
-                model.CanCollide   = false
+    -- Build player character set to skip
+    local charSet = {}
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl.Character then charSet[pl.Character] = true end
+    end
+
+    for _, child in ipairs(workspace:GetChildren()) do
+        -- Skip confirmed enemy folder
+        if child.Name == "Entities" then continue end
+        -- Skip player characters
+        if charSet[child] then
+            -- Tint green so still visible
+            for _, p in ipairs(child:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    pcall(function() p.BrickColor = BrickColor.new("Bright green"); p.Material = Enum.Material.Neon; p.CastShadow = false end)
+                end
             end
             continue
         end
+        -- Skip Camera, Terrain (handled by FPS boost), non-parts
+        if child:IsA("Camera") or child.ClassName == "Terrain" then continue end
 
-        local kind = classifyModel(model, charSet, unitSet)
-
-        if kind == "playerchar" or kind == "unit" then
-            -- Tint units green so they're still visible
-            for _, p in ipairs(model:GetDescendants()) do
-                if p:IsA("BasePart") then
-                    pcall(function()
-                        p.BrickColor  = BrickColor.new("Bright green")
-                        p.Material    = Enum.Material.Neon
-                        p.CastShadow  = false
-                    end)
-                elseif p:IsA("Decal") or p:IsA("Texture") or p:IsA("ParticleEmitter")
-                    or p:IsA("Trail") or p:IsA("Beam") or p:IsA("BillboardGui")
-                    or p:IsA("SurfaceGui") then
-                    pcall(function()
-                        if p:FindFirstProperty("Enabled") then p.Enabled = false
-                        elseif p:IsA("Decal") or p:IsA("Texture") then p.Transparency = 1 end
-                    end)
-                end
+        -- Everything else: hide BaseParts, keep floor collidable
+        for _, p in ipairs(child:GetDescendants()) do
+            if p:IsA("BasePart") and p.Transparency < 1 then
+                p.Transparency = 1
+                local isFloor = (pY - p.Position.Y) >= 0 and (pY - p.Position.Y) <= 6
+                if not isFloor then p.CanCollide = false end
+                pcall(function()
+                    local m = p:FindFirstChildOfClass("SpecialMesh")
+                    if m then m.MeshType = Enum.MeshType.Block end
+                end)
+                count = count + 1
+            elseif p:IsA("Decal") or p:IsA("Texture") then
+                p.Transparency = 1
             end
-
-        elseif kind == "enemy" then
-            -- Tint enemies red so they're still visible (unless delete enemies is on)
-            if not getDeleteEnemies() then
-                for _, p in ipairs(model:GetDescendants()) do
-                    if p:IsA("BasePart") then
-                        pcall(function()
-                            p.BrickColor  = BrickColor.new("Bright red")
-                            p.Material    = Enum.Material.Neon
-                            p.CastShadow  = false
-                        end)
-                    end
-                end
-            end
-
-        else
-            -- Map structure: hide it
-            for _, p in ipairs(model:GetDescendants()) do
-                if isBasePart(p.Name) then continue end
-                if p:IsA("BasePart") and p.Transparency < 1 then
-                    p.Transparency = 1
-                    local isFloor = (pY - p.Position.Y) >= 0 and (pY - p.Position.Y) <= 6
-                    if not isFloor then p.CanCollide = false end
-                    pcall(function()
-                        local m = p:FindFirstChildOfClass("SpecialMesh")
-                        if m then m.MeshType = Enum.MeshType.Block end
-                    end)
-                    count = count + 1
-                elseif p:IsA("Decal") or p:IsA("Texture") then
-                    p.Transparency = 1
-                end
-            end
+        end
+        -- Also handle direct BasePart children
+        if child:IsA("BasePart") and child.Transparency < 1 then
+            child.Transparency = 1
+            local isFloor = (pY - child.Position.Y) >= 0 and (pY - child.Position.Y) <= 6
+            if not isFloor then child.CanCollide = false end
+            count = count + 1
         end
     end
     notify(("Map: hid %d parts"):format(count), true)
 end)
 
 -- ── Delete Enemies ────────────────────────────────────────────────
--- Destroys enemy models. Leaves player characters and placed units alone.
+-- CONFIRMED: enemies live in workspace.Entities folder as numbered Models (1,2,3...)
 local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies", 3, false, "util.deletenemies")
 local destroyedEnemies = {}
 onDeleteEnemies(function(on)
@@ -946,20 +886,40 @@ task.spawn(function()
     while true do
         task.wait(0.2)
         if not getDeleteEnemies() or not inGameMode() then continue end
-        local charSet, unitSet = buildCharAndUnitSets()
-        for _, model in ipairs(workspace:GetChildren()) do
-            if not model:IsA("Model") then continue end
+        local entities = workspace:FindFirstChild("Entities")
+        if not entities then continue end
+        for _, model in ipairs(entities:GetChildren()) do
             if destroyedEnemies[model] then continue end
-            local kind = classifyModel(model, charSet, unitSet)
-            if kind == "enemy" then
+            if model:IsA("Model") or model:IsA("BasePart") then
                 destroyedEnemies[model] = true
                 pcall(function() model:Destroy() end)
             end
         end
     end
 end)
+-- Also watch for new enemies spawning
+workspace.ChildAdded:Connect(function(child)
+    if child.Name ~= "Entities" then return end
+    child.ChildAdded:Connect(function(model)
+        if not getDeleteEnemies() then return end
+        task.wait(0.05)
+        pcall(function() model:Destroy() end)
+    end)
+end)
+do
+    local entities = workspace:FindFirstChild("Entities")
+    if entities then
+        entities.ChildAdded:Connect(function(model)
+            if not getDeleteEnemies() then return end
+            task.wait(0.05)
+            pcall(function() model:Destroy() end)
+        end)
+    end
+end
 
 -- ── FPS Boost ─────────────────────────────────────────────────────
+-- CONFIRMED paths: workspace.Terrain, game:GetService("Lighting")
+-- Makes everything flat grey — no textures, no sky, no particles.
 local fpsApplied = false
 local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.fpsbst")
 onBoostFPS(function(on)
@@ -967,40 +927,54 @@ onBoostFPS(function(on)
         fpsApplied = true
         local Lighting = game:GetService("Lighting")
 
+        -- Lowest quality setting
         settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
 
-        -- Flat grey lighting, no sky, no atmosphere
+        -- Nuke all Lighting children (Sky, Atmosphere, PostEffects, etc.)
+        for _, c in ipairs(Lighting:GetChildren()) do
+            pcall(function() c:Destroy() end)
+        end
+        -- Flat grey lighting
         Lighting.GlobalShadows        = false
         Lighting.FogEnd               = 9e9
         Lighting.FogStart             = 9e9
         Lighting.Brightness           = 0
-        Lighting.Ambient              = Color3.fromRGB(180,180,180)
-        Lighting.OutdoorAmbient       = Color3.fromRGB(180,180,180)
+        Lighting.Ambient              = Color3.fromRGB(200, 200, 200)
+        Lighting.OutdoorAmbient       = Color3.fromRGB(200, 200, 200)
         Lighting.ClockTime            = 14
         Lighting.ExposureCompensation = 0
-        for _, c in ipairs(Lighting:GetChildren()) do
-            pcall(function() c:Destroy() end) -- removes Sky, Atmosphere, all PostEffects
+        Lighting.ColorShift_Bottom    = Color3.new(0,0,0)
+        Lighting.ColorShift_Top       = Color3.new(0,0,0)
+
+        -- Terrain: flat grey, no decoration, no water effects
+        local Terrain = workspace.Terrain
+        Terrain.WaterWaveSize     = 0
+        Terrain.WaterWaveSpeed    = 0
+        Terrain.WaterReflectance  = 0
+        Terrain.WaterTransparency = 1
+        Terrain.Decoration        = false
+        -- Remove clouds from Terrain
+        for _, c in ipairs(Terrain:GetChildren()) do
+            if c:IsA("Clouds") then pcall(function() c:Destroy() end) end
         end
 
-        local Terrain = workspace:FindFirstChildOfClass("Terrain")
-        if Terrain then
-            Terrain.WaterWaveSize    = 0; Terrain.WaterWaveSpeed   = 0
-            Terrain.WaterReflectance = 0; Terrain.WaterTransparency = 1
-            Terrain.Decoration       = false
-        end
-
+        -- Simplify every instance in workspace
         local function simplify(inst)
             if inst:IsA("BasePart") then
                 pcall(function()
-                    inst.Material   = Enum.Material.SmoothPlastic
-                    inst.CastShadow = false
+                    inst.Material    = Enum.Material.SmoothPlastic
+                    inst.CastShadow  = false
                     inst.Reflectance = 0
+                    -- Make terrain-adjacent parts grey
+                    inst.BrickColor  = BrickColor.new("Medium stone grey")
                 end)
             end
             local cls = inst.ClassName
-            if cls == "ParticleEmitter" or cls == "Trail" or cls == "Beam"
-            or cls == "Smoke" or cls == "Fire" or cls == "Sparkles"
-            or cls == "SelectionBox" or cls == "Atmosphere" or cls == "Sky" then
+            if cls=="ParticleEmitter" or cls=="Trail" or cls=="Beam"
+            or cls=="Smoke" or cls=="Fire" or cls=="Sparkles"
+            or cls=="SelectionBox" or cls=="Atmosphere" or cls=="Sky"
+            or cls=="Clouds" or cls=="PointLight" or cls=="SpotLight"
+            or cls=="SurfaceLight" then
                 pcall(function() inst:Destroy() end)
             elseif inst:IsA("Decal") or inst:IsA("Texture") then
                 pcall(function() inst.Transparency = 1 end)
@@ -1018,6 +992,8 @@ onBoostFPS(function(on)
     elseif not on and fpsApplied then
         fpsApplied = false
         notify("FPS Boost OFF — rejoin to fully restore", true)
+    end
+end)
     end
 end)
 
