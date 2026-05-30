@@ -994,10 +994,8 @@ onBoostFPS(function(on)
         notify("FPS Boost OFF — rejoin to fully restore", true)
     end
 end)
-    end
-end)
 
-end
+end -- close Game Tab do block
 
 -- ======================
 -- ODYSSEY TAB  (dynamic, no UUIDs)
@@ -1614,7 +1612,6 @@ end -- close Odyssey do block
 switchTab("Lobby")
 notify("OzWare V3 loaded", true)
 
-
 -- ======================
 -- FLOATING TOGGLE (bottom-left)  +  SUMMON UI SUPPRESSOR
 -- ======================
@@ -1679,4 +1676,4 @@ end)
 -- Do not destroy game ScreenGuis and do not monkey-patch SummonAnimationHandler.
 -- Both approaches can leave WindowHandler / game button state stuck, which is
 -- what made summon buttons and mode-join buttons stop responding.
-end
+end -- close Float button do block
