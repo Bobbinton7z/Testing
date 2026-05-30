@@ -1028,6 +1028,8 @@ local function refreshRemotes()
         REMOTES.CardPickEvent   = _advFolder:FindFirstChild("CardPickEvent")
         REMOTES.ShopEvent       = _advFolder:FindFirstChild("ShopEvent")
         REMOTES.TreasureEvent   = _advFolder:FindFirstChild("TreasureEvent")
+        REMOTES.UnitRewardEvent = _advFolder:FindFirstChild("UnitRewardEvent")
+        REMOTES.BossRewardEvent = _advFolder:FindFirstChild("BossRewardEvent")
         REMOTES.VoteEvent       = _advFolder:FindFirstChild("VoteEvent")
         REMOTES.MapEvent        = _advFolder:FindFirstChild("MapEvent")
             or Net:FindFirstChild("MapEvent")
@@ -1035,7 +1037,6 @@ local function refreshRemotes()
     if _stageMech then
         REMOTES.OdysseyChest = _stageMech:FindFirstChild("OdysseyChest")
     end
-    -- ModifierEvent: fires "ClientReady" after each vote to signal readiness
     REMOTES.ModifierEvent = Net:FindFirstChild("ModifierEvent")
 end
 refreshRemotes()
@@ -1178,10 +1179,12 @@ local _, getAutoPick           = toggle(autoSec, "Auto select cards", 3, true, "
 label(autoSec, "Will select basic cards and prioritize the highest rarity", 4)
 local _, getAutoRagnawCards    = toggle(autoSec, "Auto Select Unit Cards (Ragnaw Only)", 5, false, "odyssey.auto_ragnaw_unit_cards")
 label(autoSec, "Will select 4 cards that pair good with Ragnaw", 6)
-local _, getAutoSkipShop       = toggle(autoSec, "Auto skip shop (advance past floor)", 7, false, "odyssey.auto_skip_shop.v2_safe")
-label(autoSec, "Shop floors have no GUI — enabling this with Auto Next Room skips past them", 8)
-local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect chest", 9, false, "odyssey.auto_collect_chest.v2_safe")
-label(autoSec, "Will collect chests and close the treasure UI; pair this with Auto Next Room", 10)
+local _, getAutoSkipShop       = toggle(autoSec, "Auto Skip Shop", 7, false, "odyssey.auto_skip_shop.v3")
+label(autoSec, "Closes Stiches' Shop and advances to next room", 8)
+local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect Chests", 9, false, "odyssey.auto_collect_chest.v3")
+label(autoSec, "Opens all chests in Treasure Room and closes UI", 10)
+local _, getSkipUnitReward     = toggle(autoSec, "Skip Unit Reward", 11, false, "odyssey.skip_unit_reward")
+label(autoSec, "Skips the unit reward panel after clearing an elite room", 12)
 
 -- =====================================================
 
@@ -1390,80 +1393,77 @@ end
 -- Both use CardPickEvent:FireServer("Pick", index) and ("Skip", 0)
 
 
-local function findGuiWithText(text, exact)
-    for _, g in ipairs(playerGui:GetChildren()) do
-        if g == gui or not g:IsA("ScreenGui") then continue end
-        for _, d in ipairs(g:GetDescendants()) do
-            if d:IsA("TextLabel") then
-                if exact and d.Text == text then return g end
-                if not exact and d.Text:find(text, 1, true) then return g end
-            end
-        end
-    end
-    return nil
+-- ── AdventureHUD helper ──────────────────────────────────────────
+-- CONFIRMED: all panels live inside PlayerGui.AdventureHUD
+-- AdventureHUD children:
+--   ChooseCard              — card pick panel
+--   Stiches' Shop_Export    — shop panel (note: Stiches, one t)
+--   TreasurePanel           — treasure room panel
+--   RunRewardsPanelRoot     — unit reward after elite room ("CLAIM YOUR REWARDS")
+--   AdventureMapRoot        — map/vote UI
+
+local function getAdventureHUD()
+    return playerGui:FindFirstChild("AdventureHUD")
 end
 
-local function findFrameInGui(frameName)
-    for _, g in ipairs(playerGui:GetChildren()) do
-        if g == gui then continue end
-        local f = g:FindFirstChild(frameName, true)
-        if f then return f, g end
-    end
-    return nil, nil
+local function getPanelVisible(panelName)
+    local hud = getAdventureHUD()
+    if not hud then return false end
+    local panel = hud:FindFirstChild(panelName)
+    if not panel then return false end
+    -- Panel is active if it exists and is not explicitly invisible
+    return panel.Visible ~= false
 end
 
 -- ── Card pick ────────────────────────────────────────────────────
+-- CONFIRMED: cards are in AdventureHUD.ChooseCard
+-- ModifierTitle TextLabels sorted left-to-right = index 1,2,3
 local function readOpenCardOptions()
-    for _, g in ipairs(playerGui:GetChildren()) do
-        if g == gui or not g:IsA("ScreenGui") then continue end
-        if g.Enabled == false then continue end
-        local cards = {}
-        local hasSkip, hasReroll, hasConfirm = false, false, false
-        for _, d in ipairs(g:GetDescendants()) do
-            if d:IsA("TextLabel") and d.Name == "ModifierTitle" and d.Text and #d.Text > 1 then
-                table.insert(cards, {text = d.Text, x = d.AbsolutePosition.X})
-            end
-            if d:IsA("TextButton") and d.Text then
-                local tl = d.Text:lower()
-                if tl == "skip"           then hasSkip    = true end
-                if tl:find("reroll")      then hasReroll  = true end
-                if tl:find("confirm")     then hasConfirm = true end
-            end
+    local hud = getAdventureHUD()
+    if not hud then return nil end
+    local chooseCard = hud:FindFirstChild("ChooseCard")
+    if not chooseCard or chooseCard.Visible == false then return nil end
+
+    local cards = {}
+    local hasSkip, hasReroll, hasConfirm = false, false, false
+    for _, d in ipairs(chooseCard:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Name == "ModifierTitle" and d.Text and #d.Text > 1 then
+            table.insert(cards, {text = d.Text, x = d.AbsolutePosition.X})
         end
-        -- Must have cards + Skip + (Reroll or Confirm) — excludes Stage Info
-        if #cards > 0 and hasSkip and (hasReroll or hasConfirm) then
-            table.sort(cards, function(a, b) return a.x < b.x end)
-            local opts = {}
-            for _, c in ipairs(cards) do table.insert(opts, c.text) end
-            return opts
+        if d:IsA("TextButton") and d.Text then
+            local tl = d.Text:lower()
+            if tl == "skip"       then hasSkip    = true end
+            if tl:find("reroll")  then hasReroll  = true end
+            if tl:find("confirm") then hasConfirm = true end
         end
     end
-    return nil
+    if #cards == 0 then return nil end
+    if not hasSkip then return nil end
+    table.sort(cards, function(a, b) return a.x < b.x end)
+    local opts = {}
+    for _, c in ipairs(cards) do table.insert(opts, c.text) end
+    return opts
 end
 
--- ── Shop detection ───────────────────────────────────────────────
+-- ── Shop ─────────────────────────────────────────────────────────
+-- CONFIRMED: AdventureHUD["Stiches' Shop_Export"]
 local function isShopOpen()
-    -- Check for TreasurePanel's sibling ShopPanel, or any GUI with Stitches text
-    local f = findFrameInGui("ShopPanel")
-    if f then return true end
-    return findGuiWithText("Stitches", false) ~= nil
-        or findGuiWithText("Odyssey Coins", true) ~= nil
+    return getPanelVisible("Stiches' Shop_Export")
 end
 
--- ── Treasure detection ───────────────────────────────────────────
-local function isTreasureOpen()
-    local f = findFrameInGui("TreasurePanel")
-    return f ~= nil
-end
-
--- ── Shop close ───────────────────────────────────────────────────
 local function closeShopGui()
     refreshRemotes()
     local shopEv = getONet("ShopEvent")
     if shopEv then pcall(function() shopEv:FireServer("Close") end) end
 end
 
--- ── Treasure collect ─────────────────────────────────────────────
+-- ── Treasure ─────────────────────────────────────────────────────
+-- CONFIRMED: AdventureHUD.TreasurePanel
+-- TreasureEvent:FireServer("OpenChest", index) — indices 1-12
+local function isTreasureOpen()
+    return getPanelVisible("TreasurePanel")
+end
+
 local openedChests = {}
 local function collectAndCloseTreasure()
     refreshRemotes()
@@ -1477,18 +1477,34 @@ local function collectAndCloseTreasure()
             end
         end
     end
-    -- Click the Close button on TreasurePanel
-    local panel = findFrameInGui("TreasurePanel")
-    if panel then
-        local closeBtn = panel:FindFirstChild("Close", true)
-        if closeBtn then
-            pcall(function() closeBtn.Activated:Fire() end)
-            pcall(function() closeBtn.MouseButton1Click:Fire() end)
+    -- Click Close button inside TreasurePanel
+    local hud = getAdventureHUD()
+    if hud then
+        local panel = hud:FindFirstChild("TreasurePanel")
+        if panel then
+            local closeBtn = panel:FindFirstChild("Close", true)
+            if closeBtn then
+                pcall(function() closeBtn.Activated:Fire() end)
+                pcall(function() closeBtn.MouseButton1Click:Fire() end)
+            end
         end
     end
 end
 
--- ── requestNextRoom ──────────────────────────────────────────────
+-- ── Unit Reward ───────────────────────────────────────────────────
+-- CONFIRMED: AdventureHUD.RunRewardsPanelRoot — "CLAIM YOUR REWARDS"
+-- UnitRewardEvent:FireServer("Skip") to skip
+local function isUnitRewardOpen()
+    return getPanelVisible("RunRewardsPanelRoot")
+end
+
+local function skipUnitRewardPanel()
+    refreshRemotes()
+    local ev = getONet("UnitRewardEvent")
+    if ev then pcall(function() ev:FireServer("Skip") end) end
+end
+
+-- ── requestNextRoom ───────────────────────────────────────────────
 local function requestNextRoom()
     refreshRemotes()
     local mapEv = getONet("MapEvent")
@@ -1504,18 +1520,30 @@ local function requestNextRoom()
     if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
 end
 
--- ── Master automation loop ───────────────────────────────────────
--- Single Heartbeat poll handles everything. No DescendantAdded, no Enabled watchers.
--- Each action has its own cooldown so they don't interfere with each other.
+-- ── Master automation loop ────────────────────────────────────────
+-- Single Heartbeat poll. Checks AdventureHUD panel visibility directly.
 do
-    local clocks = {card=0, shop=0, treasure=0, room=0}
-    local shopDone, treasureDone = false, false
+    local clocks = {card=0, shop=0, treasure=0, room=0, unit=0}
+    local shopDone, treasureDone, unitDone = false, false, false
 
     RunSvc.Heartbeat:Connect(function()
         local now = os.clock()
         if not inGameMode() then
-            shopDone = false; treasureDone = false
+            shopDone = false; treasureDone = false; unitDone = false
             return
+        end
+
+        -- Unit Reward (check every 0.5s)
+        if getSkipUnitReward() and now - clocks.unit >= 0.5 then
+            clocks.unit = now
+            if isUnitRewardOpen() then
+                if not unitDone then
+                    unitDone = true
+                    task.spawn(skipUnitRewardPanel)
+                end
+            else
+                unitDone = false
+            end
         end
 
         -- Card pick (check every 0.5s)
@@ -1533,7 +1561,7 @@ do
                 elseif reason == "skip-unit" then
                     skipCards()
                 end
-                clocks.room = now + 2 -- hold off room advance after picking
+                clocks.room = now + 2
                 return
             end
         end
@@ -1546,9 +1574,7 @@ do
                     shopDone = true
                     task.spawn(function()
                         closeShopGui()
-                        if getAutoNextRoom() then
-                            task.wait(0.5); requestNextRoom()
-                        end
+                        if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
                     end)
                 end
             else
@@ -1565,9 +1591,7 @@ do
                     openedChests = {}
                     task.spawn(function()
                         collectAndCloseTreasure()
-                        if getAutoNextRoom() then
-                            task.wait(1); requestNextRoom()
-                        end
+                        if getAutoNextRoom() then task.wait(1); requestNextRoom() end
                     end)
                 end
             else
@@ -1575,7 +1599,7 @@ do
             end
         end
 
-        -- Auto Next Room (check every 2s when nothing else is happening)
+        -- Auto Next Room (check every 2s)
         if getAutoNextRoom() and now - clocks.room >= 2 then
             clocks.room = now
             task.spawn(requestNextRoom)
