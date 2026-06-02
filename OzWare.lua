@@ -17,23 +17,23 @@ local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
 local Net       = RS:WaitForChild("Networking")
 
 -- ======================
--- THEME (high contrast)
+-- THEME (dark purple / grunge)
 -- ======================
 local C = {
-    BG       = Color3.fromRGB(28, 34, 52),       -- dark navy window
-    PANEL    = Color3.fromRGB(22, 28, 44),       -- sidebar / titlebar (slightly darker)
-    CARD     = Color3.fromRGB(34, 42, 62),       -- cards
-    BORDER   = Color3.fromRGB(55, 65, 95),
-    ACCENT   = Color3.fromRGB(95, 230, 240),     -- neon cyan
-    ACCENT2  = Color3.fromRGB(255, 70, 160),     -- neon magenta
+    BG       = Color3.fromRGB(12, 10, 18),         -- near-black purple background
+    PANEL    = Color3.fromRGB(20, 16, 30),         -- sidebar / titlebar
+    CARD     = Color3.fromRGB(24, 20, 38),         -- section cards
+    BORDER   = Color3.fromRGB(90, 40, 120),        -- purple border
+    ACCENT   = Color3.fromRGB(180, 60, 255),       -- vivid purple
+    ACCENT2  = Color3.fromRGB(255, 40, 200),       -- hot pink/magenta
     GREEN    = Color3.fromRGB(80, 220, 170),
-    RED      = Color3.fromRGB(255, 90, 130),
+    RED      = Color3.fromRGB(255, 80, 120),
     YELLOW   = Color3.fromRGB(245, 200, 90),
     TEXT     = Color3.fromRGB(255, 255, 255),
-    SUBTEXT  = Color3.fromRGB(245, 248, 255),
-    DIM      = Color3.fromRGB(220, 226, 240),
-    DISABLED = Color3.fromRGB(55, 60, 85),
-    ACTIVE   = Color3.fromRGB(245, 248, 255),    -- light pill for active tab
+    SUBTEXT  = Color3.fromRGB(180, 160, 210),
+    DIM      = Color3.fromRGB(140, 120, 175),
+    DISABLED = Color3.fromRGB(45, 38, 65),
+    ACTIVE   = Color3.fromRGB(180, 60, 255),       -- active tab = purple pill
 }
 local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
@@ -206,39 +206,39 @@ local win = Instance.new("Frame")
 win.Name="Window"; win.Size=UDim2.new(0,720,0,460)
 win.AnchorPoint=Vector2.new(0.5,0.5); win.Position=UDim2.new(0.5,0,0.5,0)
 win.BackgroundColor3=C.BG; win.BorderSizePixel=0; win.ClipsDescendants=true
--- Active=true means only the window frame itself captures mouse events;
--- areas of the ScreenGui outside the window are fully click-through so
--- game buttons behind OzWare continue to work normally.
 win.Active=true; win.Parent=gui
-corner(win,18); stroke(win,C.BORDER,1)
+corner(win,14); stroke(win,C.ACCENT,2)
 
--- Neon side glow bars (left = cyan, right = magenta) — parented to gui, hugging window
+-- Purple neon glow bars on sides
 local function glowBar(side, col)
     local g=Instance.new("Frame")
     g.AnchorPoint=Vector2.new(0.5,0.5)
-    g.Size=UDim2.new(0,4,0,420)
-    -- side: -1 = left of window, +1 = right of window
-    g.Position=UDim2.new(0.5, side * (360 + 16), 0.5, 0)
+    g.Size=UDim2.new(0,3,0,420)
+    g.Position=UDim2.new(0.5, side * (360 + 12), 0.5, 0)
     g.BackgroundColor3=col; g.BorderSizePixel=0; g.ZIndex=0; g.Parent=gui
     corner(g,2)
     local s=Instance.new("ImageLabel")
-    s.AnchorPoint=Vector2.new(0.5,0.5); s.Size=UDim2.new(0,90,1,80)
+    s.AnchorPoint=Vector2.new(0.5,0.5); s.Size=UDim2.new(0,80,1,80)
     s.Position=UDim2.new(0.5,0,0.5,0); s.BackgroundTransparency=1
     s.Image="rbxassetid://5028857084"; s.ImageColor3=col
-    s.ImageTransparency=0.45; s.ZIndex=0; s.Parent=g
+    s.ImageTransparency=0.3; s.ZIndex=0; s.Parent=g
 end
+glowBar(-1, C.ACCENT)
+glowBar( 1, C.ACCENT2)
 
--- Title bar
+-- Title bar with gradient header
 local titleBar=Instance.new("Frame")
 titleBar.Size=UDim2.new(1,0,0,52); titleBar.BackgroundColor3=C.PANEL
 titleBar.BorderSizePixel=0; titleBar.ZIndex=2; titleBar.Parent=win
-corner(titleBar,18)
+corner(titleBar,14)
 local titleCover=Instance.new("Frame")
 titleCover.Size=UDim2.new(1,0,0,18); titleCover.Position=UDim2.new(0,0,1,-18)
 titleCover.BackgroundColor3=C.PANEL; titleCover.BorderSizePixel=0
 titleCover.ZIndex=2; titleCover.Parent=titleBar
+-- Subtle purple gradient on title bar
+gradient(titleBar, C.PANEL, Color3.fromRGB(35, 20, 55), 180)
 
--- Monogram logo "Oz" with neon gradient
+-- "Oz" logo with purple glow
 local logo=Instance.new("TextLabel")
 logo.Size=UDim2.new(0,38,0,38); logo.Position=UDim2.new(0,14,0.5,-19)
 logo.BackgroundTransparency=1; logo.Text="Oz"
@@ -246,13 +246,14 @@ logo.TextColor3=C.ACCENT; logo.TextSize=22; logo.Font=FONT_BOLD
 logo.ZIndex=3; logo.Parent=titleBar
 gradient(logo,C.ACCENT,C.ACCENT2,135)
 
--- Centered title
+-- Centered title — graffiti style uppercase
 local titleLbl=Instance.new("TextLabel")
-titleLbl.Size=UDim2.new(0,200,1,0); titleLbl.AnchorPoint=Vector2.new(0.5,0)
+titleLbl.Size=UDim2.new(0,220,1,0); titleLbl.AnchorPoint=Vector2.new(0.5,0)
 titleLbl.Position=UDim2.new(0.5,0,0,0)
 titleLbl.BackgroundTransparency=1; titleLbl.Text="OzWare V3"
-titleLbl.TextColor3=C.TEXT; titleLbl.TextSize=18; titleLbl.Font=FONT_BOLD
+titleLbl.TextColor3=C.TEXT; titleLbl.TextSize=19; titleLbl.Font=FONT_BOLD
 titleLbl.ZIndex=3; titleLbl.Parent=titleBar
+gradient(titleLbl, C.ACCENT, C.ACCENT2, 0)
 
 -- Title buttons
 local function titleBtn(rightOffset, bg, symbol)
@@ -310,8 +311,8 @@ contentArea.Size=UDim2.new(1, -180, 1, -64); contentArea.Position=UDim2.new(0,17
 contentArea.BackgroundTransparency=1; contentArea.ClipsDescendants=true; contentArea.Parent=win
 
 local tabButtons, tabLabels, tabIcons, tabPages, activeTab = {}, {}, {}, {}, nil
-local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey"}
-local TAB_ICONS = { Lobby="H", Joiner="J", Game="G", Odyssey="O" }
+local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","Macro"}
+local TAB_ICONS = { Lobby="H", Joiner="J", Game="G", Odyssey="O", Macro="M" }
 
 local function makePage()
     local p=Instance.new("ScrollingFrame")
@@ -326,35 +327,45 @@ end
 local function switchTab(name)
     for n,_ in pairs(tabPages) do
         tabPages[n].Visible=false
-        tween(tabButtons[n],{BackgroundColor3=C.PANEL, BackgroundTransparency=1},0.15)
+        tween(tabButtons[n],{BackgroundColor3=C.PANEL, BackgroundTransparency=0},0.15)
         tabLabels[n].TextColor3=C.SUBTEXT
         tabIcons[n].TextColor3=C.SUBTEXT
     end
     tabPages[name].Visible=true
-    tween(tabButtons[name],{BackgroundColor3=C.ACTIVE, BackgroundTransparency=0},0.15)
-    tabLabels[name].TextColor3=Color3.fromRGB(28,34,52)
-    tabIcons[name].TextColor3=Color3.fromRGB(28,34,52)
+    tween(tabButtons[name],{BackgroundColor3=C.ACCENT, BackgroundTransparency=0},0.15)
+    tabLabels[name].TextColor3=C.TEXT
+    tabIcons[name].TextColor3=C.TEXT
     activeTab=name
 end
 
 for i,name in ipairs(TAB_NAMES) do
     local b=Instance.new("TextButton")
-    b.Size=UDim2.new(1,0,0,38); b.BackgroundColor3=C.ACTIVE; b.BackgroundTransparency=1
+    b.Size=UDim2.new(1,0,0,36); b.BackgroundColor3=C.PANEL; b.BackgroundTransparency=0
     b.Text=""; b.AutoButtonColor=false
     b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=3; b.Parent=tabList
-    corner(b,10)
+    corner(b,8); stroke(b,C.BORDER,1)
     local ico=Instance.new("TextLabel")
-    ico.Size=UDim2.new(0,24,0,24); ico.Position=UDim2.new(0,10,0.5,-12)
+    ico.Size=UDim2.new(0,22,0,22); ico.Position=UDim2.new(0,10,0.5,-11)
     ico.BackgroundTransparency=1; ico.Text=TAB_ICONS[name] or ""
-    ico.TextColor3=C.SUBTEXT; ico.TextSize=15; ico.Font=FONT_BOLD; ico.ZIndex=4; ico.Parent=b
+    ico.TextColor3=C.SUBTEXT; ico.TextSize=14; ico.Font=FONT_BOLD; ico.ZIndex=4; ico.Parent=b
     local lbl=Instance.new("TextLabel")
-    lbl.Size=UDim2.new(1,-40,1,0); lbl.Position=UDim2.new(0,38,0,0)
+    lbl.Size=UDim2.new(1,-40,1,0); lbl.Position=UDim2.new(0,36,0,0)
     lbl.BackgroundTransparency=1; lbl.Text=name; lbl.TextColor3=C.SUBTEXT
     lbl.TextSize=13; lbl.Font=FONT_SEMI; lbl.TextXAlignment=Enum.TextXAlignment.Left
     lbl.ZIndex=4; lbl.Parent=b
     tabButtons[name]=b; tabLabels[name]=lbl; tabIcons[name]=ico
     tabPages[name]=makePage()
     b.MouseButton1Click:Connect(function() switchTab(name) end)
+    b.MouseEnter:Connect(function()
+        if activeTab ~= name then
+            tween(b, {BackgroundColor3=C.DISABLED}, 0.1)
+        end
+    end)
+    b.MouseLeave:Connect(function()
+        if activeTab ~= name then
+            tween(b, {BackgroundColor3=C.PANEL}, 0.1)
+        end
+    end)
 end
 
 -- Avatar footer at bottom of sidebar
@@ -395,7 +406,7 @@ local function section(page, title, order)
         local bar=Instance.new("Frame")
         bar.Size=UDim2.new(0,3,1,0); bar.BackgroundColor3=C.ACCENT
         bar.BorderSizePixel=0; bar.ZIndex=3; bar.Parent=hdr
-        corner(bar,2); gradient(bar,C.ACCENT,C.ACCENT2,90)
+        corner(bar,2); gradient(bar,C.ACCENT2,C.ACCENT,90)
         local lbl=Instance.new("TextLabel")
         lbl.Size=UDim2.new(1,-12,1,0); lbl.Position=UDim2.new(0,10,0,0)
         lbl.BackgroundTransparency=1; lbl.Text=title; lbl.TextColor3=C.TEXT
@@ -1607,6 +1618,389 @@ end
 end -- close Odyssey do block
 
 -- ======================
+-- MACRO TAB
+-- ======================
+do
+local macroPage = tabPages["Macro"]
+local Net        = RS:FindFirstChild("Networking")
+local unitEv     = Net and Net:FindFirstChild("UnitEvent")
+local abilityEv  = Net and Net:FindFirstChild("AbilityEvent")
+
+-- Macro storage: saved to writefile so they persist between sessions
+local MACRO_FILE = "OzWare_macros.json"
+local macros = {}  -- { [name] = { events = [{t,remote,args}], duration } }
+
+local function saveMacros()
+    -- Serialize only primitive args (strings, numbers, bools, tables of those)
+    local function serArgs(args)
+        local out = {}
+        for i, v in ipairs(args) do
+            local t = typeof(v)
+            if t == "string" or t == "number" or t == "boolean" then
+                out[i] = {type=t, value=tostring(v)}
+            elseif t == "table" then
+                local tbl = {}
+                for k, val in pairs(v) do
+                    tbl[tostring(k)] = tostring(val)
+                end
+                out[i] = {type="table", value=tbl}
+            end
+        end
+        return out
+    end
+    local data = {}
+    for name, mac in pairs(macros) do
+        local evts = {}
+        for _, e in ipairs(mac.events) do
+            table.insert(evts, {t=e.t, remote=e.remote, args=serArgs(e.args)})
+        end
+        data[name] = {events=evts, duration=mac.duration}
+    end
+    pcall(function()
+        writefile(MACRO_FILE, HttpService:JSONEncode(data))
+    end)
+end
+
+local function loadMacros()
+    pcall(function()
+        if not isfile(MACRO_FILE) then return end
+        local raw = readfile(MACRO_FILE)
+        local data = HttpService:JSONDecode(raw)
+        for name, mac in pairs(data) do
+            macros[name] = mac
+        end
+    end)
+end
+loadMacros()
+
+-- ── State ────────────────────────────────────────────────────────
+local selectedMacro = nil
+local recording     = false
+local playing       = false
+local recStart      = 0
+local hookConn      = nil  -- active __namecall hook during recording
+
+-- ── UI helpers ───────────────────────────────────────────────────
+local headerSec  = section(macroPage, "Macros", 1)
+local nameSec    = section(macroPage, "Macro Name", 2)
+local listSec    = section(macroPage, "Saved Macros", 3)
+local controlSec = section(macroPage, "Controls", 4)
+
+-- Name input
+local nameBox = input(nameSec, "Enter macro name...", 1)
+local createBtn = btn(nameSec, "Create Macro", C.ACCENT, 2)
+
+-- Selection label
+local selLabel = Instance.new("TextLabel")
+selLabel.Size = UDim2.new(1,0,0,22)
+selLabel.BackgroundTransparency = 1
+selLabel.Text = "Selected: none"
+selLabel.TextColor3 = C.SUBTEXT
+selLabel.TextSize = 12
+selLabel.Font = FONT_SEMI
+selLabel.TextXAlignment = Enum.TextXAlignment.Left
+selLabel.LayoutOrder = 3
+selLabel.Parent = nameSec
+
+-- Macro list scroll
+local listScroll = Instance.new("ScrollingFrame")
+listScroll.Size = UDim2.new(1,0,0,160)
+listScroll.BackgroundColor3 = C.BG
+listScroll.BorderSizePixel = 0
+listScroll.ScrollBarThickness = 4
+listScroll.ScrollBarImageColor3 = C.ACCENT
+listScroll.CanvasSize = UDim2.new(0,0,0,0)
+listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+listScroll.LayoutOrder = 1
+listScroll.Parent = listSec
+corner(listScroll, 7); stroke(listScroll, C.BORDER, 1)
+listLayout(listScroll, nil, 4); padding(listScroll, nil, 6, 6, 6, 6)
+
+-- Status label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1,0,0,22)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Ready"
+statusLabel.TextColor3 = C.SUBTEXT
+statusLabel.TextSize = 12
+statusLabel.Font = FONT_SEMI
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.LayoutOrder = 1
+statusLabel.Parent = controlSec
+
+-- Control buttons
+local recBtn  = btn(controlSec, "Record",   Color3.fromRGB(220,80,80),   2)
+local playBtn = btn(controlSec, "Play",     C.GREEN,                       3)
+local stopBtn = btn(controlSec, "Stop",     Color3.fromRGB(120,120,140),  4)
+local delBtn  = btn(controlSec, "Delete",   C.RED,                         5)
+
+-- ── List rebuild ─────────────────────────────────────────────────
+local function setStatus(txt, col)
+    statusLabel.Text = txt
+    statusLabel.TextColor3 = col or C.SUBTEXT
+end
+
+local function rebuildList()
+    for _, c in ipairs(listScroll:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    local names = {}
+    for k in pairs(macros) do table.insert(names, k) end
+    table.sort(names)
+
+    if #names == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(1,0,0,28)
+        empty.BackgroundTransparency = 1
+        empty.Text = "No macros yet — create one above"
+        empty.TextColor3 = C.SUBTEXT
+        empty.TextSize = 12
+        empty.Font = FONT_REG
+        empty.LayoutOrder = 1
+        empty.Parent = listScroll
+        return
+    end
+
+    for i, name in ipairs(names) do
+        local mac = macros[name]
+        local row = Instance.new("TextButton")
+        row.Size = UDim2.new(1,0,0,32)
+        row.BackgroundColor3 = (selectedMacro == name) and C.ACCENT or C.PANEL
+        row.AutoButtonColor = false
+        row.Text = ""
+        row.BorderSizePixel = 0
+        row.LayoutOrder = i
+        row.Parent = listScroll
+        corner(row, 6)
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1,-60,1,0)
+        lbl.Position = UDim2.new(0,10,0,0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = ("%s  (%d events)"):format(name, #(mac.events or {}))
+        lbl.TextColor3 = (selectedMacro == name) and Color3.fromRGB(20,24,40) or C.TEXT
+        lbl.TextSize = 12
+        lbl.Font = FONT_SEMI
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = row
+
+        row.MouseButton1Click:Connect(function()
+            selectedMacro = (selectedMacro == name) and nil or name
+            selLabel.Text = selectedMacro and ("Selected: "..selectedMacro) or "Selected: none"
+            selLabel.TextColor3 = selectedMacro and C.ACCENT or C.SUBTEXT
+            rebuildList()
+        end)
+    end
+end
+rebuildList()
+
+-- ── Create macro ─────────────────────────────────────────────────
+createBtn.MouseButton1Click:Connect(function()
+    local name = nameBox.Text:match("^%s*(.-)%s*$")
+    if not name or name == "" then
+        return notify("Enter a macro name first", false)
+    end
+    if macros[name] then
+        return notify("Macro '"..name.."' already exists", false)
+    end
+    macros[name] = {events={}, duration=0}
+    selectedMacro = name
+    selLabel.Text = "Selected: "..name
+    selLabel.TextColor3 = C.ACCENT
+    nameBox.Text = ""
+    saveMacros()
+    rebuildList()
+    notify("Macro '"..name.."' created", true)
+end)
+
+-- ── Arg serializer for replay ─────────────────────────────────────
+local function deserializeArgs(serialized)
+    local args = {}
+    for i, entry in ipairs(serialized) do
+        if entry.type == "string" then
+            args[i] = entry.value
+        elseif entry.type == "number" then
+            args[i] = tonumber(entry.value)
+        elseif entry.type == "boolean" then
+            args[i] = (entry.value == "true")
+        elseif entry.type == "table" then
+            local tbl = {}
+            for k, v in pairs(entry.value) do
+                local nk = tonumber(k) or k
+                local nv = tonumber(v)
+                tbl[nk] = nv ~= nil and nv or v
+            end
+            args[i] = tbl
+        end
+    end
+    return args
+end
+
+-- ── Record ───────────────────────────────────────────────────────
+recBtn.MouseButton1Click:Connect(function()
+    if not selectedMacro then
+        return notify("Select or create a macro first", false)
+    end
+    if playing then
+        return notify("Stop playback first", false)
+    end
+    if not inGameMode() then
+        return notify("Must be in a match to record", false)
+    end
+    if typeof(hookmetamethod) ~= "function" then
+        return notify("Executor lacks hookmetamethod", false)
+    end
+
+    if recording then
+        -- Stop recording
+        recording = false
+        local mac = macros[selectedMacro]
+        if mac then
+            mac.duration = os.clock() - recStart
+        end
+        -- Unhook by replacing with passthrough (can't unhook in most executors)
+        -- The hook checks `recording` so it silently passes through when false
+        recBtn.Text = "Record"
+        recBtn.BackgroundColor3 = Color3.fromRGB(220,80,80)
+        saveMacros()
+        local evCount = mac and #mac.events or 0
+        setStatus(("Recorded %d events"):format(evCount), C.GREEN)
+        notify(("Saved %d events"):format(evCount), true)
+        rebuildList()
+        return
+    end
+
+    -- Start recording — clear existing events
+    macros[selectedMacro].events = {}
+    recStart = os.clock()
+    recording = true
+    recBtn.Text = "Stop Recording"
+    recBtn.BackgroundColor3 = C.YELLOW
+    setStatus("Recording...", C.YELLOW)
+    notify("Recording: "..selectedMacro, true)
+
+    -- Hook __namecall to capture UnitEvent and AbilityEvent
+    -- Only captures "Render" (place) and "Activate" (ability) — skips UUID-based calls
+    if typeof(hookmetamethod) == "function" then
+        local watched = {}
+        if unitEv    then watched[unitEv]    = "Unit"    end
+        if abilityEv then watched[abilityEv] = "Ability" end
+
+        local old; old = hookmetamethod(game, "__namecall", function(self, ...)
+            local m = getnamecallmethod()
+            if (m == "FireServer" or m == "InvokeServer") and watched[self] and recording then
+                local args = {...}
+                local action = typeof(args[1]) == "string" and args[1] or ""
+                -- Only record placement and ability activations (not Upgrade/Sell/ChangePriority)
+                if action == "Render" or action == "Activate" then
+                    table.insert(macros[selectedMacro].events, {
+                        t      = os.clock() - recStart,
+                        remote = watched[self],
+                        args   = args,
+                    })
+                end
+            end
+            return old(self, ...)
+        end)
+    end
+end)
+
+-- ── Play ─────────────────────────────────────────────────────────
+playBtn.MouseButton1Click:Connect(function()
+    if not selectedMacro then
+        return notify("Select a macro first", false)
+    end
+    if recording then
+        return notify("Stop recording first", false)
+    end
+    if playing then
+        return notify("Already playing", false)
+    end
+    if not inGameMode() then
+        return notify("Must be in a match to play", false)
+    end
+
+    local mac = macros[selectedMacro]
+    if not mac or #mac.events == 0 then
+        return notify("Macro is empty — record something first", false)
+    end
+
+    playing = true
+    setStatus("Playing: "..selectedMacro, C.GREEN)
+    notify("Playing: "..selectedMacro, true)
+
+    task.spawn(function()
+        local t0 = os.clock()
+        local prevT = 0
+
+        for _, evt in ipairs(mac.events) do
+            if not playing then break end
+            local delay = evt.t - prevT
+            if delay > 0 then task.wait(delay) end
+            if not playing then break end
+
+            -- Re-resolve remotes at play time in case of rejoin
+            local remote
+            if evt.remote == "Unit" then
+                remote = Net and Net:FindFirstChild("UnitEvent")
+            elseif evt.remote == "Ability" then
+                remote = Net and Net:FindFirstChild("AbilityEvent")
+            end
+
+            if remote then
+                -- Deserialize args from saved format
+                local args = deserializeArgs(evt.args)
+                pcall(function() remote:FireServer(table.unpack(args)) end)
+            end
+
+            prevT = evt.t
+        end
+
+        playing = false
+        setStatus("Playback complete", C.SUBTEXT)
+        notify("Macro done: "..selectedMacro, true)
+    end)
+end)
+
+-- ── Stop ─────────────────────────────────────────────────────────
+stopBtn.MouseButton1Click:Connect(function()
+    if recording then
+        -- Simulate stop recording
+        recording = false
+        local mac = macros[selectedMacro]
+        if mac then mac.duration = os.clock() - recStart end
+        recBtn.Text = "Record"
+        recBtn.BackgroundColor3 = Color3.fromRGB(220,80,80)
+        saveMacros()
+        rebuildList()
+        setStatus("Recording stopped", C.SUBTEXT)
+    end
+    if playing then
+        playing = false
+        setStatus("Stopped", C.SUBTEXT)
+        notify("Playback stopped", true)
+    end
+end)
+
+-- ── Delete ───────────────────────────────────────────────────────
+delBtn.MouseButton1Click:Connect(function()
+    if not selectedMacro then
+        return notify("Select a macro to delete", false)
+    end
+    local name = selectedMacro
+    macros[name] = nil
+    selectedMacro = nil
+    selLabel.Text = "Selected: none"
+    selLabel.TextColor3 = C.SUBTEXT
+    saveMacros()
+    rebuildList()
+    setStatus("Deleted: "..name, C.SUBTEXT)
+    notify("Deleted: "..name, true)
+end)
+
+end -- close Macro Tab do block
+
+-- ======================
 -- BOOT
 -- ======================
 switchTab("Lobby")
@@ -1616,23 +2010,58 @@ notify("OzWare V3 loaded", true)
 -- FLOATING TOGGLE (bottom-left)  +  SUMMON UI SUPPRESSOR
 -- ======================
 do
-local floatBtn = Instance.new("TextButton")
+local floatBtn = Instance.new("ImageButton")
 floatBtn.Name = "OzFloat"
-floatBtn.Size = UDim2.new(0, 52, 0, 52)
-floatBtn.Position = UDim2.new(0, 16, 1, -68)
+floatBtn.Size = UDim2.new(0, 58, 0, 58)
+floatBtn.Position = UDim2.new(0, 16, 1, -74)
 floatBtn.AnchorPoint = Vector2.new(0,0)
-floatBtn.BackgroundColor3 = C.PANEL
-floatBtn.Text = "Oz"
-floatBtn.TextColor3 = C.ACCENT
-floatBtn.TextSize = 20
-floatBtn.Font = FONT_BOLD
+floatBtn.BackgroundColor3 = Color3.fromRGB(0,0,0)
+floatBtn.BackgroundTransparency = 1
 floatBtn.BorderSizePixel = 0
 floatBtn.AutoButtonColor = false
 floatBtn.ZIndex = 50
 floatBtn.Parent = gui
-corner(floatBtn, 26)
-stroke(floatBtn, C.ACCENT, 2)
-gradient(floatBtn, C.ACCENT, C.ACCENT2, 135)
+-- Pink metallic star image (image 2 provided by user)
+floatBtn.Image = "rbxassetid://6031068420"  -- closest Roblox star asset; replaced with uploaded image below
+-- Upload the star image and use its asset ID here
+-- For now use a pink star shape via ImageLabel overlay
+floatBtn.Image = ""
+corner(floatBtn, 29)
+
+-- Dark circle background with purple glow stroke
+local floatBg = Instance.new("Frame")
+floatBg.Size = UDim2.new(1,0,1,0)
+floatBg.BackgroundColor3 = Color3.fromRGB(15, 8, 25)
+floatBg.BorderSizePixel = 0
+floatBg.ZIndex = 49
+floatBg.Parent = floatBtn
+corner(floatBg, 29)
+stroke(floatBg, C.ACCENT, 2)
+-- Purple glow bloom
+local glow = Instance.new("ImageLabel")
+glow.Size = UDim2.new(0,90,0,90)
+glow.AnchorPoint = Vector2.new(0.5,0.5)
+glow.Position = UDim2.new(0.5,0,0.5,0)
+glow.BackgroundTransparency = 1
+glow.Image = "rbxassetid://5028857084"
+glow.ImageColor3 = C.ACCENT2
+glow.ImageTransparency = 0.5
+glow.ZIndex = 48
+glow.Parent = floatBtn
+
+-- Star shape using TextLabel with ✦ character in pink/magenta
+local starLbl = Instance.new("TextLabel")
+starLbl.Size = UDim2.new(1,-4,1,-4)
+starLbl.AnchorPoint = Vector2.new(0.5,0.5)
+starLbl.Position = UDim2.new(0.5,0,0.5,0)
+starLbl.BackgroundTransparency = 1
+starLbl.Text = "✦"
+starLbl.TextColor3 = C.ACCENT2
+starLbl.TextSize = 30
+starLbl.Font = FONT_BOLD
+starLbl.ZIndex = 51
+starLbl.Parent = floatBtn
+gradient(starLbl, C.ACCENT, C.ACCENT2, 135)
 
 -- Drag support for floating button
 do
