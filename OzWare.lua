@@ -50,6 +50,7 @@ local function OdysseyNet()   local o = Net:FindFirstChild("Odyssey") return o a
 -- not in the lobby. All automation loops check this before firing remotes.
 -- ======================
 local function getMapRoot()
+    -- CONFIRMED: workspace.Map exists in this game
     return workspace:FindFirstChild("Map")
         or workspace:FindFirstChild("MapHolder")
         or workspace:FindFirstChild("Maps")
@@ -825,6 +826,8 @@ end
 
 
 -- ── Delete Map Structures ─────────────────────────────────────────
+-- CONFIRMED: map is in workspace.Map, decorations in workspace.Map.Assets
+-- workspace.Ignore contains chests — never touch it
 local mapDeleted = false
 local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
@@ -837,30 +840,13 @@ onDeleteMap(function(on)
     local pY  = hrp and hrp.Position.Y or 0
     local count = 0
 
-    -- Spawn platform: large flat part within 12 studs of player Y
     local function isSpawnPlatform(p)
         if not p:IsA("BasePart") then return false end
         return (p.Size.X > 40 or p.Size.Z > 40) and math.abs(p.Position.Y - pY) < 12
     end
 
-    local charSet = {}
-    for _, pl in ipairs(Players:GetPlayers()) do
-        if pl.Character then charSet[pl.Character] = true end
-    end
-
-    for _, child in ipairs(workspace:GetChildren()) do
-        if child.Name == "Entities" then continue end
-        if charSet[child] then
-            for _, p in ipairs(child:GetDescendants()) do
-                if p:IsA("BasePart") then
-                    pcall(function() p.BrickColor = BrickColor.new("Bright green"); p.Material = Enum.Material.Neon; p.CastShadow = false end)
-                end
-            end
-            continue
-        end
-        if child:IsA("Camera") or child.ClassName == "Terrain" then continue end
-
-        for _, p in ipairs(child:GetDescendants()) do
+    local function hideDescendants(root)
+        for _, p in ipairs(root:GetDescendants()) do
             if p:IsA("BasePart") and p.Transparency < 1 then
                 p.Transparency = 1
                 if not isSpawnPlatform(p) then p.CanCollide = false end
@@ -873,12 +859,38 @@ onDeleteMap(function(on)
                 p.Transparency = 1
             end
         end
-        if child:IsA("BasePart") and child.Transparency < 1 then
-            child.Transparency = 1
-            if not isSpawnPlatform(child) then child.CanCollide = false end
-            count = count + 1
+    end
+
+    -- Target workspace.Map directly (confirmed map folder)
+    local mapFolder = workspace:FindFirstChild("Map")
+    if mapFolder then
+        -- workspace.Map.Assets = decorations (hide completely)
+        local assets = mapFolder:FindFirstChild("Assets")
+        if assets then hideDescendants(assets) end
+        -- Rest of Map folder (platforms, terrain models) — hide non-floor parts
+        for _, child in ipairs(mapFolder:GetChildren()) do
+            if child.Name ~= "Assets" then hideDescendants(child) end
         end
     end
+
+    -- Tint player characters green
+    local charSet = {}
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl.Character then charSet[pl.Character] = true end
+    end
+    for _, child in ipairs(workspace:GetChildren()) do
+        if child.Name == "Entities" or child.Name == "Ignore"
+        or child.Name == "Map" or child:IsA("Camera")
+        or child.ClassName == "Terrain" then continue end
+        if charSet[child] then
+            for _, p in ipairs(child:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    pcall(function() p.BrickColor = BrickColor.new("Bright green"); p.Material = Enum.Material.Neon; p.CastShadow = false end)
+                end
+            end
+        end
+    end
+
     notify(("Map: hid %d parts"):format(count), true)
 end)
 
@@ -1414,17 +1426,24 @@ end
 --   RunRewardsPanelRoot     — unit reward after elite room ("CLAIM YOUR REWARDS")
 --   AdventureMapRoot        — map/vote UI
 
+-- ── AdventureHUD helper ──────────────────────────────────────────
 local function getAdventureHUD()
     return playerGui:FindFirstChild("AdventureHUD")
 end
 
--- Search AdventureHUD and its MatchPanels subfolder for a named panel
+-- A panel is "open" when it has non-zero AbsoluteSize (game animates size to 0 when hiding)
+local function isPanelOpen(panel)
+    if not panel then return false end
+    if not panel.Visible then return false end
+    local s = panel.AbsoluteSize
+    return s.X > 10 and s.Y > 10
+end
+
 local function findAdventurePanel(name)
     local hud = getAdventureHUD()
     if not hud then return nil end
     local direct = hud:FindFirstChild(name)
     if direct then return direct end
-    -- Also check MatchPanels subfolder (confirmed from StarterPlayer modules)
     local matchPanels = hud:FindFirstChild("MatchPanels")
     if matchPanels then
         return matchPanels:FindFirstChild(name)
@@ -1432,26 +1451,39 @@ local function findAdventurePanel(name)
     return nil
 end
 
-local function getPanelVisible(panelName)
-    local hud = getAdventureHUD()
-    if not hud then return false end
-    local panel = hud:FindFirstChild(panelName)
-    if not panel then return false end
-    return panel.Visible ~= false
+-- Click a close button using its exact confirmed path
+local function clickClose(panel)
+    if not panel then return end
+    -- Confirmed path: panel.Content.TopFrame.RightFrame.RightFrame.Close
+    local btn = panel:FindFirstChild("Content")
+    if btn then
+        btn = btn:FindFirstChild("TopFrame")
+        if btn then
+            btn = btn:FindFirstChild("RightFrame")
+            if btn then
+                btn = btn:FindFirstChild("RightFrame")
+                if btn then
+                    btn = btn:FindFirstChild("Close")
+                end
+            end
+        end
+    end
+    if btn then
+        pcall(function() btn.Activated:Fire() end)
+        pcall(function() btn.MouseButton1Click:Fire() end)
+    end
 end
 
 -- ── Card pick ────────────────────────────────────────────────────
--- CONFIRMED module name: RunStartPickPanel (not ChooseCard)
--- This panel shows at the start of each floor for card selection
+-- Module name confirmed: RunStartPickPanel
 local function readOpenCardOptions()
     local hud = getAdventureHUD()
     if not hud then return nil end
 
-    -- Try confirmed name first, then fallback
     local chooseCard = hud:FindFirstChild("RunStartPickPanel")
                     or hud:FindFirstChild("ChooseCard")
                     or hud:FindFirstChild("CardPickPanel")
-    if not chooseCard or chooseCard.Visible == false then return nil end
+    if not isPanelOpen(chooseCard) then return nil end
 
     local cards = {}
     local hasSkip, hasReroll, hasConfirm = false, false, false
@@ -1474,66 +1506,83 @@ local function readOpenCardOptions()
     return opts
 end
 
--- ── Unit Reward ───────────────────────────────────────────────────
--- CONFIRMED module name: BossRewardPickPanel (not RunRewardsPanelRoot)
-local function isUnitRewardOpen()
-    return getPanelVisible("BossRewardPickPanel")
-        or getPanelVisible("RunRewardsPanelRoot")
-end
-
 -- ── Shop ─────────────────────────────────────────────────────────
--- CONFIRMED: AdventureHUD["Stiches' Shop_Export"]
+-- Confirmed path: AdventureHUD["Stiches' Shop_Export"]
+-- Close button:   ...Content.TopFrame.RightFrame.RightFrame.Close
 local function isShopOpen()
     local p = findAdventurePanel("Stiches' Shop_Export")
            or findAdventurePanel("ShopPanel")
-    return p ~= nil and p.Visible ~= false
+    return isPanelOpen(p)
 end
 
 local function closeShopGui()
     refreshRemotes()
     local shopEv = getONet("ShopEvent")
     if shopEv then pcall(function() shopEv:FireServer("Close") end) end
+    -- Also click the Close button directly
+    local panel = findAdventurePanel("Stiches' Shop_Export")
+               or findAdventurePanel("ShopPanel")
+    clickClose(panel)
 end
 
 -- ── Treasure ─────────────────────────────────────────────────────
--- CONFIRMED: AdventureHUD.TreasurePanel
--- TreasureEvent:FireServer("OpenChest", index) — indices 1-12
+-- Confirmed path: AdventureHUD.TreasurePanel
+-- Close button:   ...Content.TopFrame.RightFrame.RightFrame.Close
 local function isTreasureOpen()
     local p = findAdventurePanel("TreasurePanel")
-    return p ~= nil and p.Visible ~= false
+    return isPanelOpen(p)
 end
 
 local openedChests = {}
 local function collectAndCloseTreasure()
     refreshRemotes()
-    local treasureEv = getONet("TreasureEvent")
-    if treasureEv then
-        for i = 1, 12 do
-            if not openedChests[i] then
-                openedChests[i] = true
-                pcall(function() treasureEv:FireServer("OpenChest", i) end)
-                task.wait(0.08)
+    local chestRemote = getONet("OdysseyChest")
+    if not chestRemote then
+        -- OdysseyChest is under StageMechanics
+        local sm = Net:FindFirstChild("StageMechanics")
+        chestRemote = sm and sm:FindFirstChild("OdysseyChest")
+    end
+
+    if chestRemote then
+        -- CONFIRMED: chests are in workspace.Ignore named "OdysseyChest_<uuid>"
+        local ignoreFolder = workspace:FindFirstChild("Ignore")
+        if ignoreFolder then
+            for _, model in ipairs(ignoreFolder:GetChildren()) do
+                local name = model.Name
+                -- Match OdysseyChest_<uuid> but NOT OdysseyChestPing_<uuid>
+                if name:sub(1, 13) == "OdysseyChest_" and name:sub(1, 17) ~= "OdysseyChestPing_" then
+                    local uuid = name:sub(14) -- strip "OdysseyChest_" prefix
+                    if not openedChests[uuid] then
+                        openedChests[uuid] = true
+                        pcall(function() chestRemote:FireServer("OpenChest", uuid) end)
+                        task.wait(0.08)
+                    end
+                end
             end
         end
     end
-    -- Click Close button inside TreasurePanel
-    local hud = getAdventureHUD()
-    if hud then
-        local panel = hud:FindFirstChild("TreasurePanel")
-        if panel then
-            local closeBtn = panel:FindFirstChild("Close", true)
-            if closeBtn then
-                pcall(function() closeBtn.Activated:Fire() end)
-                pcall(function() closeBtn.MouseButton1Click:Fire() end)
-            end
-        end
-    end
+
+    -- Click confirmed Close button: TreasurePanel.Content.TopFrame.RightFrame.RightFrame.Close
+    local panel = findAdventurePanel("TreasurePanel")
+    clickClose(panel)
+end
+
+-- ── Unit Reward ───────────────────────────────────────────────────
+-- Module name confirmed: BossRewardPickPanel
+local function isUnitRewardOpen()
+    local p = findAdventurePanel("BossRewardPickPanel")
+           or findAdventurePanel("RunRewardsPanelRoot")
+    return isPanelOpen(p)
 end
 
 local function skipUnitRewardPanel()
     refreshRemotes()
     local ev = getONet("UnitRewardEvent")
     if ev then pcall(function() ev:FireServer("Skip") end) end
+    -- Also click Close if present
+    local panel = findAdventurePanel("BossRewardPickPanel")
+               or findAdventurePanel("RunRewardsPanelRoot")
+    clickClose(panel)
 end
 
 -- ── requestNextRoom ───────────────────────────────────────────────
