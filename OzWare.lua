@@ -209,22 +209,22 @@ win.BackgroundColor3=C.BG; win.BorderSizePixel=0; win.ClipsDescendants=true
 win.Active=true; win.Parent=gui
 corner(win,14); stroke(win,C.ACCENT,2)
 
--- Purple neon glow bars on sides
-local function glowBar(side, col)
+-- Purple neon glow bars — parented to win so they move with it
+local function glowBar(xPos, col)
     local g=Instance.new("Frame")
     g.AnchorPoint=Vector2.new(0.5,0.5)
-    g.Size=UDim2.new(0,3,0,420)
-    g.Position=UDim2.new(0.5, side * (360 + 12), 0.5, 0)
-    g.BackgroundColor3=col; g.BorderSizePixel=0; g.ZIndex=0; g.Parent=gui
+    g.Size=UDim2.new(0,3,1,20)
+    g.Position=UDim2.new(xPos,0,0.5,0)
+    g.BackgroundColor3=col; g.BorderSizePixel=0; g.ZIndex=0; g.Parent=win
     corner(g,2)
     local s=Instance.new("ImageLabel")
-    s.AnchorPoint=Vector2.new(0.5,0.5); s.Size=UDim2.new(0,80,1,80)
+    s.AnchorPoint=Vector2.new(0.5,0.5); s.Size=UDim2.new(0,60,1,60)
     s.Position=UDim2.new(0.5,0,0.5,0); s.BackgroundTransparency=1
     s.Image="rbxassetid://5028857084"; s.ImageColor3=col
-    s.ImageTransparency=0.3; s.ZIndex=0; s.Parent=g
+    s.ImageTransparency=0.4; s.ZIndex=0; s.Parent=g
 end
-glowBar(-1, C.ACCENT)
-glowBar( 1, C.ACCENT2)
+glowBar(0, C.ACCENT)    -- left edge
+glowBar(1, C.ACCENT2)   -- right edge
 
 -- Title bar with gradient header
 local titleBar=Instance.new("Frame")
@@ -823,9 +823,8 @@ local function isBasePart(name)
     return false
 end
 
+
 -- ── Delete Map Structures ─────────────────────────────────────────
--- Hides all workspace descendants EXCEPT Entities folder (enemies) and player characters.
--- Units (non-Entities models with player owner) turn green.
 local mapDeleted = false
 local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
@@ -838,18 +837,20 @@ onDeleteMap(function(on)
     local pY  = hrp and hrp.Position.Y or 0
     local count = 0
 
-    -- Build player character set to skip
+    -- Spawn platform: large flat part within 12 studs of player Y
+    local function isSpawnPlatform(p)
+        if not p:IsA("BasePart") then return false end
+        return (p.Size.X > 40 or p.Size.Z > 40) and math.abs(p.Position.Y - pY) < 12
+    end
+
     local charSet = {}
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl.Character then charSet[pl.Character] = true end
     end
 
     for _, child in ipairs(workspace:GetChildren()) do
-        -- Skip confirmed enemy folder
         if child.Name == "Entities" then continue end
-        -- Skip player characters
         if charSet[child] then
-            -- Tint green so still visible
             for _, p in ipairs(child:GetDescendants()) do
                 if p:IsA("BasePart") then
                     pcall(function() p.BrickColor = BrickColor.new("Bright green"); p.Material = Enum.Material.Neon; p.CastShadow = false end)
@@ -857,15 +858,12 @@ onDeleteMap(function(on)
             end
             continue
         end
-        -- Skip Camera, Terrain (handled by FPS boost), non-parts
         if child:IsA("Camera") or child.ClassName == "Terrain" then continue end
 
-        -- Everything else: hide BaseParts, keep floor collidable
         for _, p in ipairs(child:GetDescendants()) do
             if p:IsA("BasePart") and p.Transparency < 1 then
                 p.Transparency = 1
-                local isFloor = (pY - p.Position.Y) >= 0 and (pY - p.Position.Y) <= 6
-                if not isFloor then p.CanCollide = false end
+                if not isSpawnPlatform(p) then p.CanCollide = false end
                 pcall(function()
                     local m = p:FindFirstChildOfClass("SpecialMesh")
                     if m then m.MeshType = Enum.MeshType.Block end
@@ -875,16 +873,15 @@ onDeleteMap(function(on)
                 p.Transparency = 1
             end
         end
-        -- Also handle direct BasePart children
         if child:IsA("BasePart") and child.Transparency < 1 then
             child.Transparency = 1
-            local isFloor = (pY - child.Position.Y) >= 0 and (pY - child.Position.Y) <= 6
-            if not isFloor then child.CanCollide = false end
+            if not isSpawnPlatform(child) then child.CanCollide = false end
             count = count + 1
         end
     end
     notify(("Map: hid %d parts"):format(count), true)
 end)
+
 
 -- ── Delete Enemies ────────────────────────────────────────────────
 -- CONFIRMED: enemies live in workspace.Entities folder as numbered Models (1,2,3...)
@@ -1034,13 +1031,15 @@ local function refreshRemotes()
     _advFolder = _odyFolder and _odyFolder:FindFirstChild("Adventure")
     _stageMech = Net:FindFirstChild("StageMechanics")
     if _advFolder then
-        REMOTES.CardPickEvent   = _advFolder:FindFirstChild("CardPickEvent")
-        REMOTES.ShopEvent       = _advFolder:FindFirstChild("ShopEvent")
-        REMOTES.TreasureEvent   = _advFolder:FindFirstChild("TreasureEvent")
-        REMOTES.UnitRewardEvent = _advFolder:FindFirstChild("UnitRewardEvent")
-        REMOTES.BossRewardEvent = _advFolder:FindFirstChild("BossRewardEvent")
-        REMOTES.VoteEvent       = _advFolder:FindFirstChild("VoteEvent")
-        REMOTES.MapEvent        = _advFolder:FindFirstChild("MapEvent")
+        -- All confirmed from Dex screenshot of Networking.Odyssey.Adventure:
+        REMOTES.CardPickEvent    = _advFolder:FindFirstChild("CardPickEvent")
+        REMOTES.ShopEvent        = _advFolder:FindFirstChild("ShopEvent")
+            or (_odyFolder and _odyFolder:FindFirstChild("OdysseyShopEvent"))
+        REMOTES.TreasureEvent    = _advFolder:FindFirstChild("TreasureEvent")
+        REMOTES.UnitRewardEvent  = _advFolder:FindFirstChild("UnitRewardEvent")
+        REMOTES.BossRewardEvent  = _advFolder:FindFirstChild("BossRewardEvent")
+        REMOTES.VoteEvent        = _advFolder:FindFirstChild("VoteEvent")
+        REMOTES.MapEvent         = _advFolder:FindFirstChild("MapEvent")
             or Net:FindFirstChild("MapEvent")
     end
     if _stageMech then
@@ -1052,33 +1051,37 @@ refreshRemotes()
 
 -- Clear REMOTES cache on respawn/teleport so they re-resolve for the next run
 game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
+    -- Reset all one-shot flags so toggles work immediately in the new match
     for k in pairs(REMOTES) do REMOTES[k] = nil end
+    mapDeleted       = false
+    destroyedEnemies = {}
+    fpsApplied       = false
     task.wait(3); refreshRemotes()
 end)
 
 local function getONet(name)
-    -- If the remote is already cached, return it
     if REMOTES[name] then return REMOTES[name] end
-    -- Adventure folder only exists during a run — refresh every time we miss
     refreshRemotes()
     return REMOTES[name]
 end
 
--- Re-resolve remotes when a new child appears under Networking
--- (Adventure folder is added when the player enters a run)
-Net.ChildAdded:Connect(function()
-    refreshRemotes()
+-- Watch for Adventure folder appearing (happens when entering a run)
+Net.ChildAdded:Connect(function(c)
+    if c.Name == "Odyssey" then
+        task.wait(0.5); refreshRemotes()
+        c.ChildAdded:Connect(function() task.wait(0.2); refreshRemotes() end)
+    end
+    task.wait(0.2); refreshRemotes()
 end)
-local odyF = Net:FindFirstChild("Odyssey")
-if odyF then
-    odyF.ChildAdded:Connect(function() refreshRemotes() end)
-else
-    Net.ChildAdded:Connect(function(c)
-        if c.Name == "Odyssey" then
-            refreshRemotes()
-            c.ChildAdded:Connect(function() refreshRemotes() end)
+do
+    local odyF = Net:FindFirstChild("Odyssey")
+    if odyF then
+        odyF.ChildAdded:Connect(function() task.wait(0.2); refreshRemotes() end)
+        local advF = odyF:FindFirstChild("Adventure")
+        if advF then
+            advF.ChildAdded:Connect(function() task.wait(0.1); refreshRemotes() end)
         end
-    end)
+    end
 end
 
 -- --- Card discovery ---------------------------------------------------------
@@ -1415,22 +1418,39 @@ local function getAdventureHUD()
     return playerGui:FindFirstChild("AdventureHUD")
 end
 
+-- Search AdventureHUD and its MatchPanels subfolder for a named panel
+local function findAdventurePanel(name)
+    local hud = getAdventureHUD()
+    if not hud then return nil end
+    local direct = hud:FindFirstChild(name)
+    if direct then return direct end
+    -- Also check MatchPanels subfolder (confirmed from StarterPlayer modules)
+    local matchPanels = hud:FindFirstChild("MatchPanels")
+    if matchPanels then
+        return matchPanels:FindFirstChild(name)
+    end
+    return nil
+end
+
 local function getPanelVisible(panelName)
     local hud = getAdventureHUD()
     if not hud then return false end
     local panel = hud:FindFirstChild(panelName)
     if not panel then return false end
-    -- Panel is active if it exists and is not explicitly invisible
     return panel.Visible ~= false
 end
 
 -- ── Card pick ────────────────────────────────────────────────────
--- CONFIRMED: cards are in AdventureHUD.ChooseCard
--- ModifierTitle TextLabels sorted left-to-right = index 1,2,3
+-- CONFIRMED module name: RunStartPickPanel (not ChooseCard)
+-- This panel shows at the start of each floor for card selection
 local function readOpenCardOptions()
     local hud = getAdventureHUD()
     if not hud then return nil end
-    local chooseCard = hud:FindFirstChild("ChooseCard")
+
+    -- Try confirmed name first, then fallback
+    local chooseCard = hud:FindFirstChild("RunStartPickPanel")
+                    or hud:FindFirstChild("ChooseCard")
+                    or hud:FindFirstChild("CardPickPanel")
     if not chooseCard or chooseCard.Visible == false then return nil end
 
     local cards = {}
@@ -1454,10 +1474,19 @@ local function readOpenCardOptions()
     return opts
 end
 
+-- ── Unit Reward ───────────────────────────────────────────────────
+-- CONFIRMED module name: BossRewardPickPanel (not RunRewardsPanelRoot)
+local function isUnitRewardOpen()
+    return getPanelVisible("BossRewardPickPanel")
+        or getPanelVisible("RunRewardsPanelRoot")
+end
+
 -- ── Shop ─────────────────────────────────────────────────────────
 -- CONFIRMED: AdventureHUD["Stiches' Shop_Export"]
 local function isShopOpen()
-    return getPanelVisible("Stiches' Shop_Export")
+    local p = findAdventurePanel("Stiches' Shop_Export")
+           or findAdventurePanel("ShopPanel")
+    return p ~= nil and p.Visible ~= false
 end
 
 local function closeShopGui()
@@ -1470,7 +1499,8 @@ end
 -- CONFIRMED: AdventureHUD.TreasurePanel
 -- TreasureEvent:FireServer("OpenChest", index) — indices 1-12
 local function isTreasureOpen()
-    return getPanelVisible("TreasurePanel")
+    local p = findAdventurePanel("TreasurePanel")
+    return p ~= nil and p.Visible ~= false
 end
 
 local openedChests = {}
@@ -1498,13 +1528,6 @@ local function collectAndCloseTreasure()
             end
         end
     end
-end
-
--- ── Unit Reward ───────────────────────────────────────────────────
--- CONFIRMED: AdventureHUD.RunRewardsPanelRoot — "CLAIM YOUR REWARDS"
--- UnitRewardEvent:FireServer("Skip") to skip
-local function isUnitRewardOpen()
-    return getPanelVisible("RunRewardsPanelRoot")
 end
 
 local function skipUnitRewardPanel()
