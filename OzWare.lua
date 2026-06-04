@@ -826,8 +826,6 @@ end
 
 
 -- ── Delete Map Structures ─────────────────────────────────────────
--- CONFIRMED: workspace.Map = map root, workspace.Map.Assets = decorations only
--- We ONLY touch Map.Assets — platform and floor stay fully visible and collidable
 local mapDeleted = false
 local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
@@ -836,51 +834,49 @@ onDeleteMap(function(on)
     if not inGameMode() then notify("Must be in a match", false); return end
     mapDeleted = true
 
-    local mapFolder  = workspace:FindFirstChild("Map")
-    local assets     = mapFolder and mapFolder:FindFirstChild("Assets")
-
-    if not assets then
-        notify("Map.Assets not found", false)
-        return
-    end
-
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    local pY  = hrp and hrp.Position.Y or 0
     local count = 0
-    for _, p in ipairs(assets:GetDescendants()) do
-        if p:IsA("BasePart") then
-            pcall(function()
-                p.Transparency = 1
-                p.CanCollide   = false  -- phase through decorations
-                p.CastShadow   = false
-            end)
-            count = count + 1
-        elseif p:IsA("Decal") or p:IsA("Texture") then
-            pcall(function() p.Transparency = 1 end)
-        elseif p:IsA("SpecialMesh") then
-            pcall(function() p.MeshType = Enum.MeshType.Block end)
-        end
+
+    -- Platform = large flat BasePart within 8 studs of player Y — keep visible + collidable
+    local function isPlatform(p)
+        return (p.Size.X > 50 or p.Size.Z > 50) and math.abs(p.Position.Y - pY) <= 8
     end
 
-    -- Tint placed units green for visibility
     local charSet = {}
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl.Character then charSet[pl.Character] = true end
     end
+
+    local SKIP = {Entities=true, Ignore=true, Camera=true}
     for _, child in ipairs(workspace:GetChildren()) do
-        if charSet[child] then
-            for _, p in ipairs(child:GetDescendants()) do
-                if p:IsA("BasePart") then
-                    pcall(function()
-                        p.BrickColor = BrickColor.new("Bright green")
-                        p.Material   = Enum.Material.Neon
-                        p.CastShadow = false
-                    end)
-                end
+        if SKIP[child.Name] or child.ClassName == "Terrain" or charSet[child] then continue end
+        for _, p in ipairs(child:GetDescendants()) do
+            if p:IsA("BasePart") then
+                pcall(function()
+                    if not isPlatform(p) then
+                        p.Transparency = 1
+                        p.CanCollide   = false
+                        p.CastShadow   = false
+                    end
+                end)
+                count = count + 1
+            elseif p:IsA("Decal") or p:IsA("Texture") then
+                pcall(function() p.Transparency = 1 end)
             end
         end
+        if child:IsA("BasePart") then
+            pcall(function()
+                if not isPlatform(child) then
+                    child.Transparency = 1
+                    child.CanCollide   = false
+                end
+            end)
+        end
     end
-
-    notify(("Map: hid %d decoration parts"):format(count), true)
+    notify(("Map: hid %d parts"):format(count), true)
 end)
+
 
 
 -- ── Delete Enemies ────────────────────────────────────────────────
@@ -1305,23 +1301,9 @@ local function isUnitCardPick(opts)
     return false
 end
 
-local function pickIndex(opts, indexHint)
     local ev = getONet("CardPickEvent")
-    if not ev then return false end
-    local idx = indexHint or 1
-    pcall(function() ev:FireServer("Pick", idx) end)
-    -- Character-specific cards need a second Pick to confirm (double-tap)
-    if isUnitCardPick(opts) then
-        task.wait(0.3)
-        pcall(function() ev:FireServer("Pick", idx) end)
-    end
-    return true
+    if ev then pcall(function() ev:FireServer("Skip", 0) end) end
 end
-
-local function skipCards()
-    local ev = getONet("CardPickEvent")
-    if not ev then return end
-    pcall(function() ev:FireServer("Skip", 0) end)
 end
 
 
@@ -1365,44 +1347,20 @@ local function rarityScore(name)
         if n:find(key, 1, true) and score > best then best = score end
     end
     return best
-end
 local function isRagnawTargetCard(name)
     return RAGNAW_TARGET_CARDS[(name or ""):lower():gsub("^%s+",""):gsub("%s+$","")] == true
 end
+
+-- chooseCardIndex: picks the highest rarity card from text blobs
 local function chooseCardIndex(opts)
-    local bestIdx, bestScore
-    if getAutoRagnawCards() and ragnawPickCount < 4 then
-        for i, name in ipairs(opts) do
-            if isRagnawTargetCard(name) and not ragnawPickedThisRun[name] then
-                local score = 100 + rarityScore(name)
-                if not bestScore or score > bestScore then bestIdx, bestScore = i, score end
-            end
-        end
-        if bestIdx then return bestIdx, "ragnaw" end
-    end
-    if getAutoRagnawCards() then
-        local allUnit = #opts > 0
-        for _, name in ipairs(opts) do
-            if classifyCard(name) ~= "unit" then allUnit = false; break end
-        end
-        if allUnit then return nil, "skip-unit" end
-    end
-    if getAutoPick() then
-        for i, name in ipairs(opts) do
-            local score = rarityScore(name)
-            if classifyCard(name) == "generic" then score = score + 20 end
-            if not bestScore or score > bestScore then bestIdx, bestScore = i, score end
-        end
+    if not opts or #opts == 0 then return 1, "basic" end
+    local bestIdx, bestScore = 1, -1
+    for i, text in ipairs(opts) do
+        local score = rarityScore(text)
+        if score > bestScore then bestIdx = i; bestScore = score end
     end
     return bestIdx, "basic"
 end
-
--- ── Card UI detection ───────────────────────────────────────────
--- CONFIRMED from logger: card names are in TextLabels with Name="ModifierTitle"
--- inside a parent Frame named "Main". Cards appear left-to-right = index 1,2,3.
--- Basic card UI:     title "Choose a basic card",     buttons: Reroll, Skip
--- Character card UI: title "Choose a character-specific card", buttons: Confirm Choice, Skip
--- Both use CardPickEvent:FireServer("Pick", index) and ("Skip", 0)
 
 
 -- ── AdventureHUD helper ──────────────────────────────────────────
@@ -1462,31 +1420,75 @@ local function clickClose(panel)
 end
 
 -- ── Card pick ────────────────────────────────────────────────────
--- CONFIRMED from print: ChooseCard  1102, 551 (large = open)
--- Panel is in AdventureHUD.ChooseCard
-local function readOpenCardOptions()
+-- CONFIRMED structure:
+--   ChooseCard.Content.ListContainer
+--     ImageButton (Frame) ← card 1 (leftmost)
+--     ImageButton (Frame) ← card 2
+--     ImageButton (Frame) ← card 3 (rightmost, usually highest rarity)
+-- Card name/rarity: TextLabel (Description) inside each ImageButton
+-- Pick by simulating MouseButton1Click on the ImageButton
+
+local function getCardButtons()
     local hud = getAdventureHUD()
     if not hud then return nil end
+    local cc = hud:FindFirstChild("ChooseCard")
+    if not cc or not cc.Visible then return nil end
 
-    local chooseCard = hud:FindFirstChild("ChooseCard")
-    if not isPanelOpen(chooseCard) then return nil end
+    -- CONFIRMED path: ChooseCard.Content.ListContainer.ScrollIndicatorFrame
+    local sif = cc:FindFirstChild("Content")
+    sif = sif and sif:FindFirstChild("ListContainer")
+    sif = sif and sif:FindFirstChild("ScrollIndicatorFrame")
+    if not sif then return nil end
 
     local cards = {}
-    local hasSkip, hasReroll, hasConfirm = false, false, false
-    for _, d in ipairs(chooseCard:GetDescendants()) do
-        if d:IsA("TextLabel") and d.Name == "ModifierTitle" and d.Text and #d.Text > 1 then
-            table.insert(cards, {text = d.Text, x = d.AbsolutePosition.X})
-        end
-        if d:IsA("TextButton") and d.Text then
-            local tl = d.Text:lower()
-            if tl == "skip"       then hasSkip    = true end
-            if tl:find("reroll")  then hasReroll  = true end
-            if tl:find("confirm") then hasConfirm = true end
+    for _, child in ipairs(sif:GetChildren()) do
+        if child:IsA("ImageButton") then
+            local text = ""
+            for _, d in ipairs(child:GetDescendants()) do
+                if d:IsA("TextLabel") and d.Text and #d.Text > 1 then
+                    text = text .. " " .. d.Text:lower()
+                end
+            end
+            table.insert(cards, {
+                btn  = child,
+                text = text,
+                x    = child.AbsolutePosition.X,
+            })
         end
     end
     if #cards == 0 then return nil end
-    if not hasSkip then return nil end
     table.sort(cards, function(a, b) return a.x < b.x end)
+    return cards
+end
+
+local function clickButton(btn)
+    -- Delta executor blocks :Fire() on signals
+    -- We use the remote directly instead (see doCardPick and pickIndex)
+    _ = btn -- unused but kept for API compatibility
+end
+
+-- Direct remote pick — works when called while ChooseCard is visible
+-- The server accepts CardPickEvent only during an active card pick phase
+local function pickIndex(opts, indexHint)
+    local ev = getONet("CardPickEvent")
+    if not ev then return false end
+    local idx = indexHint or 1
+    -- For character cards: first pick selects, second pick confirms
+    pcall(function() ev:FireServer("Pick", idx) end)
+    task.wait(0.3)
+    pcall(function() ev:FireServer("Pick", idx) end)
+    return true
+end
+
+local function skipCards()
+    local ev = getONet("CardPickEvent")
+    if ev then pcall(function() ev:FireServer("Skip", 0) end) end
+end
+
+local function readOpenCardOptions()
+    local cards = getCardButtons()
+    if not cards then return nil end
+    -- Return text blobs for rarity scoring
     local opts = {}
     for _, c in ipairs(cards) do table.insert(opts, c.text) end
     return opts
@@ -1588,92 +1590,108 @@ local function requestNextRoom()
     if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
 end
 
--- ── Master automation loop ────────────────────────────────────────
--- Single Heartbeat poll. Checks AdventureHUD panel visibility directly.
+-- ── Event-driven automation ───────────────────────────────────────
+-- Uses GetPropertyChangedSignal("Visible") — fires the instant each
+-- panel appears. Much more reliable than polling every 0.5s.
+
+local function doCardPick()
+    if not (getAutoPick() or getAutoRagnawCards()) then return end
+    -- Small delay so server finishes setting up pick state
+    task.wait(0.3)
+    local ev = getONet("CardPickEvent")
+    if not ev then return end
+
+    -- Find best card by rarity from button text
+    local cards = getCardButtons()
+    local bestIdx = 1
+    if cards and #cards > 0 then
+        local bestScore = -1
+        for i, c in ipairs(cards) do
+            local score = rarityScore(c.text)
+            if score > bestScore then bestIdx = i; bestScore = score end
+        end
+    end
+
+    -- Fire Pick twice — first selects, second confirms character cards
+    pcall(function() ev:FireServer("Pick", bestIdx) end)
+    task.wait(0.35)
+    pcall(function() ev:FireServer("Pick", bestIdx) end)
+end
+
+local function doShop()
+    if not getAutoSkipShop() then return end
+    task.wait(0.15)
+    closeShopGui()
+    if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
+end
+
+local function doTreasure()
+    if not getAutoCollectChests() then return end
+    openedChests = {}
+    task.wait(0.5)
+    collectAndCloseTreasure()
+    if getAutoNextRoom() then task.wait(1); requestNextRoom() end
+end
+
+local function doUnitReward()
+    if not getSkipUnitReward() then return end
+    task.wait(0.15)
+    skipUnitRewardPanel()
+end
+
+-- Connect signals once AdventureHUD and its panels are available
+local function hookPanels(hud)
+    local function onVisible(panel, fn)
+        if not panel then return end
+        panel:GetPropertyChangedSignal("Visible"):Connect(function()
+            if panel.Visible then task.spawn(fn) end
+        end)
+    end
+
+    onVisible(hud:FindFirstChild("ChooseCard"),             doCardPick)
+    onVisible(hud:FindFirstChild("Stiches' Shop_Export"),   doShop)
+    onVisible(hud:FindFirstChild("TreasurePanel"),          doTreasure)
+    onVisible(hud:FindFirstChild("BossRewardPickPanel"),    doUnitReward)
+    onVisible(hud:FindFirstChild("RunRewardsPanelRoot"),    doUnitReward)
+end
+
+-- Try to hook now; retry every second until AdventureHUD is found
+task.spawn(function()
+    local hooked = false
+    while not hooked do
+        local hud = playerGui:FindFirstChild("AdventureHUD")
+        if hud then
+            hookPanels(hud)
+            hooked = true
+        else
+            -- Wait for AdventureHUD to appear
+            playerGui.ChildAdded:Wait()
+        end
+    end
+end)
+
+-- Also hook when playerGui gets a new AdventureHUD (e.g. after rejoin)
+playerGui.ChildAdded:Connect(function(child)
+    if child.Name == "AdventureHUD" then
+        task.wait(0.5)
+        hookPanels(child)
+    end
+end)
+
+-- Auto Next Room: keep polling since there's no panel to watch
 do
-    local clocks = {card=0, shop=0, treasure=0, room=0, unit=0}
-    local shopDone, treasureDone, unitDone = false, false, false
-
+    local roomClock = 0
     RunSvc.Heartbeat:Connect(function()
+        if not getAutoNextRoom() then return end
+        if not inGameMode() then return end
         local now = os.clock()
-        if not inGameMode() then
-            shopDone = false; treasureDone = false; unitDone = false
-            return
-        end
-
-        -- Unit Reward (check every 0.5s)
-        if getSkipUnitReward() and now - clocks.unit >= 0.5 then
-            clocks.unit = now
-            if isUnitRewardOpen() then
-                if not unitDone then
-                    unitDone = true
-                    task.spawn(skipUnitRewardPanel)
-                end
-            else
-                unitDone = false
-            end
-        end
-
-        -- Card pick (check every 0.5s)
-        if (getAutoPick() or getAutoRagnawCards()) and now - clocks.card >= 0.5 then
-            clocks.card = now
-            local opts = readOpenCardOptions()
-            if opts and #opts > 0 then
-                local chosenIdx, reason = chooseCardIndex(opts)
-                if chosenIdx then
-                    pickIndex(opts, chosenIdx)
-                    if reason == "ragnaw" then
-                        ragnawPickedThisRun[opts[chosenIdx]] = true
-                        ragnawPickCount = math.min(4, ragnawPickCount + 1)
-                    end
-                elseif reason == "skip-unit" then
-                    skipCards()
-                end
-                clocks.room = now + 2
-                return
-            end
-        end
-
-        -- Shop (check every 1s, fire once per appearance)
-        if getAutoSkipShop() and now - clocks.shop >= 1 then
-            clocks.shop = now
-            if isShopOpen() then
-                if not shopDone then
-                    shopDone = true
-                    task.spawn(function()
-                        closeShopGui()
-                        if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
-                    end)
-                end
-            else
-                shopDone = false
-            end
-        end
-
-        -- Treasure (check every 1s, fire once per appearance)
-        if getAutoCollectChests() and now - clocks.treasure >= 1 then
-            clocks.treasure = now
-            if isTreasureOpen() then
-                if not treasureDone then
-                    treasureDone = true
-                    openedChests = {}
-                    task.spawn(function()
-                        collectAndCloseTreasure()
-                        if getAutoNextRoom() then task.wait(1); requestNextRoom() end
-                    end)
-                end
-            else
-                treasureDone = false
-            end
-        end
-
-        -- Auto Next Room (check every 2s)
-        if getAutoNextRoom() and now - clocks.room >= 2 then
-            clocks.room = now
+        if now - roomClock >= 2 then
+            roomClock = now
             task.spawn(requestNextRoom)
         end
     end)
 end
+
 end -- close Odyssey do block
 
 -- ======================
