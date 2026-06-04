@@ -1419,12 +1419,11 @@ local function getAdventureHUD()
     return playerGui:FindFirstChild("AdventureHUD")
 end
 
--- A panel is "open" when it has non-zero AbsoluteSize (game animates size to 0 when hiding)
+-- A panel is "open" when Visible=true
+-- CONFIRMED from debugger: game toggles Visible property, AbsoluteSize stays constant
 local function isPanelOpen(panel)
     if not panel then return false end
-    if not panel.Visible then return false end
-    local s = panel.AbsoluteSize
-    return s.X > 10 and s.Y > 10
+    return panel.Visible == true
 end
 
 local function findAdventurePanel(name)
