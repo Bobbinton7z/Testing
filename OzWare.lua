@@ -188,7 +188,7 @@ loadOzSettings()
 -- Logo image: upload OzWare logo to Roblox, replace LOGO_ASSET_ID below
 -- ======================
 local LOGO_ASSET = "rbxassetid://YOUR_LOGO_ID"  -- replace with your uploaded asset ID
-local WIN_W, WIN_H = 820, 520
+local WIN_W, WIN_H = 740, 475
 local SIDEBAR_W    = 144
 
 -- ── Window frame ─────────────────────────────────────────────────
@@ -202,6 +202,33 @@ win.BorderSizePixel  = 0
 win.ClipsDescendants = true
 win.Active           = true
 win.Visible          = false   -- starts hidden; float button reveals it
+
+-- ── Open/close animation (top-level so accessible at boot) ────────
+local isOpen = false
+
+local function openWindow()
+    isOpen = true
+    win.Visible = true
+    win.Size    = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
+    win.AnchorPoint = Vector2.new(0.5, 0.5)
+    win.Position    = UDim2.new(0.5, 0, 0.5, 0)
+    TweenSvc:Create(win, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, WIN_W, 0, WIN_H)
+    }):Play()
+end
+
+local function closeWindow()
+    isOpen = false
+    local t = TweenSvc:Create(win, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
+    })
+    t:Play()
+    t.Completed:Connect(function()
+        win.Visible = false
+        win.Size    = UDim2.new(0, WIN_W, 0, WIN_H)
+    end)
+end
+
 win.ZIndex           = 10
 win.Parent           = gui
 Instance.new("UICorner", win).CornerRadius = UDim.new(0, 14)
@@ -1896,6 +1923,7 @@ end -- close Macro Tab do block
 -- ======================
 switchTab("Lobby")
 notify("OzWare V3 loaded", true)
+task.defer(openWindow) -- show GUI on inject
 
 -- ======================
 -- FLOATING TOGGLE (bottom-left)  +  SUMMON UI SUPPRESSOR
@@ -1927,33 +1955,6 @@ eyeLbl.Size=UDim2.new(1,0,1,0); eyeLbl.BackgroundTransparency=1
 eyeLbl.Text="👁"; eyeLbl.TextSize=24; eyeLbl.Font=FONT_BOLD
 eyeLbl.TextColor3=C.ACCENT2; eyeLbl.ZIndex=51
 
--- ── Open/close animation ─────────────────────────────────────────
-local isOpen = false
-
-local function openWindow()
-    isOpen = true
-    win.Visible = true
-    win.Size    = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
-    win.AnchorPoint = Vector2.new(0.5, 0.5)
-    win.Position    = UDim2.new(0.5, 0, 0.5, 0)
-    -- Spring open: grows from 55% to full with Back easing (bouncy)
-    TweenSvc:Create(win, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, WIN_W, 0, WIN_H)
-    }):Play()
-end
-
-local function closeWindow()
-    isOpen = false
-    -- Shrink away with Back easing inward
-    local t = TweenSvc:Create(win, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-        Size = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
-    })
-    t:Play()
-    t.Completed:Connect(function()
-        win.Visible = false
-        win.Size    = UDim2.new(0, WIN_W, 0, WIN_H)
-    end)
-end
 
 -- Float button: drag vs tap
 local dragging2  = false
