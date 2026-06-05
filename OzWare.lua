@@ -1184,12 +1184,16 @@ do
     end
 end
 
--- --- Card discovery ---------------------------------------------------------
--- Cards come from one of:
---   1) ReplicatedStorage / Odyssey / Cards (or similar)
---   2) Scraped at runtime when the card-pick UI opens
-local function isRagnawTargetCard(name)
-    return RAGNAW_TARGET_CARDS[(name or ""):lower():gsub("^%s+",""):gsub("%s+$","")] == true
+-- Rarity scoring from card text blob
+local RARITY_SCORES = {secret=7, divine=7, celestial=6, mythic=5, legendary=4, epic=3, rare=2, uncommon=1, common=0}
+local function rarityScore(text)
+    if not text then return 0 end
+    local t = text:lower()
+    local best = 0
+    for word, score in pairs(RARITY_SCORES) do
+        if t:find(word, 1, true) and score > best then best = score end
+    end
+    return best
 end
 
 -- chooseCardIndex: picks the highest rarity card from text blobs
