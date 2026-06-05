@@ -40,16 +40,19 @@ local FONT_SEMI = Enum.Font.GothamSemibold
 local FONT_REG  = Enum.Font.Gotham
 
 
+local function getMapRoot()
+    return workspace:FindFirstChild("Map")
+        or workspace:FindFirstChild("MapHolder")
+        or workspace:FindFirstChild("Maps")
+        or workspace:FindFirstChild("Stage")
+end
+
 local function inGameMode()
-    -- Regular match: map folder exists in workspace
     if getMapRoot() then return true end
-    -- Odyssey run: Adventure subfolder with VoteEvent exists under Networking
-    -- This is the most reliable signal — VoteEvent only exists during an active run
     local net = RS:FindFirstChild("Networking")
     local ody = net and net:FindFirstChild("Odyssey")
     local adv = ody and ody:FindFirstChild("Adventure")
     if adv and adv:FindFirstChild("VoteEvent") then return true end
-    -- Fallback: any of these workspace folders indicate an active match
     for _, name in ipairs({
         "OdysseyRoom","AdventureRoom","Adventure","OdysseyMap","AdventureMap",
         "Odyssey","OdysseyStage","AdventureStage","OdysseyHolder","AdventureHolder",
@@ -885,7 +888,7 @@ local gamePage = tabPages["Game"]
 local matchSec = section(gamePage, "Match Controls", 1)
 
 -- Skip Wave: toggle, fires every 3s while on and in-match
-local _, getSkipWave, onSkipWave = toggle(matchSec, "Skip Wave", C.ACCENT, 1, "game.skipwave")
+local _, getSkipWave, onSkipWave = toggle(matchSec, "Skip Wave", 1, false, "game.skipwave")
 local skipWaveClock = 0
 RunSvc.Heartbeat:Connect(function()
     if not getSkipWave() then return end
@@ -1044,7 +1047,7 @@ onBoostFPS(function(on)
         Terrain.WaterWaveSpeed    = 0
         Terrain.WaterReflectance  = 0
         Terrain.WaterTransparency = 1
-        Terrain.Decoration        = false
+        pcall(function() Terrain.Decoration = false end)
         -- Remove clouds from Terrain
         for _, c in ipairs(Terrain:GetChildren()) do
             if c:IsA("Clouds") then pcall(function() c:Destroy() end) end
