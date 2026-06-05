@@ -1355,10 +1355,6 @@ local function closeShopGui()
     refreshRemotes()
     local shopEv = getONet("ShopEvent")
     if shopEv then pcall(function() shopEv:FireServer("Close") end) end
-    local hud = getAdventureHUD()
-    if hud then
-        clickClose(hud:FindFirstChild("Stiches' Shop_Export"))
-    end
 end
 
 -- ── Treasure ─────────────────────────────────────────────────────
@@ -1399,9 +1395,16 @@ local function collectAndCloseTreasure()
         end
     end
 
-    -- Click confirmed Close button: TreasurePanel.Content.TopFrame.RightFrame.RightFrame.Close
-    local hud = getAdventureHUD()
-    if hud then clickClose(hud:FindFirstChild("TreasurePanel")) end
+    -- Chest collection done; panel closes when server processes all chests
+    local hud = playerGui:FindFirstChild("AdventureHUD")
+    if hud then
+        local panel = hud:FindFirstChild("TreasurePanel")
+        if panel then
+            -- Fire close via remote if available
+            local ev = getONet("TreasureEvent")
+            if ev then pcall(function() ev:FireServer("Close") end) end
+        end
+    end
 end
 
 -- ── Unit Reward ───────────────────────────────────────────────────
@@ -1416,10 +1419,6 @@ local function skipUnitRewardPanel()
     refreshRemotes()
     local ev = getONet("UnitRewardEvent")
     if ev then pcall(function() ev:FireServer("Skip") end) end
-    -- Also click Close if present
-    local panel = findAdventurePanel("BossRewardPickPanel")
-               or findAdventurePanel("RunRewardsPanelRoot")
-    clickClose(panel)
 end
 
 -- ── requestNextRoom ───────────────────────────────────────────────
@@ -1439,94 +1438,72 @@ local function requestNextRoom()
 end
 
 -- ── Event-driven automation ───────────────────────────────────────
--- Uses GetPropertyChangedSignal("Visible") — fires the instant each
--- panel appears. Much more reliable than polling every 0.5s.
+-- Polls panel Visible state every 0.3s — reliable regardless of when
+-- panels are added to AdventureHUD
+do
+    local flags = {card=false, shop=false, treasure=false, unit=false}
 
-local function doCardPick()
-    if not (getAutoPick() or getAutoRagnawCards()) then return end
-    -- Small delay so server finishes setting up pick state
-    task.wait(0.3)
-    local ev = getONet("CardPickEvent")
-    if not ev then return end
-
-    -- Find best card by rarity from button text
-    local cards = getCardButtons()
-    local bestIdx = 1
-    if cards and #cards > 0 then
-        local bestScore = -1
-        for i, c in ipairs(cards) do
-            local score = rarityScore(c.text)
-            if score > bestScore then bestIdx = i; bestScore = score end
+    RunSvc.Heartbeat:Connect(function()
+        if not inGameMode() then
+            flags.card=false; flags.shop=false; flags.treasure=false; flags.unit=false
+            return
         end
-    end
-
-    -- Fire Pick twice — first selects, second confirms character cards
-    pcall(function() ev:FireServer("Pick", bestIdx) end)
-    task.wait(0.35)
-    pcall(function() ev:FireServer("Pick", bestIdx) end)
-end
-
-local function doShop()
-    if not getAutoSkipShop() then return end
-    task.wait(0.15)
-    closeShopGui()
-    if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
-end
-
-local function doTreasure()
-    if not getAutoCollectChests() then return end
-    openedChests = {}
-    task.wait(0.5)
-    collectAndCloseTreasure()
-    if getAutoNextRoom() then task.wait(1); requestNextRoom() end
-end
-
-local function doUnitReward()
-    if not getSkipUnitReward() then return end
-    task.wait(0.15)
-    skipUnitRewardPanel()
-end
-
--- Connect signals once AdventureHUD and its panels are available
-local function hookPanels(hud)
-    local function onVisible(panel, fn)
-        if not panel then return end
-        panel:GetPropertyChangedSignal("Visible"):Connect(function()
-            if panel.Visible then task.spawn(fn) end
-        end)
-    end
-
-    onVisible(hud:FindFirstChild("ChooseCard"),             doCardPick)
-    onVisible(hud:FindFirstChild("Stiches' Shop_Export"),   doShop)
-    onVisible(hud:FindFirstChild("TreasurePanel"),          doTreasure)
-    onVisible(hud:FindFirstChild("BossRewardPickPanel"),    doUnitReward)
-    onVisible(hud:FindFirstChild("RunRewardsPanelRoot"),    doUnitReward)
-end
-
--- Try to hook now; retry every second until AdventureHUD is found
-task.spawn(function()
-    local hooked = false
-    while not hooked do
         local hud = playerGui:FindFirstChild("AdventureHUD")
-        if hud then
-            hookPanels(hud)
-            hooked = true
-        else
-            -- Wait for AdventureHUD to appear
-            playerGui.ChildAdded:Wait()
-        end
-    end
-end)
+        if not hud then return end
 
--- Also hook when playerGui gets a new AdventureHUD (e.g. after rejoin)
-playerGui.ChildAdded:Connect(function(child)
-    if child.Name == "AdventureHUD" then
-        task.wait(0.5)
-        hookPanels(child)
-    end
-end)
+        -- Unit reward
+        local up = hud:FindFirstChild("BossRewardPickPanel") or hud:FindFirstChild("RunRewardsPanelRoot")
+        if up and up.Visible then
+            if not flags.unit and getSkipUnitReward() then
+                flags.unit = true
+                task.spawn(function()
+                    task.wait(0.15)
+                    local ev = getONet("UnitRewardEvent")
+                    if ev then pcall(function() ev:FireServer("Skip") end) end
+                end)
+            end
+        else flags.unit = false end
 
--- Auto Next Room: keep polling since there's no panel to watch
+        -- Card pick
+        local cp = hud:FindFirstChild("ChooseCard")
+        if cp and cp.Visible then
+            if not flags.card and (getAutoPick() or getAutoRagnawCards()) then
+                flags.card = true
+                task.spawn(doCardPick)
+            end
+        else flags.card = false end
+
+        -- Shop
+        local sp = hud:FindFirstChild("Stiches' Shop_Export")
+        if sp and sp.Visible then
+            if not flags.shop and getAutoSkipShop() then
+                flags.shop = true
+                task.spawn(function()
+                    task.wait(0.2)
+                    local ev = getONet("ShopEvent")
+                    if ev then pcall(function() ev:FireServer("Close") end) end
+                    if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
+                end)
+            end
+        else flags.shop = false end
+
+        -- Treasure
+        local tp = hud:FindFirstChild("TreasurePanel")
+        if tp and tp.Visible then
+            if not flags.treasure and getAutoCollectChests() then
+                flags.treasure = true
+                openedChests = {}
+                task.spawn(function()
+                    task.wait(0.3)
+                    collectAndCloseTreasure()
+                    if getAutoNextRoom() then task.wait(1); requestNextRoom() end
+                end)
+            end
+        else flags.treasure = false end
+    end)
+end
+
+-- Auto Next Room heartbeat
 do
     local roomClock = 0
     RunSvc.Heartbeat:Connect(function()
