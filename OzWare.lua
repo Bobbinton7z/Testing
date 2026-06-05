@@ -188,7 +188,7 @@ loadOzSettings()
 -- Logo image: upload OzWare logo to Roblox, replace LOGO_ASSET_ID below
 -- ======================
 local LOGO_ASSET = "rbxassetid://YOUR_LOGO_ID"  -- replace with your uploaded asset ID
-local WIN_W, WIN_H = 680, 440
+local WIN_W, WIN_H = 820, 520
 local SIDEBAR_W    = 144
 
 -- ── Window frame ─────────────────────────────────────────────────
@@ -366,7 +366,6 @@ contentArea.ZIndex           = 11
 -- ── Tab system ────────────────────────────────────────────────────
 local tabButtons, tabLabels, tabIcons, tabPages, activeTab = {}, {}, {}, {}, nil
 local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","Macro"}
-local TAB_ICONS = {Lobby="⌂", Joiner="⊕", Game="⚙", Odyssey="◈", Macro="⊞"}
 
 local function makePage()
     local p=Instance.new("ScrollingFrame")
@@ -400,34 +399,33 @@ local function switchTab(name)
 end
 
 for i,name in ipairs(TAB_NAMES) do
-    -- Tab button: full width, no bg by default
     local b = Instance.new("TextButton", tabList)
-    b.Size=UDim2.new(1,0,0,38); b.BackgroundColor3=Color3.fromRGB(180,80,255)
+    b.Size=UDim2.new(1,0,0,40); b.BackgroundColor3=Color3.fromRGB(180,80,255)
     b.BackgroundTransparency=1; b.Text=""; b.AutoButtonColor=false
     b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=13
     Instance.new("UICorner",b).CornerRadius=UDim.new(0,0)
 
     -- Left accent bar (visible when active)
     local bar = Instance.new("Frame", b)
-    bar.Name="ActiveBar"; bar.Size=UDim2.new(0,3,0.7,0)
+    bar.Name="ActiveBar"; bar.Size=UDim2.new(0,3,0.6,0)
     bar.AnchorPoint=Vector2.new(0,0.5); bar.Position=UDim2.new(0,0,0.5,0)
     bar.BackgroundColor3=C.ACCENT2; bar.BorderSizePixel=0; bar.ZIndex=15
     bar.BackgroundTransparency=1
     Instance.new("UICorner",bar).CornerRadius=UDim.new(0,2)
 
-    -- Icon
-    local ico = Instance.new("TextLabel", b)
-    ico.Size=UDim2.new(0,20,0,20); ico.Position=UDim2.new(0,14,0.5,-10)
-    ico.BackgroundTransparency=1; ico.Text=TAB_ICONS[name] or ""
-    ico.TextColor3=Color3.fromRGB(120,100,150); ico.TextSize=16; ico.Font=FONT_BOLD
-    ico.ZIndex=14
-
-    -- Label
+    -- Label only — no icon
     local lbl = Instance.new("TextLabel", b)
-    lbl.Size=UDim2.new(1,-42,1,0); lbl.Position=UDim2.new(0,38,0,0)
-    lbl.BackgroundTransparency=1; lbl.Text=name; lbl.TextColor3=Color3.fromRGB(120,100,150)
-    lbl.TextSize=13; lbl.Font=FONT_SEMI; lbl.TextXAlignment=Enum.TextXAlignment.Left
+    lbl.Size=UDim2.new(1,-16,1,0); lbl.Position=UDim2.new(0,14,0,0)
+    lbl.BackgroundTransparency=1; lbl.Text=name
+    lbl.TextColor3=Color3.fromRGB(110,95,140)
+    lbl.TextSize=13; lbl.Font=FONT_SEMI
+    lbl.TextXAlignment=Enum.TextXAlignment.Left
     lbl.ZIndex=14
+
+    -- dummy ico table entry so switchTab doesn't error
+    local ico = Instance.new("TextLabel", b)
+    ico.Size=UDim2.new(0,0,0,0); ico.BackgroundTransparency=1
+    ico.Text=""; ico.ZIndex=0
 
     tabButtons[name]=b; tabLabels[name]=lbl; tabIcons[name]=ico
     tabPages[name]=makePage()
@@ -442,7 +440,7 @@ for i,name in ipairs(TAB_NAMES) do
     b.MouseLeave:Connect(function()
         if activeTab~=name then
             tween(b,{BackgroundTransparency=1},0.1)
-            lbl.TextColor3=Color3.fromRGB(120,100,150)
+            lbl.TextColor3=Color3.fromRGB(110,95,140)
         end
     end)
 end
@@ -1930,55 +1928,66 @@ eyeLbl.Text="👁"; eyeLbl.TextSize=24; eyeLbl.Font=FONT_BOLD
 eyeLbl.TextColor3=C.ACCENT2; eyeLbl.ZIndex=51
 
 -- ── Open/close animation ─────────────────────────────────────────
-local isOpen   = false
-local OPEN_SIZE  = UDim2.new(0, WIN_W, 0, WIN_H)
-local CLOSE_SIZE = UDim2.new(0, WIN_W * 0.85, 0, WIN_H * 0.85)
+local isOpen = false
 
 local function openWindow()
     isOpen = true
     win.Visible = true
-    win.Size    = UDim2.new(0, WIN_W * 0.7, 0, WIN_H * 0.7)
-    win.GroupTransparency = 0.6
-    TweenSvc:Create(win, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = OPEN_SIZE, GroupTransparency = 0
+    win.Size    = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
+    win.AnchorPoint = Vector2.new(0.5, 0.5)
+    win.Position    = UDim2.new(0.5, 0, 0.5, 0)
+    -- Spring open: grows from 55% to full with Back easing (bouncy)
+    TweenSvc:Create(win, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, WIN_W, 0, WIN_H)
     }):Play()
-    winStroke.Color = C.ACCENT
-    TweenSvc:Create(winStroke, TweenInfo.new(0.35), {Color = Color3.fromRGB(80,30,120)}):Play()
 end
 
 local function closeWindow()
     isOpen = false
-    TweenSvc:Create(win, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-        Size = CLOSE_SIZE, GroupTransparency = 0.6
-    }):Play()
-    task.delay(0.2, function()
+    -- Shrink away with Back easing inward
+    local t = TweenSvc:Create(win, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
+    })
+    t:Play()
+    t.Completed:Connect(function()
         win.Visible = false
-        win.Size    = OPEN_SIZE
-        win.GroupTransparency = 0
+        win.Size    = UDim2.new(0, WIN_W, 0, WIN_H)
     end)
 end
 
--- Float button drag + tap
-local dragging2, startPos2, startInput2, pressT = false
+-- Float button: drag vs tap
+local dragging2  = false
+local startPos2  = nil
+local startInput2 = nil
+local pressT     = nil
+
 floatBtn.InputBegan:Connect(function(i)
     if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-        dragging2=true; startPos2=floatBtn.Position; startInput2=i.Position; pressT=tick()
+        dragging2   = true
+        startPos2   = floatBtn.Position
+        startInput2 = i.Position
+        pressT      = tick()
     end
 end)
+
 floatBtn.InputEnded:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-        local moved = startInput2 and (i.Position-startInput2).Magnitude > 6
-        dragging2 = false
-        if not moved and tick()-pressT < 0.35 then
-            if isOpen then closeWindow() else openWindow() end
-        end
+    if i.UserInputType~=Enum.UserInputType.MouseButton1 and i.UserInputType~=Enum.UserInputType.Touch then return end
+    local moved = startInput2 and (Vector2.new(i.Position.X,i.Position.Y) - Vector2.new(startInput2.X,startInput2.Y)).Magnitude > 8
+    dragging2 = false
+    if not moved and pressT and (tick()-pressT) < 0.4 then
+        if isOpen then closeWindow() else openWindow() end
     end
 end)
+
 UIS.InputChanged:Connect(function(i)
     if not dragging2 then return end
     if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
-        local d=i.Position-startInput2
-        floatBtn.Position=UDim2.new(startPos2.X.Scale,startPos2.X.Offset+d.X,startPos2.Y.Scale,startPos2.Y.Offset+d.Y)
+        if not startInput2 then return end
+        local d = i.Position - startInput2
+        floatBtn.Position = UDim2.new(
+            startPos2.X.Scale, startPos2.X.Offset + d.X,
+            startPos2.Y.Scale, startPos2.Y.Offset + d.Y
+        )
     end
 end)
 
