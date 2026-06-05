@@ -1537,6 +1537,11 @@ do
     end)
 end
 
+-- Confirm Odyssey block executed successfully
+task.defer(function()
+    notify("Odyssey: hooks active", true)
+end)
+
 end -- close Odyssey do block
 
 -- ======================
