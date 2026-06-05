@@ -39,23 +39,6 @@ local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
 local FONT_REG  = Enum.Font.Gotham
 
--- ======================
--- REMOTES
--- ======================
-local function OdysseyNet()   local o = Net:FindFirstChild("Odyssey") return o and o:FindFirstChild("Adventure") end
-
--- ======================
--- GAME-MODE GUARD (top-level, shared by all tabs)
--- Returns true only when the player is inside an active match/map,
--- not in the lobby. All automation loops check this before firing remotes.
--- ======================
-local function getMapRoot()
-    -- CONFIRMED: workspace.Map exists in this game
-    return workspace:FindFirstChild("Map")
-        or workspace:FindFirstChild("MapHolder")
-        or workspace:FindFirstChild("Maps")
-        or workspace:FindFirstChild("Stage")
-end
 
 local function inGameMode()
     -- Regular match: map folder exists in workspace
@@ -201,126 +184,196 @@ end
 loadOzSettings()
 
 -- ======================
--- WINDOW
+-- WINDOW  (premium redesign)
+-- Logo image: upload OzWare logo to Roblox, replace LOGO_ASSET_ID below
 -- ======================
+local LOGO_ASSET = "rbxassetid://YOUR_LOGO_ID"  -- replace with your uploaded asset ID
+local WIN_W, WIN_H = 680, 440
+local SIDEBAR_W    = 144
+
+-- ── Window frame ─────────────────────────────────────────────────
 local win = Instance.new("Frame")
-win.Name="Window"; win.Size=UDim2.new(0,720,0,460)
-win.AnchorPoint=Vector2.new(0.5,0.5); win.Position=UDim2.new(0.5,0,0.5,0)
-win.BackgroundColor3=C.BG; win.BorderSizePixel=0; win.ClipsDescendants=true
-win.Active=true; win.Parent=gui
-corner(win,14); stroke(win,C.ACCENT,2)
+win.Name             = "Window"
+win.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
+win.AnchorPoint      = Vector2.new(0.5, 0.5)
+win.Position         = UDim2.new(0.5, 0, 0.5, 0)
+win.BackgroundColor3 = Color3.fromRGB(13, 13, 20)
+win.BorderSizePixel  = 0
+win.ClipsDescendants = true
+win.Active           = true
+win.Visible          = false   -- starts hidden; float button reveals it
+win.ZIndex           = 10
+win.Parent           = gui
+Instance.new("UICorner", win).CornerRadius = UDim.new(0, 14)
+local winStroke = Instance.new("UIStroke", win)
+winStroke.Color = Color3.fromRGB(60, 30, 90)
+winStroke.Thickness = 1
 
--- Purple neon glow bars — parented to win so they move with it
-local function glowBar(xPos, col)
-    local g=Instance.new("Frame")
-    g.AnchorPoint=Vector2.new(0.5,0.5)
-    g.Size=UDim2.new(0,3,1,20)
-    g.Position=UDim2.new(xPos,0,0.5,0)
-    g.BackgroundColor3=col; g.BorderSizePixel=0; g.ZIndex=0; g.Parent=win
-    corner(g,2)
-    local s=Instance.new("ImageLabel")
-    s.AnchorPoint=Vector2.new(0.5,0.5); s.Size=UDim2.new(0,60,1,60)
-    s.Position=UDim2.new(0.5,0,0.5,0); s.BackgroundTransparency=1
-    s.Image="rbxassetid://5028857084"; s.ImageColor3=col
-    s.ImageTransparency=0.4; s.ZIndex=0; s.Parent=g
+-- Subtle inner gradient on window background
+do
+    local bg = Instance.new("Frame", win)
+    bg.Size = UDim2.new(1,0,1,0); bg.BackgroundColor3 = Color3.fromRGB(20,10,35)
+    bg.BorderSizePixel = 0; bg.ZIndex = 0
+    local g = Instance.new("UIGradient", bg)
+    g.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(22,10,38)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(10,10,18)),
+    })
+    g.Rotation = 135
 end
-glowBar(0, C.ACCENT)    -- left edge
-glowBar(1, C.ACCENT2)   -- right edge
 
--- Title bar with gradient header
-local titleBar=Instance.new("Frame")
-titleBar.Size=UDim2.new(1,0,0,52); titleBar.BackgroundColor3=C.PANEL
-titleBar.BorderSizePixel=0; titleBar.ZIndex=2; titleBar.Parent=win
-corner(titleBar,14)
-local titleCover=Instance.new("Frame")
-titleCover.Size=UDim2.new(1,0,0,18); titleCover.Position=UDim2.new(0,0,1,-18)
-titleCover.BackgroundColor3=C.PANEL; titleCover.BorderSizePixel=0
-titleCover.ZIndex=2; titleCover.Parent=titleBar
--- Subtle purple gradient on title bar
-gradient(titleBar, C.PANEL, Color3.fromRGB(35, 20, 55), 180)
+-- ── Header (logo banner) ─────────────────────────────────────────
+local header = Instance.new("Frame", win)
+header.Size             = UDim2.new(1, 0, 0, 78)
+header.BackgroundColor3 = Color3.fromRGB(16, 10, 28)
+header.BorderSizePixel  = 0
+header.ZIndex           = 12
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
+-- Cover bottom-round on header
+local headerCover = Instance.new("Frame", header)
+headerCover.Size             = UDim2.new(1,0,0,14)
+headerCover.Position         = UDim2.new(0,0,1,-14)
+headerCover.BackgroundColor3 = Color3.fromRGB(16,10,28)
+headerCover.BorderSizePixel  = 0; headerCover.ZIndex = 13
+-- Subtle gradient on header
+local hgrad = Instance.new("UIGradient", header)
+hgrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(30,12,50)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(13,10,22)),
+})
+hgrad.Rotation = 90
+-- Bottom separator line
+local sep = Instance.new("Frame", win)
+sep.Size             = UDim2.new(1,0,0,1)
+sep.Position         = UDim2.new(0,0,0,78)
+sep.BackgroundColor3 = Color3.fromRGB(60,30,90)
+sep.BorderSizePixel  = 0; sep.ZIndex = 14
 
--- "Oz" logo with purple glow
-local logo=Instance.new("TextLabel")
-logo.Size=UDim2.new(0,38,0,38); logo.Position=UDim2.new(0,14,0.5,-19)
-logo.BackgroundTransparency=1; logo.Text="Oz"
-logo.TextColor3=C.ACCENT; logo.TextSize=22; logo.Font=FONT_BOLD
-logo.ZIndex=3; logo.Parent=titleBar
-gradient(logo,C.ACCENT,C.ACCENT2,135)
-
--- Centered title — graffiti style uppercase
-local titleLbl=Instance.new("TextLabel")
-titleLbl.Size=UDim2.new(0,220,1,0); titleLbl.AnchorPoint=Vector2.new(0.5,0)
-titleLbl.Position=UDim2.new(0.5,0,0,0)
-titleLbl.BackgroundTransparency=1; titleLbl.Text="OzWare V3"
-titleLbl.TextColor3=C.TEXT; titleLbl.TextSize=19; titleLbl.Font=FONT_BOLD
-titleLbl.ZIndex=3; titleLbl.Parent=titleBar
-gradient(titleLbl, C.ACCENT, C.ACCENT2, 0)
-
--- Title buttons
-local function titleBtn(rightOffset, bg, symbol)
-    local b=Instance.new("TextButton")
-    b.AnchorPoint=Vector2.new(1,0.5)
-    b.Size=UDim2.new(0,28,0,28)
-    b.Position=UDim2.new(1, -rightOffset, 0.5, 0)
-    b.BackgroundColor3=bg; b.Text=symbol; b.TextColor3=C.TEXT
-    b.TextSize=15; b.Font=FONT_BOLD; b.BorderSizePixel=0
-    b.ZIndex=4; b.Parent=titleBar; corner(b,8)
-    b.MouseEnter:Connect(function() tween(b,{BackgroundTransparency=0.3}) end)
-    b.MouseLeave:Connect(function() tween(b,{BackgroundTransparency=0}) end)
-    return b
+-- Logo image centered in header
+local logoImg = Instance.new("ImageLabel", header)
+logoImg.Size             = UDim2.new(0, 160, 0, 56)
+logoImg.AnchorPoint      = Vector2.new(0.5, 0.5)
+logoImg.Position         = UDim2.new(0.5, 0, 0.5, 0)
+logoImg.BackgroundTransparency = 1
+logoImg.Image            = LOGO_ASSET
+logoImg.ScaleType        = Enum.ScaleType.Fit
+logoImg.ZIndex           = 14
+-- Fallback text if no asset ID yet
+local logoFallback = Instance.new("TextLabel", header)
+logoFallback.Size             = UDim2.new(0, 200, 1, 0)
+logoFallback.AnchorPoint      = Vector2.new(0.5, 0.5)
+logoFallback.Position         = UDim2.new(0.5, 0, 0.5, 0)
+logoFallback.BackgroundTransparency = 1
+logoFallback.Text             = "OzWare"
+logoFallback.TextColor3       = Color3.fromRGB(255,255,255)
+logoFallback.TextSize         = 28
+logoFallback.Font             = FONT_BOLD
+logoFallback.ZIndex           = 15
+logoFallback.Visible          = (LOGO_ASSET == "rbxassetid://YOUR_LOGO_ID")
+do
+    local g2 = Instance.new("UIGradient", logoFallback)
+    g2.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(200,80,255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255,60,200)),
+    })
+    g2.Rotation = 0
 end
--- (Minimize / Close buttons removed; using floating toggle bottom-left)
+-- Version badge
+local verBadge = Instance.new("TextLabel", header)
+verBadge.Size             = UDim2.new(0,28,0,16)
+verBadge.AnchorPoint      = Vector2.new(1,0)
+verBadge.Position         = UDim2.new(1,-10,0,8)
+verBadge.BackgroundColor3 = Color3.fromRGB(140,40,200)
+verBadge.BorderSizePixel  = 0
+verBadge.Text             = "V3"
+verBadge.TextColor3       = Color3.fromRGB(255,255,255)
+verBadge.TextSize         = 10; verBadge.Font = FONT_BOLD
+verBadge.ZIndex           = 15
+Instance.new("UICorner",verBadge).CornerRadius = UDim.new(0,4)
 
-
--- floating toggle handler is added after sidebar/contentArea exist (see bottom of file)
-
--- Drag
+-- Drag via header
 local dragging, dragStart, winStart = false, nil, nil
-titleBar.InputBegan:Connect(function(i)
+header.InputBegan:Connect(function(i)
     if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
         dragging=true; dragStart=i.Position; winStart=win.Position
     end
 end)
-titleBar.InputEnded:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end
+header.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        dragging=false
+    end
 end)
 UIS.InputChanged:Connect(function(i)
     if not dragging then return end
     if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
         local d=i.Position-dragStart
-        win.Position=UDim2.new(winStart.X.Scale, winStart.X.Offset+d.X, winStart.Y.Scale, winStart.Y.Offset+d.Y)
+        win.Position=UDim2.new(winStart.X.Scale,winStart.X.Offset+d.X,winStart.Y.Scale,winStart.Y.Offset+d.Y)
     end
 end)
 
--- ======================
--- SIDEBAR (left vertical tabs) + CONTENT (right)
--- ======================
--- Sidebar container (no list layout — children positioned manually)
-local sidebar=Instance.new("Frame")
-sidebar.Size=UDim2.new(0,150,1,-64); sidebar.Position=UDim2.new(0,10,0,58)
-sidebar.BackgroundColor3=C.PANEL; sidebar.BorderSizePixel=0; sidebar.ZIndex=2; sidebar.Parent=win
-corner(sidebar,14)
+-- ── Sidebar ───────────────────────────────────────────────────────
+local sidebar = Instance.new("Frame", win)
+sidebar.Size             = UDim2.new(0, SIDEBAR_W, 1, -96)
+sidebar.Position         = UDim2.new(0, 0, 0, 86)
+sidebar.BackgroundColor3 = Color3.fromRGB(18, 12, 30)
+sidebar.BorderSizePixel  = 0; sidebar.ZIndex = 11
+-- Right border only
+local sideStroke = Instance.new("Frame", sidebar)
+sideStroke.Size             = UDim2.new(0,1,1,0)
+sideStroke.Position         = UDim2.new(1,-1,0,0)
+sideStroke.BackgroundColor3 = Color3.fromRGB(50,25,75)
+sideStroke.BorderSizePixel  = 0; sideStroke.ZIndex = 12
 
--- Tab list (top of sidebar)
-local tabList=Instance.new("Frame")
-tabList.Size=UDim2.new(1,-12,1,-78); tabList.Position=UDim2.new(0,6,0,8)
-tabList.BackgroundTransparency=1; tabList.ZIndex=3; tabList.Parent=sidebar
-listLayout(tabList,nil,6,Enum.HorizontalAlignment.Center)
+local tabList = Instance.new("Frame", sidebar)
+tabList.Size                = UDim2.new(1,0,1,-60)
+tabList.Position            = UDim2.new(0,0,0,8)
+tabList.BackgroundTransparency = 1; tabList.ZIndex = 12
+listLayout(tabList, nil, 2, Enum.HorizontalAlignment.Center)
 
-local contentArea=Instance.new("Frame")
-contentArea.Size=UDim2.new(1, -180, 1, -64); contentArea.Position=UDim2.new(0,170,0,58)
-contentArea.BackgroundTransparency=1; contentArea.ClipsDescendants=true; contentArea.Parent=win
+-- Avatar footer
+local footer = Instance.new("Frame", sidebar)
+footer.Size             = UDim2.new(1,-12,0,50)
+footer.Position         = UDim2.new(0,6,1,-56)
+footer.BackgroundColor3 = Color3.fromRGB(25,15,40)
+footer.BorderSizePixel  = 0; footer.ZIndex = 12
+Instance.new("UICorner",footer).CornerRadius=UDim.new(0,8)
+local avImg = Instance.new("ImageLabel", footer)
+avImg.Size=UDim2.new(0,32,0,32); avImg.Position=UDim2.new(0,8,0.5,-16)
+avImg.BackgroundColor3=C.CARD; avImg.BorderSizePixel=0; avImg.ZIndex=13
+Instance.new("UICorner",avImg).CornerRadius=UDim.new(0,16)
+stroke(avImg,C.ACCENT,1)
+task.spawn(function()
+    local ok,url=pcall(function()
+        return Players:GetUserThumbnailAsync(player.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size48x48)
+    end)
+    if ok then avImg.Image=url end
+end)
+local avName = Instance.new("TextLabel", footer)
+avName.Size=UDim2.new(1,-50,1,0); avName.Position=UDim2.new(0,46,0,0)
+avName.BackgroundTransparency=1; avName.Text=player.DisplayName or player.Name
+avName.TextColor3=Color3.fromRGB(220,220,235); avName.TextSize=11; avName.Font=FONT_SEMI
+avName.TextXAlignment=Enum.TextXAlignment.Left
+avName.TextTruncate=Enum.TextTruncate.AtEnd; avName.ZIndex=13
 
+-- ── Content area ──────────────────────────────────────────────────
+local contentArea = Instance.new("Frame", win)
+contentArea.Size             = UDim2.new(1, -(SIDEBAR_W+14), 1, -96)
+contentArea.Position         = UDim2.new(0, SIDEBAR_W+8, 0, 86)
+contentArea.BackgroundTransparency = 1
+contentArea.ClipsDescendants = true
+contentArea.ZIndex           = 11
+
+-- ── Tab system ────────────────────────────────────────────────────
 local tabButtons, tabLabels, tabIcons, tabPages, activeTab = {}, {}, {}, {}, nil
 local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","Macro"}
-local TAB_ICONS = { Lobby="H", Joiner="J", Game="G", Odyssey="O", Macro="M" }
+local TAB_ICONS = {Lobby="⌂", Joiner="⊕", Game="⚙", Odyssey="◈", Macro="⊞"}
 
 local function makePage()
     local p=Instance.new("ScrollingFrame")
     p.Size=UDim2.new(1,0,1,0); p.BackgroundTransparency=1; p.BorderSizePixel=0
-    p.ScrollBarThickness=3; p.ScrollBarImageColor3=C.ACCENT
+    p.ScrollBarThickness=3; p.ScrollBarImageColor3=Color3.fromRGB(140,40,200)
     p.CanvasSize=UDim2.new(0,0,0,0); p.AutomaticCanvasSize=Enum.AutomaticSize.Y
-    p.Visible=false; p.ZIndex=2; p.Parent=contentArea
+    p.Visible=false; p.ZIndex=12; p.Parent=contentArea
     listLayout(p,nil,8); padding(p,nil,4,12,2,8)
     return p
 end
@@ -328,67 +381,71 @@ end
 local function switchTab(name)
     for n,_ in pairs(tabPages) do
         tabPages[n].Visible=false
-        tween(tabButtons[n],{BackgroundColor3=C.PANEL, BackgroundTransparency=0},0.15)
-        tabLabels[n].TextColor3=C.SUBTEXT
-        tabIcons[n].TextColor3=C.SUBTEXT
+        if tabButtons[n] then
+            tween(tabButtons[n],{BackgroundTransparency=1},0.15)
+            if tabLabels[n] then tabLabels[n].TextColor3=Color3.fromRGB(120,100,150) end
+            if tabIcons[n]  then tabIcons[n].TextColor3=Color3.fromRGB(120,100,150) end
+            -- hide active indicator
+            local ind = tabButtons[n]:FindFirstChild("ActiveBar")
+            if ind then tween(ind,{BackgroundTransparency=1},0.15) end
+        end
     end
     tabPages[name].Visible=true
-    tween(tabButtons[name],{BackgroundColor3=C.ACCENT, BackgroundTransparency=0},0.15)
-    tabLabels[name].TextColor3=C.TEXT
-    tabIcons[name].TextColor3=C.TEXT
+    tween(tabButtons[name],{BackgroundTransparency=0.88},0.15)
+    tabLabels[name].TextColor3=Color3.fromRGB(255,255,255)
+    tabIcons[name].TextColor3=C.ACCENT2
+    local ind = tabButtons[name]:FindFirstChild("ActiveBar")
+    if ind then tween(ind,{BackgroundTransparency=0},0.2) end
     activeTab=name
 end
 
 for i,name in ipairs(TAB_NAMES) do
-    local b=Instance.new("TextButton")
-    b.Size=UDim2.new(1,0,0,36); b.BackgroundColor3=C.PANEL; b.BackgroundTransparency=0
-    b.Text=""; b.AutoButtonColor=false
-    b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=3; b.Parent=tabList
-    corner(b,8); stroke(b,C.BORDER,1)
-    local ico=Instance.new("TextLabel")
-    ico.Size=UDim2.new(0,22,0,22); ico.Position=UDim2.new(0,10,0.5,-11)
+    -- Tab button: full width, no bg by default
+    local b = Instance.new("TextButton", tabList)
+    b.Size=UDim2.new(1,0,0,38); b.BackgroundColor3=Color3.fromRGB(180,80,255)
+    b.BackgroundTransparency=1; b.Text=""; b.AutoButtonColor=false
+    b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=13
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,0)
+
+    -- Left accent bar (visible when active)
+    local bar = Instance.new("Frame", b)
+    bar.Name="ActiveBar"; bar.Size=UDim2.new(0,3,0.7,0)
+    bar.AnchorPoint=Vector2.new(0,0.5); bar.Position=UDim2.new(0,0,0.5,0)
+    bar.BackgroundColor3=C.ACCENT2; bar.BorderSizePixel=0; bar.ZIndex=15
+    bar.BackgroundTransparency=1
+    Instance.new("UICorner",bar).CornerRadius=UDim.new(0,2)
+
+    -- Icon
+    local ico = Instance.new("TextLabel", b)
+    ico.Size=UDim2.new(0,20,0,20); ico.Position=UDim2.new(0,14,0.5,-10)
     ico.BackgroundTransparency=1; ico.Text=TAB_ICONS[name] or ""
-    ico.TextColor3=C.SUBTEXT; ico.TextSize=14; ico.Font=FONT_BOLD; ico.ZIndex=4; ico.Parent=b
-    local lbl=Instance.new("TextLabel")
-    lbl.Size=UDim2.new(1,-40,1,0); lbl.Position=UDim2.new(0,36,0,0)
-    lbl.BackgroundTransparency=1; lbl.Text=name; lbl.TextColor3=C.SUBTEXT
+    ico.TextColor3=Color3.fromRGB(120,100,150); ico.TextSize=16; ico.Font=FONT_BOLD
+    ico.ZIndex=14
+
+    -- Label
+    local lbl = Instance.new("TextLabel", b)
+    lbl.Size=UDim2.new(1,-42,1,0); lbl.Position=UDim2.new(0,38,0,0)
+    lbl.BackgroundTransparency=1; lbl.Text=name; lbl.TextColor3=Color3.fromRGB(120,100,150)
     lbl.TextSize=13; lbl.Font=FONT_SEMI; lbl.TextXAlignment=Enum.TextXAlignment.Left
-    lbl.ZIndex=4; lbl.Parent=b
+    lbl.ZIndex=14
+
     tabButtons[name]=b; tabLabels[name]=lbl; tabIcons[name]=ico
     tabPages[name]=makePage()
+
     b.MouseButton1Click:Connect(function() switchTab(name) end)
     b.MouseEnter:Connect(function()
-        if activeTab ~= name then
-            tween(b, {BackgroundColor3=C.DISABLED}, 0.1)
+        if activeTab~=name then
+            tween(b,{BackgroundTransparency=0.93},0.1)
+            lbl.TextColor3=Color3.fromRGB(180,160,210)
         end
     end)
     b.MouseLeave:Connect(function()
-        if activeTab ~= name then
-            tween(b, {BackgroundColor3=C.PANEL}, 0.1)
+        if activeTab~=name then
+            tween(b,{BackgroundTransparency=1},0.1)
+            lbl.TextColor3=Color3.fromRGB(120,100,150)
         end
     end)
 end
-
--- Avatar footer at bottom of sidebar
-local footer=Instance.new("Frame")
-footer.Size=UDim2.new(1,-12,0,60); footer.Position=UDim2.new(0,6,1,-66)
-footer.BackgroundTransparency=1; footer.ZIndex=3; footer.Parent=sidebar
-local avatar=Instance.new("ImageLabel")
-avatar.Size=UDim2.new(0,40,0,40); avatar.Position=UDim2.new(0,4,0.5,-20)
-avatar.BackgroundColor3=C.CARD; avatar.BorderSizePixel=0; avatar.ZIndex=4; avatar.Parent=footer
-corner(avatar,20); stroke(avatar,C.ACCENT,1)
-task.spawn(function()
-    local ok,url = pcall(function()
-        return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
-    end)
-    if ok then avatar.Image = url end
-end)
-local nameLbl=Instance.new("TextLabel")
-nameLbl.Size=UDim2.new(1,-54,1,0); nameLbl.Position=UDim2.new(0,50,0,0)
-nameLbl.BackgroundTransparency=1; nameLbl.Text=player.DisplayName or player.Name
-nameLbl.TextColor3=C.TEXT; nameLbl.TextSize=12; nameLbl.Font=FONT_SEMI
-nameLbl.TextXAlignment=Enum.TextXAlignment.Left
-nameLbl.TextTruncate=Enum.TextTruncate.AtEnd; nameLbl.ZIndex=4; nameLbl.Parent=footer
 
 -- ======================
 -- COMPONENTS
@@ -504,7 +561,11 @@ local function toggle(parent, text, order, default, saveKey)
         apply()
         for _,cb in ipairs(callbacks) do task.spawn(cb, enabled) end
     end)
-    return btnRow, function() return enabled end, function(cb) table.insert(callbacks, cb) end
+    return btnRow, function() return enabled end, function(cb)
+        table.insert(callbacks, cb)
+        -- Fire immediately if already ON when script loads (e.g. saved state)
+        if enabled then task.spawn(cb, true) end
+    end
 end
 
 local function chip(parent, text, selected, onClick)
@@ -831,6 +892,9 @@ local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2,
 onDeleteMap(function(on)
     if not on then mapDeleted = false; return end
     if mapDeleted then return end
+    -- Wait for game to be ready (handles both click and saved-state load)
+    local waited = 0
+    while not inGameMode() and waited < 60 do task.wait(0.5); waited = waited + 0.5 end
     if not inGameMode() then notify("Must be in a match", false); return end
     mapDeleted = true
 
@@ -876,7 +940,6 @@ onDeleteMap(function(on)
     end
     notify(("Map: hid %d parts"):format(count), true)
 end)
-
 
 
 -- ── Delete Enemies ────────────────────────────────────────────────
@@ -1006,6 +1069,22 @@ end -- close Game Tab do block
 -- ======================
 do
 local odysseyPage = tabPages["Odyssey"]
+local autoSec = section(odysseyPage, "Auto Behavior", 1)
+local _, getAutoNextRoom      = toggle(autoSec, "Auto Next Room",                    1, false, "odyssey.auto_next_room")
+label(autoSec, "Continues to the next room automatically", 2)
+local _, getAutoPick          = toggle(autoSec, "Auto Select Cards",                 3, true,  "odyssey.auto_select_cards")
+label(autoSec, "Picks highest rarity card when card screen appears", 4)
+local _, getAutoRagnawCards   = toggle(autoSec, "Auto Select Unit Cards (Ragnaw)",   5, false, "odyssey.auto_ragnaw_unit_cards")
+label(autoSec, "Prioritises Ragnaw unit cards when picking", 6)
+local _, getAutoSkipShop      = toggle(autoSec, "Auto Skip Shop",                    7, false, "odyssey.auto_skip_shop.v3")
+label(autoSec, "Closes Stiches' Shop automatically", 8)
+local _, getAutoCollectChests = toggle(autoSec, "Auto Collect Chests",               9, false, "odyssey.auto_collect_chest.v3")
+label(autoSec, "Opens all chests in Treasure Room", 10)
+local _, getSkipUnitReward    = toggle(autoSec, "Skip Unit Reward",                 11, false, "odyssey.skip_unit_reward")
+label(autoSec, "Skips unit reward panel after elite rooms", 12)
+
+local ragnawPickedThisRun = {}
+local ragnawPickCount     = 0
 -- ======================
 -- Confirmed remote locations (UPD 12.5):
 --   Networking.Units.SummonEvent                          — summoning
@@ -1084,269 +1163,6 @@ end
 -- Cards come from one of:
 --   1) ReplicatedStorage / Odyssey / Cards (or similar)
 --   2) Scraped at runtime when the card-pick UI opens
-local function tryFindCardsFolder()
-    local candidates = {
-        RS:FindFirstChild("Odyssey"),
-        RS:FindFirstChild("Adventures"),
-        RS:FindFirstChild("Adventure"),
-    }
-    for _,root in ipairs(candidates) do
-        if root then
-            local f = root:FindFirstChild("Cards", true)
-            if f then return f end
-        end
-    end
-    return nil
-end
-
--- classifyCard: "generic" = basic card (single tap), "unit" = character card (double tap)
--- Uses the confirmed BASIC_CARDS list — no guesswork needed
-local function classifyCard(name, obj)
-    if not name or name == "" then return "generic" end
-    return isBasicCard(name) and "generic" or "unit"
-end
-
-local discoveredCards = { generic = {}, unit = {} }
-local selectedCards   = { generic = {}, unit = {} }  -- [cardName] = true
-
-local function addCard(name, obj)
-    if not name or name=="" then return end
-    local kind = classifyCard(name, obj)
-    for _,c in ipairs(discoveredCards[kind]) do if c==name then return end end
-    table.insert(discoveredCards[kind], name)
-end
-
-local function scanCardsFromFolder()
-    local folder = tryFindCardsFolder()
-    if not folder then return 0 end
-    local n=0
-    for _,c in ipairs(folder:GetDescendants()) do
-        if c:IsA("ModuleScript") or c:IsA("Folder") or c:IsA("Configuration") then
-            addCard(c.Name, c); n=n+1
-        end
-    end
-    return n
-end
-
--- Card names are populated from BASIC_CARDS table and runtime UI scraping
--- in the ChildAdded handler below — no separate scrape needed here
-
--- --- UI: card list builder --------------------------------------------------
-local function buildCardList(parent, kind, emptyMsg)
-    local holder = Instance.new("Frame")
-    holder.Size=UDim2.new(1,0,0,0); holder.AutomaticSize=Enum.AutomaticSize.Y
-    holder.BackgroundTransparency=1; holder.LayoutOrder=10; holder.Parent=parent
-    listLayout(holder, nil, 4)
-
-    local empty = Instance.new("TextLabel")
-    empty.Size=UDim2.new(1,0,0,20); empty.BackgroundTransparency=1
-    empty.Text=emptyMsg; empty.TextColor3=C.DIM; empty.TextSize=11
-    empty.Font=FONT_REG; empty.TextXAlignment=Enum.TextXAlignment.Left
-    empty.Parent=holder
-
-    local function redraw()
-        for _,c in ipairs(holder:GetChildren()) do
-            if c:IsA("Frame") or (c:IsA("TextLabel") and c ~= empty) then c:Destroy() end
-        end
-        local list = discoveredCards[kind]
-        empty.Visible = (#list == 0)
-        table.sort(list)
-        for i,name in ipairs(list) do
-            local row=Instance.new("Frame")
-            row.Size=UDim2.new(1,0,0,26); row.BackgroundColor3=C.PANEL
-            row.BorderSizePixel=0; row.LayoutOrder=i; row.Parent=holder
-            corner(row,5)
-            local cb=Instance.new("TextButton")
-            cb.Size=UDim2.new(0,18,0,18); cb.Position=UDim2.new(0,6,0.5,-9)
-            cb.BackgroundColor3 = selectedCards[kind][name] and C.ACCENT or C.BG
-            cb.Text=selectedCards[kind][name] and "v" or ""
-            cb.TextColor3=C.TEXT; cb.TextSize=12; cb.Font=FONT_BOLD
-            cb.BorderSizePixel=0; cb.Parent=row; corner(cb,4); stroke(cb,C.BORDER,1)
-            local lb=Instance.new("TextLabel")
-            lb.Size=UDim2.new(1,-32,1,0); lb.Position=UDim2.new(0,30,0,0)
-            lb.BackgroundTransparency=1; lb.Text=name; lb.TextColor3=C.TEXT
-            lb.TextSize=12; lb.Font=FONT_REG
-            lb.TextXAlignment=Enum.TextXAlignment.Left; lb.Parent=row
-            cb.MouseButton1Click:Connect(function()
-                selectedCards[kind][name] = not selectedCards[kind][name] or nil
-                cb.BackgroundColor3 = selectedCards[kind][name] and C.ACCENT or C.BG
-                cb.Text = selectedCards[kind][name] and "v" or ""
-            end)
-        end
-    end
-
-    redraw()
-    return redraw
-end
-
--- --- Sections ---------------------------------------------------------------
-local autoSec = section(odysseyPage, "Auto Behavior", 1)
-local _, getAutoNextRoom       = toggle(autoSec, "Auto Next Room", 1, false, "odyssey.auto_next_room")
-label(autoSec, "Will continue to the next room when match is finished", 2)
-local _, getAutoPick           = toggle(autoSec, "Auto select cards", 3, true, "odyssey.auto_select_cards")
-label(autoSec, "Will select basic cards and prioritize the highest rarity", 4)
-local _, getAutoRagnawCards    = toggle(autoSec, "Auto Select Unit Cards (Ragnaw Only)", 5, false, "odyssey.auto_ragnaw_unit_cards")
-label(autoSec, "Will select 4 cards that pair good with Ragnaw", 6)
-local _, getAutoSkipShop       = toggle(autoSec, "Auto Skip Shop", 7, false, "odyssey.auto_skip_shop.v3")
-label(autoSec, "Closes Stiches' Shop and advances to next room", 8)
-local _, getAutoCollectChests  = toggle(autoSec, "Auto Collect Chests", 9, false, "odyssey.auto_collect_chest.v3")
-label(autoSec, "Opens all chests in Treasure Room and closes UI", 10)
-local _, getSkipUnitReward     = toggle(autoSec, "Skip Unit Reward", 11, false, "odyssey.skip_unit_reward")
-label(autoSec, "Skips the unit reward panel after clearing an elite room", 12)
-
--- =====================================================
-
--- ======================
--- ======================
--- ======================
--- ADVENTURE JOINER (character reference only)
--- ======================
-
--- Required by card automation below
-local ragnawPickedThisRun = {}
-local ragnawPickCount     = 0
-
-local charSec = section(odysseyPage, "Supported Characters", 0)
-
--- Header note
-local charNote = Instance.new("TextLabel")
-charNote.Size                  = UDim2.new(1,0,0,16)
-charNote.BackgroundTransparency = 1
-charNote.Text                  = "Characters with unit-card support:"
-charNote.TextColor3            = C.SUBTEXT
-charNote.TextSize              = 11
-charNote.Font                  = FONT_REG
-charNote.TextXAlignment        = Enum.TextXAlignment.Left
-charNote.LayoutOrder           = 1
-charNote.Parent                = charSec
-
--- Regnaw (Rage) entry
-local ragnawRow = Instance.new("Frame")
-ragnawRow.Size              = UDim2.new(1,0,0,34)
-ragnawRow.BackgroundColor3  = C.PANEL
-ragnawRow.BorderSizePixel   = 0
-ragnawRow.LayoutOrder       = 2
-ragnawRow.Parent            = charSec
-corner(ragnawRow, 7)
-stroke(ragnawRow, C.ACCENT, 1)
-
-local raDot = Instance.new("Frame")
-raDot.Size             = UDim2.new(0,8,0,8)
-raDot.Position         = UDim2.new(0,10,0.5,-4)
-raDot.BackgroundColor3 = C.GREEN
-raDot.BorderSizePixel  = 0
-raDot.Parent           = ragnawRow
-corner(raDot, 4)
-
-local raName = Instance.new("TextLabel")
-raName.Size              = UDim2.new(0.6,0,1,0)
-raName.Position          = UDim2.new(0,24,0,0)
-raName.BackgroundTransparency = 1
-raName.Text              = "Regnaw (Rage)"
-raName.TextColor3        = C.TEXT
-raName.TextSize          = 13
-raName.Font              = FONT_BOLD
-raName.TextXAlignment    = Enum.TextXAlignment.Left
-raName.Parent            = ragnawRow
-
-local raBadge = Instance.new("TextLabel")
-raBadge.Size             = UDim2.new(0,80,0,20)
-raBadge.Position         = UDim2.new(1,-86,0.5,-10)
-raBadge.BackgroundColor3 = C.GREEN
-raBadge.BorderSizePixel  = 0
-raBadge.Text             = "Active"
-raBadge.TextColor3       = Color3.fromRGB(10,20,10)
-raBadge.TextSize         = 11
-raBadge.Font             = FONT_BOLD
-raBadge.TextXAlignment   = Enum.TextXAlignment.Center
-raBadge.Parent           = ragnawRow
-corner(raBadge, 5)
-
--- ODYSSEY AUTOMATION LOOP
--- ======================
-local function isMaxedUnitCard(cardName)
-    -- Try to count how many of this card the player has via stat folder/attribute
-    -- Common patterns: Player:FindFirstChild("OdysseyCards"), or per-unit count attribute
-    local function countIn(container)
-        if not container then return nil end
-        local n = container:GetAttribute(cardName)
-        if typeof(n)=="number" then return n end
-        local child = container:FindFirstChild(cardName)
-        if child then
-            local v = child:GetAttribute("Count") or child:GetAttribute("Amount") or child:GetAttribute("Value")
-            if typeof(v)=="number" then return v end
-            if child:IsA("IntValue") or child:IsA("NumberValue") then return child.Value end
-        end
-        return nil
-    end
-    local locs = {
-        player:FindFirstChild("OdysseyCards"),
-        player:FindFirstChild("Odyssey"),
-        player:FindFirstChild("AdventureCards"),
-    }
-    for _,l in ipairs(locs) do
-        local c = countIn(l)
-        if c then return c >= 4 end
-    end
-    return false
-end
-
--- isUnitCardGui: true if any of the visible card options are NOT basic cards
--- (character-specific cards need double-fire to confirm)
-local function isUnitCardPick(opts)
-    if not opts then return false end
-    for _, name in ipairs(opts) do
-        if not isBasicCard(name) then return true end
-    end
-    return false
-end
-
-    local ev = getONet("CardPickEvent")
-    if ev then pcall(function() ev:FireServer("Skip", 0) end) end
-end
-end
-
-
-local RARITY_SCORE = {
-    common=1, uncommon=2, rare=3, epic=4, legendary=5,
-    mythic=6, mythical=6, secret=7, celestial=8, divine=9
-}
-
--- All confirmed basic card names (from OdysseyCardIcons module, UPD 12.5)
--- If a card name is in this set it's a BASIC card → single CardPickEvent("Pick", idx)
--- If it's NOT in this set it's a CHARACTER card → double-fire to confirm
-local BASIC_CARDS = {
-    ["Adrenaline Shot"]=true, ["Serrated Tips"]=true, ["Boxing Gloves"]=true,
-    ["Precision Optics"]=true, ["Ambush"]=true, ["Essence Collector"]=true,
-    ["Concussive Blast"]=true, ["Slayer Rounds"]=true, ["Military Training"]=true,
-    ["Painful Gains"]=true, ["Volatile Demise"]=true, ["Infection"]=true,
-    ["Base Shield"]=true, ["Battle Frenzy"]=true, ["Treasure Map Fragment"]=true,
-    ["Quick Charge"]=true, ["Potent Toxins"]=true, ["Numbing Agent"]=true,
-    ["Extended Duration"]=true, ["The Best Defense\226\128\166"]=true,
-    ["The Best Defense..."]=true, -- display alias (ellipsis may render differently)
-    ["Resource Overflow"]=true, ["Delicate Flower"]=true, ["Affinity"]=true,
-    ["Double Tap"]=true, ["Unstoppable Force"]=true, ["Spoils of War"]=true,
-    ["Limit Break"]=true, ["Golden Age"]=true, ["Crippling Field"]=true,
-    ["Luckcatcher"]=true,
-}
-
-local function isBasicCard(name)
-    return BASIC_CARDS[name] == true
-end
-local RAGNAW_TARGET_CARDS = {
-    ["rageful arrival"]        = true, ["legendaryplacementdamage"]  = true,
-    ["elite conquest"]         = true, ["legendaryeliteplacement"]   = true,
-    ["all-range rage"]         = true, ["all range rage"]            = true, ["mythicfullaoe"] = true,
-    ["monarch's breakthrough"] = true, ["monarchs breakthrough"]     = true,
-    ["monarch breakthrough"]   = true, ["epicpermanentplacements"]   = true,
-}
-local function rarityScore(name)
-    local n = (name or ""):lower()
-    local best = 0
-    for key, score in pairs(RARITY_SCORE) do
-        if n:find(key, 1, true) and score > best then best = score end
-    end
-    return best
 local function isRagnawTargetCard(name)
     return RAGNAW_TARGET_CARDS[(name or ""):lower():gsub("^%s+",""):gsub("%s+$","")] == true
 end
@@ -2087,99 +1903,83 @@ notify("OzWare V3 loaded", true)
 -- FLOATING TOGGLE (bottom-left)  +  SUMMON UI SUPPRESSOR
 -- ======================
 do
+-- ── Float button ───────────────────────────────────────────────────
 local floatBtn = Instance.new("ImageButton")
-floatBtn.Name = "OzFloat"
-floatBtn.Size = UDim2.new(0, 58, 0, 58)
-floatBtn.Position = UDim2.new(0, 16, 1, -74)
-floatBtn.AnchorPoint = Vector2.new(0,0)
-floatBtn.BackgroundColor3 = Color3.fromRGB(0,0,0)
-floatBtn.BackgroundTransparency = 1
-floatBtn.BorderSizePixel = 0
-floatBtn.AutoButtonColor = false
-floatBtn.ZIndex = 50
-floatBtn.Parent = gui
--- Pink metallic star image (image 2 provided by user)
-floatBtn.Image = "rbxassetid://6031068420"  -- closest Roblox star asset; replaced with uploaded image below
--- Upload the star image and use its asset ID here
--- For now use a pink star shape via ImageLabel overlay
-floatBtn.Image = ""
-corner(floatBtn, 29)
+floatBtn.Name="OzFloat"
+floatBtn.Size=UDim2.new(0,52,0,52)
+floatBtn.Position=UDim2.new(0,16,1,-68)
+floatBtn.AnchorPoint=Vector2.new(0,0)
+floatBtn.BackgroundColor3=Color3.fromRGB(18,10,30)
+floatBtn.BackgroundTransparency=0
+floatBtn.BorderSizePixel=0; floatBtn.AutoButtonColor=false
+floatBtn.ZIndex=50; floatBtn.Image=""; floatBtn.Parent=gui
+Instance.new("UICorner",floatBtn).CornerRadius=UDim.new(0,26)
+stroke(floatBtn,C.ACCENT,2)
 
--- Dark circle background with purple glow stroke
-local floatBg = Instance.new("Frame")
-floatBg.Size = UDim2.new(1,0,1,0)
-floatBg.BackgroundColor3 = Color3.fromRGB(15, 8, 25)
-floatBg.BorderSizePixel = 0
-floatBg.ZIndex = 49
-floatBg.Parent = floatBtn
-corner(floatBg, 29)
-stroke(floatBg, C.ACCENT, 2)
--- Purple glow bloom
-local glow = Instance.new("ImageLabel")
-glow.Size = UDim2.new(0,90,0,90)
-glow.AnchorPoint = Vector2.new(0.5,0.5)
-glow.Position = UDim2.new(0.5,0,0.5,0)
-glow.BackgroundTransparency = 1
-glow.Image = "rbxassetid://5028857084"
-glow.ImageColor3 = C.ACCENT2
-glow.ImageTransparency = 0.5
-glow.ZIndex = 48
-glow.Parent = floatBtn
+-- Glow bloom
+local fbGlow = Instance.new("ImageLabel",floatBtn)
+fbGlow.Size=UDim2.new(0,80,0,80); fbGlow.AnchorPoint=Vector2.new(0.5,0.5)
+fbGlow.Position=UDim2.new(0.5,0,0.5,0); fbGlow.BackgroundTransparency=1
+fbGlow.Image="rbxassetid://5028857084"; fbGlow.ImageColor3=C.ACCENT2
+fbGlow.ImageTransparency=0.55; fbGlow.ZIndex=49
 
--- Star shape using TextLabel with ✦ character in pink/magenta
-local starLbl = Instance.new("TextLabel")
-starLbl.Size = UDim2.new(1,-4,1,-4)
-starLbl.AnchorPoint = Vector2.new(0.5,0.5)
-starLbl.Position = UDim2.new(0.5,0,0.5,0)
-starLbl.BackgroundTransparency = 1
-starLbl.Text = "✦"
-starLbl.TextColor3 = C.ACCENT2
-starLbl.TextSize = 30
-starLbl.Font = FONT_BOLD
-starLbl.ZIndex = 51
-starLbl.Parent = floatBtn
-gradient(starLbl, C.ACCENT, C.ACCENT2, 135)
+-- Eye icon (matches OzWare logo aesthetic)
+local eyeLbl = Instance.new("TextLabel",floatBtn)
+eyeLbl.Size=UDim2.new(1,0,1,0); eyeLbl.BackgroundTransparency=1
+eyeLbl.Text="👁"; eyeLbl.TextSize=24; eyeLbl.Font=FONT_BOLD
+eyeLbl.TextColor3=C.ACCENT2; eyeLbl.ZIndex=51
 
--- Drag support for floating button
-do
-    local dragging, startPos, startInput
-    floatBtn.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-            dragging=true; startPos=floatBtn.Position; startInput=i.Position
-        end
-    end)
-    floatBtn.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-            dragging=false
-        end
-    end)
-    UIS.InputChanged:Connect(function(i)
-        if not dragging then return end
-        if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
-            local d = i.Position - startInput
-            floatBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X, startPos.Y.Scale, startPos.Y.Offset+d.Y)
-        end
+-- ── Open/close animation ─────────────────────────────────────────
+local isOpen   = false
+local OPEN_SIZE  = UDim2.new(0, WIN_W, 0, WIN_H)
+local CLOSE_SIZE = UDim2.new(0, WIN_W * 0.85, 0, WIN_H * 0.85)
+
+local function openWindow()
+    isOpen = true
+    win.Visible = true
+    win.Size    = UDim2.new(0, WIN_W * 0.7, 0, WIN_H * 0.7)
+    win.GroupTransparency = 0.6
+    TweenSvc:Create(win, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = OPEN_SIZE, GroupTransparency = 0
+    }):Play()
+    winStroke.Color = C.ACCENT
+    TweenSvc:Create(winStroke, TweenInfo.new(0.35), {Color = Color3.fromRGB(80,30,120)}):Play()
+end
+
+local function closeWindow()
+    isOpen = false
+    TweenSvc:Create(win, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+        Size = CLOSE_SIZE, GroupTransparency = 0.6
+    }):Play()
+    task.delay(0.2, function()
+        win.Visible = false
+        win.Size    = OPEN_SIZE
+        win.GroupTransparency = 0
     end)
 end
 
--- Tap (no drag) toggles window
-local pressStart, pressPos
-floatBtn.MouseButton1Down:Connect(function() pressStart = tick(); pressPos = floatBtn.Position end)
-floatBtn.MouseButton1Click:Connect(function()
-    if pressStart and (tick()-pressStart) < 0.4 and pressPos and pressPos == floatBtn.Position then
-        win.Visible = not win.Visible
-    elseif not pressStart then
-        win.Visible = not win.Visible
-    else
-        -- treat as tap if barely moved
-        win.Visible = not win.Visible
+-- Float button drag + tap
+local dragging2, startPos2, startInput2, pressT = false
+floatBtn.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        dragging2=true; startPos2=floatBtn.Position; startInput2=i.Position; pressT=tick()
+    end
+end)
+floatBtn.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        local moved = startInput2 and (i.Position-startInput2).Magnitude > 6
+        dragging2 = false
+        if not moved and tick()-pressT < 0.35 then
+            if isOpen then closeWindow() else openWindow() end
+        end
+    end
+end)
+UIS.InputChanged:Connect(function(i)
+    if not dragging2 then return end
+    if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
+        local d=i.Position-startInput2
+        floatBtn.Position=UDim2.new(startPos2.X.Scale,startPos2.X.Offset+d.X,startPos2.Y.Scale,startPos2.Y.Offset+d.Y)
     end
 end)
 
--- ======================
--- Safety note
--- ======================
--- Do not destroy game ScreenGuis and do not monkey-patch SummonAnimationHandler.
--- Both approaches can leave WindowHandler / game button state stuck, which is
--- what made summon buttons and mode-join buttons stop responding.
 end -- close Float button do block
