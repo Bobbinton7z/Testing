@@ -1226,6 +1226,14 @@ local function getAdventureHUD()
     return realGui:FindFirstChild("AdventureHUD")
 end
 
+-- All panels are direct children of AdventureHUD at runtime
+-- (MatchPanels only exists in StarterPlayer source, not in PlayerGui)
+local function findPanel(name)
+    local hud = getAdventureHUD()
+    if not hud then return nil end
+    return hud:FindFirstChild(name)
+end
+
 -- A panel is "open" when Visible=true
 -- CONFIRMED from debugger: game toggles Visible property, AbsoluteSize stays constant
 local function isPanelOpen(panel)
@@ -1278,19 +1286,19 @@ end
 -- Pick by simulating MouseButton1Click on the ImageButton
 
 local function getCardButtons()
-    local hud = getAdventureHUD()
-    if not hud then return nil end
-    local cc = hud:FindFirstChild("ChooseCard")
+    -- CONFIRMED: CardPickPanel under AdventureHUD.MatchPanels.Panels
+    local cc = findPanel("CardPickPanel") or findPanel("ChooseCard")
     if not cc or not cc.Visible then return nil end
 
-    -- CONFIRMED path: ChooseCard.Content.ListContainer.ScrollIndicatorFrame
+    -- Search for card buttons - try known path first, then search all descendants
     local sif = cc:FindFirstChild("Content")
     sif = sif and sif:FindFirstChild("ListContainer")
     sif = sif and sif:FindFirstChild("ScrollIndicatorFrame")
-    if not sif then return nil end
 
+    -- If path not found, search entire panel for ImageButtons
+    local searchRoot = sif or cc
     local cards = {}
-    for _, child in ipairs(sif:GetChildren()) do
+    for _, child in ipairs(searchRoot:GetChildren()) do
         if child:IsA("ImageButton") then
             local text = ""
             for _, d in ipairs(child:GetDescendants()) do
@@ -1438,69 +1446,92 @@ local function requestNextRoom()
     if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
 end
 
--- ── Event-driven automation ───────────────────────────────────────
--- Polls panel Visible state every 0.3s — reliable regardless of when
--- panels are added to AdventureHUD
+-- ── Simple direct-fire automation ────────────────────────────────
+-- Shop, unit reward, and chests work by firing remotes directly.
+-- Server validates state — if not applicable it's a no-op.
 do
-    local flags = {card=false, shop=false, treasure=false, unit=false}
-
+    local clock = 0
     RunSvc.Heartbeat:Connect(function()
-        if not inGameMode() then
-            flags.card=false; flags.shop=false; flags.treasure=false; flags.unit=false
-            return
+        if not inGameMode() then return end
+        local now = os.clock()
+        if now - clock < 1.5 then return end
+        clock = now
+
+        -- Skip shop: server closes it if open, ignores if not
+        if getAutoSkipShop() then
+            local ev = getONet("ShopEvent")
+            if ev then pcall(function() ev:FireServer("Close") end) end
         end
-        local hud = realGui:FindFirstChild("AdventureHUD")
-        if not hud then return end
 
-        -- Unit reward
-        local up = hud:FindFirstChild("BossRewardPickPanel") or hud:FindFirstChild("RunRewardsPanelRoot")
-        if up and up.Visible then
-            if not flags.unit and getSkipUnitReward() then
-                flags.unit = true
-                task.spawn(function()
-                    task.wait(0.15)
-                    local ev = getONet("UnitRewardEvent")
-                    if ev then pcall(function() ev:FireServer("Skip") end) end
-                end)
+        -- Skip unit reward: server skips if reward pending, ignores if not
+        if getSkipUnitReward() then
+            local ev = getONet("UnitRewardEvent")
+            if ev then pcall(function() ev:FireServer("Skip") end) end
+        end
+    end)
+end
+
+-- Chests: fire instantly when each OdysseyChest model appears in workspace.Ignore
+do
+    local function tryOpenChest(model)
+        if not getAutoCollectChests() then return end
+        if not model.Name:sub(1,13) == "OdysseyChest_" then return end
+        if model.Name:sub(1,17) == "OdysseyChestPing_" then return end
+        local uuid = model.Name:sub(14)
+        local cr = getONet("OdysseyChest")
+        if not cr then
+            local sm = Net:FindFirstChild("StageMechanics")
+            cr = sm and sm:FindFirstChild("OdysseyChest")
+        end
+        if cr then pcall(function() cr:FireServer("OpenChest", uuid) end) end
+    end
+
+    -- Watch for chests spawning
+    local ignoreFolder = workspace:FindFirstChild("Ignore")
+    if ignoreFolder then
+        ignoreFolder.ChildAdded:Connect(function(model)
+            task.wait(0.1) -- tiny delay for model to fully replicate
+            tryOpenChest(model)
+        end)
+        -- Also open any chests already present
+        task.spawn(function()
+            while true do
+                task.wait(1)
+                if not getAutoCollectChests() or not inGameMode() then continue end
+                local folder = workspace:FindFirstChild("Ignore")
+                if not folder then continue end
+                for _, model in ipairs(folder:GetChildren()) do
+                    tryOpenChest(model)
+                end
             end
-        else flags.unit = false end
+        end)
+    end
+    -- Also hook if Ignore folder appears later
+    workspace.ChildAdded:Connect(function(child)
+        if child.Name == "Ignore" then
+            child.ChildAdded:Connect(function(model)
+                task.wait(0.1)
+                tryOpenChest(model)
+            end)
+        end
+    end)
+end
 
-        -- Card pick
-        local cp = hud:FindFirstChild("ChooseCard")
+-- ── Card pick panel detection (still needed - server is state-gated) ──────
+do
+    local cardFlag = false
+    RunSvc.Heartbeat:Connect(function()
+        if not inGameMode() then cardFlag = false; return end
+        if not (getAutoPick() or getAutoRagnawCards()) then return end
+        local cp = findPanel("ChooseCard")
         if cp and cp.Visible then
-            if not flags.card and (getAutoPick() or getAutoRagnawCards()) then
-                flags.card = true
+            if not cardFlag then
+                cardFlag = true
                 task.spawn(doCardPick)
             end
-        else flags.card = false end
-
-        -- Shop
-        local sp = hud:FindFirstChild("Stiches' Shop_Export")
-        if sp and sp.Visible then
-            if not flags.shop and getAutoSkipShop() then
-                flags.shop = true
-                task.spawn(function()
-                    task.wait(0.2)
-                    local ev = getONet("ShopEvent")
-                    if ev then pcall(function() ev:FireServer("Close") end) end
-                    if getAutoNextRoom() then task.wait(0.5); requestNextRoom() end
-                end)
-            end
-        else flags.shop = false end
-
-        -- Treasure
-        local tp = hud:FindFirstChild("TreasurePanel")
-        if tp and tp.Visible then
-            if not flags.treasure and getAutoCollectChests() then
-                flags.treasure = true
-                openedChests = {}
-                task.spawn(function()
-                    task.wait(0.3)
-                    collectAndCloseTreasure()
-                    if getAutoNextRoom() then task.wait(1); requestNextRoom() end
-                end)
-            end
-        else flags.treasure = false end
+        else
+            cardFlag = false
+        end
     end)
 end
 
