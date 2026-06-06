@@ -12,7 +12,8 @@ local HttpService  = game:GetService("HttpService")
 
 local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
-local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
+local playerGui = ok and _gui or player:WaitForChild("PlayerGui") -- exploit GUI container
+local realGui   = player:WaitForChild("PlayerGui")                -- actual game PlayerGui
 
 local Net       = RS:WaitForChild("Networking")
 
@@ -1222,7 +1223,7 @@ end
 
 -- ── AdventureHUD helper ──────────────────────────────────────────
 local function getAdventureHUD()
-    return playerGui:FindFirstChild("AdventureHUD")
+    return realGui:FindFirstChild("AdventureHUD")
 end
 
 -- A panel is "open" when Visible=true
@@ -1396,7 +1397,7 @@ local function collectAndCloseTreasure()
     end
 
     -- Chest collection done; panel closes when server processes all chests
-    local hud = playerGui:FindFirstChild("AdventureHUD")
+    local hud = realGui:FindFirstChild("AdventureHUD")
     if hud then
         local panel = hud:FindFirstChild("TreasurePanel")
         if panel then
@@ -1448,7 +1449,7 @@ do
             flags.card=false; flags.shop=false; flags.treasure=false; flags.unit=false
             return
         end
-        local hud = playerGui:FindFirstChild("AdventureHUD")
+        local hud = realGui:FindFirstChild("AdventureHUD")
         if not hud then return end
 
         -- Unit reward
