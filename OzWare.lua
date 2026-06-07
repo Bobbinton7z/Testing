@@ -744,6 +744,18 @@ do
 end
 end
 
+-- Auto Skip Start: uses game's own SettingsEvent("Toggle", "AutoSkipStart")
+do
+local matchStartSec = section(lobbyPage, "Match Settings", 3)
+local _, getAutoSkipStart, onAutoSkipStart = toggle(matchStartSec, "Auto Start Match", 1, false, "lobby.autoskipstart")
+label(matchStartSec, "Automatically votes to start the match", 2)
+local settingsEvLobby = Net:FindFirstChild("SettingsEvent")
+onAutoSkipStart(function()
+    local ev = settingsEvLobby or Net:FindFirstChild("SettingsEvent")
+    if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
+end)
+end
+
 -- ======================
 -- JOINER TAB
 -- ======================
@@ -888,16 +900,107 @@ local gamePage = tabPages["Game"]
 
 local matchSec = section(gamePage, "Match Controls", 1)
 
+-- Restart on Wave: votes to restart when the current wave reaches the target
+local _, getRestartOnWave, onRestartOnWave = toggle(matchSec, "Restart on Wave", 1, false, "game.restartonwave")
+label(matchSec, "Votes to restart when the wave number is reached", 2)
+
+-- Wave number stepper (default 15, live-updating)
+do
+    local targetWave = 15
+    local ROW_ORDER  = 3
+
+    local row = Instance.new("Frame")
+    row.Size=UDim2.new(1,0,0,34); row.BackgroundColor3=C.CARD
+    row.BorderSizePixel=0; row.LayoutOrder=ROW_ORDER; row.ZIndex=3
+    row.Parent=matchSec
+    corner(row,7); stroke(row,C.BORDER,1)
+
+    local waveLbl = Instance.new("TextLabel", row)
+    waveLbl.Size=UDim2.new(0.5,0,1,0); waveLbl.BackgroundTransparency=1
+    waveLbl.Text="On Wave:"; waveLbl.TextColor3=C.TEXT
+    waveLbl.TextSize=13; waveLbl.Font=FONT_REG
+    waveLbl.TextXAlignment=Enum.TextXAlignment.Left
+    waveLbl.Position=UDim2.new(0,10,0,0); waveLbl.ZIndex=4
+
+    -- Minus button
+    local btnM=Instance.new("TextButton", row)
+    btnM.Size=UDim2.new(0,28,0,24); btnM.AnchorPoint=Vector2.new(1,0.5)
+    btnM.Position=UDim2.new(1,-64,0.5,0)
+    btnM.BackgroundColor3=C.PANEL; btnM.BorderSizePixel=0
+    btnM.Text="−"; btnM.TextColor3=C.TEXT; btnM.TextSize=16
+    btnM.Font=FONT_BOLD; btnM.AutoButtonColor=false; btnM.ZIndex=4
+    corner(btnM,5)
+
+    -- Wave number display
+    local numLbl=Instance.new("TextLabel", row)
+    numLbl.Size=UDim2.new(0,32,1,0); numLbl.AnchorPoint=Vector2.new(1,0)
+    numLbl.Position=UDim2.new(1,-34,0,0)
+    numLbl.BackgroundTransparency=1; numLbl.Text=tostring(targetWave)
+    numLbl.TextColor3=C.ACCENT2; numLbl.TextSize=14
+    numLbl.Font=FONT_BOLD; numLbl.ZIndex=4
+
+    -- Plus button
+    local btnP=Instance.new("TextButton", row)
+    btnP.Size=UDim2.new(0,28,0,24); btnP.AnchorPoint=Vector2.new(1,0.5)
+    btnP.Position=UDim2.new(1,-4,0.5,0)
+    btnP.BackgroundColor3=C.PANEL; btnP.BorderSizePixel=0
+    btnP.Text="+"; btnP.TextColor3=C.TEXT; btnP.TextSize=16
+    btnP.Font=FONT_BOLD; btnP.AutoButtonColor=false; btnP.ZIndex=4
+    corner(btnP,5)
+
+    local restartFired = false
+    local waveCache    = nil
+
+    local function setWave(n)
+        targetWave    = math.clamp(n, 1, 999)
+        numLbl.Text   = tostring(targetWave)
+        restartFired  = false  -- re-check immediately; fires if already past target
+    end
+
+    btnM.MouseButton1Click:Connect(function() setWave(targetWave - 1) end)
+    btnP.MouseButton1Click:Connect(function() setWave(targetWave + 1) end)
+
+    -- Heartbeat: watch wave label in HUD for the target wave
+    RunSvc.Heartbeat:Connect(function()
+        if not getRestartOnWave() then restartFired = false; return end
+        if not inGameMode() then restartFired = false; return end
+
+        -- Find or refresh the wave label (searches once, caches result)
+        if not waveCache or not waveCache.Parent then
+            waveCache = nil
+            for _, gui in ipairs(realGui:GetChildren()) do
+                for _, d in ipairs(gui:GetDescendants()) do
+                    if d:IsA("TextLabel") and d.Text:match("Wave%s+%d+/%d+") then
+                        waveCache = d; break
+                    end
+                end
+                if waveCache then break end
+            end
+        end
+        if not waveCache then return end
+
+        local cur = tonumber(waveCache.Text:match("Wave%s+(%d+)"))
+        if not cur then return end
+
+        if cur >= targetWave and not restartFired then
+            restartFired = true
+            local ev = Net:FindFirstChild("MatchRestartSettingEvent")
+            if ev then pcall(function() ev:FireServer("Vote") end) end
+        end
+        if cur < targetWave then restartFired = false end
+    end)
+end
+
 -- Skip Wave: toggle, fires every 3s while on and in-match
 local _, getSkipWave, onSkipWave = toggle(matchSec, "Skip Wave", 1, false, "game.skipwave")
-local skipWaveClock = 0
-RunSvc.Heartbeat:Connect(function()
-    if not getSkipWave() then return end
-    if not inGameMode() then return end
-    if os.clock() - skipWaveClock < 3 then return end
-    skipWaveClock = os.clock()
-    local r = Net:FindFirstChild("SkipWaveEvent")
-    if r and r:IsA("RemoteEvent") then pcall(function() r:FireServer("Skip") end) end
+-- Use game's own AutoSkipWaves setting — toggle it ON/OFF with SettingsEvent
+-- This is cleaner than spamming SkipWaveEvent every few seconds
+local settingsEv = Net:FindFirstChild("SettingsEvent")
+onSkipWave(function(on)
+    local ev = settingsEv or Net:FindFirstChild("SettingsEvent")
+    if ev then
+        pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
+    end
 end)
 
 -- ======================
@@ -1114,6 +1217,212 @@ label(autoSec, "Skips unit reward panel after elite rooms", 12)
 
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
+
+-- ── Modifier Selector ────────────────────────────────────────────
+do
+local MOD_SAVE = "OzWare_modifiers.json"
+local HttpSvc  = game:GetService("HttpService")
+
+-- Load saved modifier priorities: {name = priority}
+local modPriorities = {}
+pcall(function()
+    if isfile and isfile(MOD_SAVE) then
+        local raw = readfile(MOD_SAVE)
+        local t = HttpSvc:JSONDecode(raw)
+        if type(t) == "table" then modPriorities = t end
+    end
+end)
+local function saveModPriorities()
+    pcall(function()
+        writefile(MOD_SAVE, HttpSvc:JSONEncode(modPriorities))
+    end)
+end
+
+-- Section header
+local modSec = section(odysseyPage, "Modifier Selector", 2)
+local _, getAutoMod,     onAutoMod     = toggle(modSec, "Auto Pick Modifier",      1, false, "odyssey.auto_modifier")
+label(modSec, "Picks highest-priority modifier when offered", 2)
+local _, getRestartMod,  onRestartMod  = toggle(modSec, "Restart if not offered",  3, false, "odyssey.modifier_restart")
+label(modSec, "Restarts match if no priority modifier is offered", 4)
+
+-- Collapsible modifier list
+local collapseBtn = Instance.new("TextButton", modSec)
+collapseBtn.Size=UDim2.new(1,0,0,30); collapseBtn.BackgroundColor3=C.PANEL
+collapseBtn.BorderSizePixel=0; collapseBtn.Text="▼  Modifier Priorities"
+collapseBtn.TextColor3=C.ACCENT2; collapseBtn.TextSize=12; collapseBtn.Font=FONT_SEMI
+collapseBtn.AutoButtonColor=false; collapseBtn.LayoutOrder=5; collapseBtn.ZIndex=3
+corner(collapseBtn,7); stroke(collapseBtn,C.BORDER,1)
+
+local modListFrame = Instance.new("Frame", modSec)
+modListFrame.Size=UDim2.new(1,0,0,0); modListFrame.AutomaticSize=Enum.AutomaticSize.Y
+modListFrame.BackgroundTransparency=1; modListFrame.BorderSizePixel=0
+modListFrame.LayoutOrder=6; modListFrame.ClipsDescendants=true
+listLayout(modListFrame, nil, 4)
+label(modListFrame, "Modifiers appear here when offered in a run.", 1)
+
+local listOpen = true
+collapseBtn.MouseButton1Click:Connect(function()
+    listOpen = not listOpen
+    modListFrame.Visible = listOpen
+    collapseBtn.Text = (listOpen and "▼" or "▶") .. "  Modifier Priorities"
+end)
+
+local modRows = {}  -- name → {frame, textBox}
+local function ensureModRow(name, _, layoutOrder)
+    if modRows[name] then return end
+    local row = Instance.new("Frame", modListFrame)
+    row.Size=UDim2.new(1,0,0,32); row.BackgroundColor3=C.CARD
+    row.BorderSizePixel=0; row.LayoutOrder=layoutOrder or 999; row.ZIndex=3
+    corner(row,6); stroke(row,C.BORDER,1)
+
+    local nameLbl = Instance.new("TextLabel", row)
+    nameLbl.Size=UDim2.new(1,-66,1,0); nameLbl.Position=UDim2.new(0,8,0,0)
+    nameLbl.BackgroundTransparency=1; nameLbl.Text=name
+    nameLbl.TextColor3=C.TEXT; nameLbl.TextSize=12; nameLbl.Font=FONT_REG
+    nameLbl.TextXAlignment=Enum.TextXAlignment.Left; nameLbl.ZIndex=4
+    nameLbl.TextTruncate=Enum.TextTruncate.AtEnd
+
+    local priBox = Instance.new("TextBox", row)
+    priBox.Size=UDim2.new(0,52,0,24); priBox.AnchorPoint=Vector2.new(1,0.5)
+    priBox.Position=UDim2.new(1,-4,0.5,0)
+    priBox.BackgroundColor3=C.BG; priBox.BorderSizePixel=0
+    priBox.Text=tostring(modPriorities[name] or 0)
+    priBox.PlaceholderText="0"; priBox.PlaceholderColor3=C.DIM
+    priBox.TextColor3=C.ACCENT2; priBox.TextSize=13; priBox.Font=FONT_BOLD
+    priBox.TextXAlignment=Enum.TextXAlignment.Center; priBox.ZIndex=4
+    corner(priBox,5); stroke(priBox,C.BORDER,1)
+
+    priBox.FocusLost:Connect(function()
+        local n = tonumber(priBox.Text) or 0
+        modPriorities[name] = n
+        priBox.Text = tostring(n)
+        saveModPriorities()
+    end)
+
+    modRows[name] = {frame=row, box=priBox}
+end
+
+-- Restore previously seen modifiers from saved data
+-- Pre-populate with all known modifiers from ModifierData
+local KNOWN_MODIFIERS = {
+    -- ── Additive (appear mid-run in most maps) ────────────────────
+    { name = "Strong",          rarity = "Rare",       group = "Additive" },
+    { name = "Fast",            rarity = "Uncommon",   group = "Additive" },
+    { name = "Dodge",           rarity = "Rare",       group = "Additive" },
+    { name = "Damage",          rarity = "Uncommon",   group = "Additive" },
+    { name = "Cooldown",        rarity = "Uncommon",   group = "Additive" },
+    { name = "Range",           rarity = "Uncommon",   group = "Additive" },
+    { name = "Slayer",          rarity = "Uncommon",   group = "Additive" },
+    { name = "Press It",        rarity = "Uncommon",   group = "Additive" },
+    { name = "Common Loot",     rarity = "Rare",       group = "Additive" },
+    { name = "Uncommon Loot",   rarity = "Rare",       group = "Additive" },
+    { name = "Champions",       rarity = "Rare",       group = "Additive" },
+    { name = "Precise Attack",  rarity = "Super Rare", group = "Additive" },
+    { name = "Planning Ahead",  rarity = "Super Rare", group = "Additive" },
+    { name = "Harvest",         rarity = "Super Rare", group = "Additive" },
+    -- ── Starting (appear at match start, map-specific) ─────────────
+    { name = "Immunity",        rarity = "Special",    group = "Starting" },
+    { name = "Exploding",       rarity = "Special",    group = "Starting" },
+    { name = "Revitalize",      rarity = "Special",    group = "Starting" },
+    { name = "Thrice",          rarity = "Special",    group = "Starting" },
+    { name = "Quake",           rarity = "Special",    group = "Starting" },
+    { name = "Regen",           rarity = "Special",    group = "Starting" },
+    { name = "Shielded",        rarity = "Special",    group = "Starting" },
+    { name = "Drowsy",          rarity = "Special",    group = "Starting" },
+    { name = "No Trait No Problem", rarity = "Special", group = "Starting" },
+    { name = "Money Surge",     rarity = "Special",    group = "Starting" },
+    { name = "King's Burden",   rarity = "Special",    group = "Starting" },
+    { name = "Lifeline",        rarity = "Special",    group = "Starting" },
+    { name = "Exterminator",    rarity = "Special",    group = "Starting" },
+    { name = "Warding off Evil",rarity = "Special",    group = "Starting" },
+    { name = "Fisticuffs",      rarity = "Special",    group = "Starting" },
+    { name = "Limit Break",     rarity = "Special",    group = "Starting" },
+    { name = "Tyrant Destroyer",rarity = "Special",    group = "Starting" },
+    { name = "Sphere Finder",   rarity = "Special",    group = "Starting" },
+    { name = "High Class",      rarity = "Special",    group = "Starting" },
+    { name = "Tyrant Arrives",  rarity = "Special",    group = "Starting" },
+}
+
+-- Remove placeholder label
+for _, c in ipairs(modListFrame:GetChildren()) do
+    if c:IsA("TextLabel") then c:Destroy() end
+end
+
+-- Add group headers + pre-populated rows
+local lastGroup = nil
+local rowOrder = 10
+local function addGroupHeader(groupName)
+    local hdr = Instance.new("TextLabel", modListFrame)
+    hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundColor3=C.PANEL
+    hdr.BorderSizePixel=0; hdr.Text="── "..groupName.." ──"
+    hdr.TextColor3=C.ACCENT2; hdr.TextSize=11; hdr.Font=FONT_BOLD
+    hdr.ZIndex=3; hdr.LayoutOrder=rowOrder; rowOrder=rowOrder+1
+    corner(hdr,5)
+end
+
+for _, mod in ipairs(KNOWN_MODIFIERS) do
+    if mod.group ~= lastGroup then
+        addGroupHeader(mod.group)
+        lastGroup = mod.group
+    end
+    ensureModRow(mod.name, mod.rarity, rowOrder)
+    rowOrder = rowOrder + 1
+end
+
+-- Also restore any previously saved modifiers not in the known list
+for name, _ in pairs(modPriorities) do
+    if not modRows[name] then
+        ensureModRow(name, "Odyssey", rowOrder)
+        rowOrder = rowOrder + 1
+    end
+end
+
+-- Listen for modifier offers — fire exactly once per offer
+local modPickFired = false
+local modEv = Net:FindFirstChild("ModifierEvent")
+if modEv then
+    modEv.OnClientEvent:Connect(function(action, mods)
+        if action == "End" then
+            modPickFired = false  -- reset for next offer
+            return
+        end
+        if action ~= "Start" then return end
+        modPickFired = false  -- new offer, reset flag
+
+        -- Add any new modifier names discovered this offer
+        if type(mods) == "table" then
+            for _, mod in ipairs(mods) do
+                local n = type(mod) == "table" and mod.Name or tostring(mod)
+                if n and n ~= "" then ensureModRow(n, nil, rowOrder) end
+            end
+        end
+
+        -- Auto-pick: fire once, only if a priority modifier is offered
+        if not getAutoMod() then return end
+        if modPickFired then return end
+
+        local bestName, bestPri = nil, 0
+        if type(mods) == "table" then
+            for _, mod in ipairs(mods) do
+                local n = type(mod) == "table" and mod.Name or tostring(mod)
+                local pri = (n and modPriorities[n]) or 0
+                if pri > bestPri then bestName=n; bestPri=pri end
+            end
+        end
+
+        if bestName and bestPri > 0 then
+            modPickFired = true
+            task.defer(function()
+                pcall(function() modEv:FireServer("Choose", bestName) end)
+            end)
+        elseif getRestartMod() then
+            modPickFired = true
+            local rev = Net:FindFirstChild("MatchRestartSettingEvent")
+            if rev then pcall(function() rev:FireServer("Vote") end) end
+        end
+    end)
+end
+end -- close modifier do block
 -- ======================
 -- Confirmed remote locations (UPD 12.5):
 --   Networking.Units.SummonEvent                          — summoning
@@ -1447,129 +1756,11 @@ local function requestNextRoom()
 end
 
 -- ── Odyssey automation: event-driven ────────────────────────────
--- Each function fires ONCE when the server event fires. No spam.
+-- All connections use WaitForChild so lobby injection works too.
 do
-    local advNet = Net:FindFirstChild("Odyssey")
-    advNet = advNet and advNet:FindFirstChild("Adventure")
-
-    -- Card pick: hookmetamethod redirects player's tap to highest rarity card
-    -- + auto-clicks card 1 via VirtualUser so no manual tap needed.
-    -- Flow: VirtualUser.Button1Down → game click handler → FireServer("Pick",1)
-    --       → our hook intercepts → redirects to best rarity → old() to server
-    local cardEvL = advNet and advNet:FindFirstChild("CardPickEvent")
-    if cardEvL and typeof(hookmetamethod) == "function" then
-        local currentOffer = nil
-        local vu = game:GetService("VirtualUser")
-
-        -- Store offer data when server sends it
-        cardEvL.OnClientEvent:Connect(function(action, data)
-            if action == "Offer" then
-                currentOffer = data
-                if not (getAutoPick() or getAutoRagnawCards()) then return end
-                -- Auto-click a card to trigger the game's own pick handler
-                task.spawn(function()
-                    -- Wait for card panel to become visible
-                    local waited = 0
-                    local btn = nil
-                    while not btn and waited < 3 do
-                        task.wait(0.1); waited = waited + 0.1
-                        local cards = getCardButtons()
-                        if cards and #cards > 0 then btn = cards[1].btn end
-                    end
-                    if not btn then return end
-                    local pos = btn.AbsolutePosition
-                    local sz  = btn.AbsoluteSize
-                    local cx  = pos.X + sz.X * 0.5
-                    local cy  = pos.Y + sz.Y * 0.5
-                    -- Click card 1 — hook will redirect to best rarity
-                    pcall(function() vu:Button1Down(Vector2.new(cx, cy), CFrame.new()) end)
-                    task.wait(0.05)
-                    pcall(function() vu:Button1Up(Vector2.new(cx, cy), CFrame.new()) end)
-                end)
-            elseif action == "BasicCardGranted" or action == "CharacterCardGranted"
-                or action == "Skipped" then
-                currentOffer = nil
-            end
-        end)
-
-        -- Hook intercepts the game's own FireServer("Pick") and swaps to best card
-        local old; old = hookmetamethod(game, "__namecall", function(self, ...)
-            local m = getnamecallmethod()
-            if (m == "FireServer" or m == "InvokeServer") and self == cardEvL then
-                local args = {...}
-                if args[1] == "Pick" and (getAutoPick() or getAutoRagnawCards())
-                and currentOffer then
-                    local options = type(currentOffer) == "table"
-                        and currentOffer.Options or nil
-                    if type(options) == "table" and #options > 0 then
-                        local bestIdx, bestScore = args[2] or 1, -1
-                        for i, card in ipairs(options) do
-                            if type(card) == "table" then
-                                local rarity = tostring(card.Rarity or ""):lower()
-                                local score = rarityScore(rarity)
-                                if score > bestScore then
-                                    bestIdx = i; bestScore = score
-                                end
-                            end
-                        end
-                        args[2] = bestIdx
-                    end
-                    return old(self, table.unpack(args))
-                end
-            end
-            return old(self, ...)
-        end)
-    end
-
-    -- Vote: fire once when VoteStarted received
-    local voteEv = advNet and advNet:FindFirstChild("VoteEvent")
-    if voteEv then
-        voteEv.OnClientEvent:Connect(function(action)
-            if action ~= "VoteStarted" then return end
-            if not getAutoNextRoom() then return end
-            task.spawn(requestNextRoom)
-        end)
-    end
-
-    -- Shop: fire Close once when shop opens
-    local shopEvL = advNet and advNet:FindFirstChild("ShopEvent")
-    if shopEvL then
-        shopEvL.OnClientEvent:Connect(function(action)
-            if action ~= "Open" then return end
-            if not getAutoSkipShop() then return end
-            task.defer(function()
-                pcall(function() shopEvL:FireServer("Close") end)
-            end)
-        end)
-    end
-
-    -- Unit reward: fire Skip once when offer received
-    local unitEvL = advNet and advNet:FindFirstChild("UnitRewardEvent")
-    if unitEvL then
-        unitEvL.OnClientEvent:Connect(function(action)
-            if action ~= "Offer" then return end
-            if not getSkipUnitReward() then return end
-            task.defer(function()
-                pcall(function() unitEvL:FireServer("Skip", nil) end)
-            end)
-        end)
-    end
-
-    -- Treasure: collect chests when floor begins
-    local treasureEvL = advNet and advNet:FindFirstChild("TreasureEvent")
-    if treasureEvL then
-        treasureEvL.OnClientEvent:Connect(function(action)
-            if action ~= "Begin" then return end
-            if not getAutoCollectChests() then return end
-            task.spawn(function()
-                task.wait(0.3)
-                collectAndCloseTreasure()
-            end)
-        end)
-    end
-
-    -- Chests: open instantly when spawned in workspace.Ignore
+    local currentOffer = nil  -- stored card offer data
     local openedChestIds = {}
+
     local function hookIgnore(folder)
         folder.ChildAdded:Connect(function(model)
             if not getAutoCollectChests() then return end
@@ -1589,37 +1780,149 @@ do
     workspace.ChildAdded:Connect(function(c)
         if c.Name == "Ignore" then openedChestIds = {}; hookIgnore(c) end
     end)
-end
 
--- Auto Next Room: fire on VoteStarted only, with one retry after 2s
-do
-    local voteActive = false
-    local voteEv2 = Net:FindFirstChild("Odyssey")
-    voteEv2 = voteEv2 and voteEv2:FindFirstChild("Adventure")
-    voteEv2 = voteEv2 and voteEv2:FindFirstChild("VoteEvent")
-    if voteEv2 then
-        voteEv2.OnClientEvent:Connect(function(action)
-            if action == "VoteStarted" then
-                voteActive = true
-                if not getAutoNextRoom() then return end
-                task.spawn(requestNextRoom)
-                -- one retry in case first vote was missed
-                task.delay(2, function()
-                    if voteActive and getAutoNextRoom() then
-                        task.spawn(requestNextRoom)
-                    end
+    task.spawn(function()
+        local ody = Net:WaitForChild("Odyssey", 120)
+        if not ody then return end
+        local adv = ody:WaitForChild("Adventure", 120)
+        if not adv then return end
+
+        -- Vote: fire requestNextRoom when vote starts, one retry after 2s
+        local voteEvC = adv:WaitForChild("VoteEvent", 30)
+        if voteEvC then
+            local voteActive = false
+            voteEvC.OnClientEvent:Connect(function(action)
+                if action == "VoteStarted" then
+                    voteActive = true
+                    if not getAutoNextRoom() then return end
+                    task.spawn(requestNextRoom)
+                    task.delay(2, function()
+                        if voteActive and getAutoNextRoom() then
+                            task.spawn(requestNextRoom)
+                        end
+                    end)
+                elseif action == "VoteEnded" or action == "VoteCancelled" then
+                    voteActive = false
+                end
+            end)
+        end
+
+        -- Shop: fire Close(nil) once when server opens shop
+        local shopEvC = adv:FindFirstChild("ShopEvent")
+        if shopEvC then
+            shopEvC.OnClientEvent:Connect(function(action)
+                if action ~= "Open" then return end
+                if not getAutoSkipShop() then return end
+                task.defer(function()
+                    pcall(function() shopEvC:FireServer("Close", nil) end)
                 end)
-            elseif action == "VoteEnded" or action == "VoteCancelled" then
-                voteActive = false
-            end
-        end)
-    end
-end
+            end)
+        end
 
--- Confirm Odyssey block executed successfully
-task.defer(function()
-    notify("Odyssey: hooks active", true)
-end)
+        -- Unit reward: fire Skip(nil) once when offer received
+        local unitEvC = adv:FindFirstChild("UnitRewardEvent")
+        if unitEvC then
+            unitEvC.OnClientEvent:Connect(function(action)
+                if action ~= "Offer" then return end
+                if not getSkipUnitReward() then return end
+                task.defer(function()
+                    pcall(function() unitEvC:FireServer("Skip", nil) end)
+                end)
+            end)
+        end
+
+        -- Treasure: collect when floor begins
+        local treasureEvC = adv:FindFirstChild("TreasureEvent")
+        if treasureEvC then
+            treasureEvC.OnClientEvent:Connect(function(action)
+                if action ~= "Begin" then return end
+                if not getAutoCollectChests() then return end
+                task.spawn(function()
+                    task.wait(0.3)
+                    collectAndCloseTreasure()
+                end)
+            end)
+        end
+
+        -- Card pick: hookmetamethod + synchronous piggyback through old()
+        -- Button1Down doesn't work on mobile. Instead: when Offer arrives,
+        -- set pendingCardPick=true and fire MapEvent to trigger the hook.
+        -- Inside the hook, we call old(cardEvC,"Pick",bestIdx) synchronously
+        -- from within a legitimate FireServer context.
+        local cardEvC = adv:FindFirstChild("CardPickEvent")
+        if cardEvC and typeof(hookmetamethod) == "function" then
+            local pendingPick  = false
+            local pendingIdx   = 1
+
+            cardEvC.OnClientEvent:Connect(function(action, data)
+                if action == "Offer" then
+                    currentOffer = data
+                    if not (getAutoPick() or getAutoRagnawCards()) then return end
+                    -- Calculate best card now so hook can use it immediately
+                    local opts = type(data) == "table" and data.Options
+                    local bestIdx, bestScore = 1, -1
+                    if type(opts) == "table" then
+                        for i, card in ipairs(opts) do
+                            if type(card) == "table" then
+                                local s = rarityScore(tostring(card.Rarity or ""):lower())
+                                if s > bestScore then bestIdx=i; bestScore=s end
+                            end
+                        end
+                    end
+                    pendingIdx  = bestIdx
+                    pendingPick = true
+                    -- Trigger hook via a benign remote so piggyback fires ASAP
+                    task.spawn(function()
+                        task.wait(0.1)
+                        local mapEv = adv:FindFirstChild("MapEvent")
+                        if mapEv then
+                            pcall(function() mapEv:FireServer("RequestSnapshot") end)
+                        end
+                    end)
+                elseif action == "BasicCardGranted" or action == "CharacterCardGranted"
+                    or action == "Skipped" then
+                    currentOffer  = nil
+                    pendingPick   = false
+                end
+            end)
+
+            local old; old = hookmetamethod(game, "__namecall", function(self, ...)
+                local m = getnamecallmethod()
+                if m == "FireServer" or m == "InvokeServer" then
+                    -- Piggyback: inject card pick synchronously inside this hook frame
+                    if pendingPick and self ~= cardEvC then
+                        pendingPick = false
+                        -- old() with cardEvC uses the current namecall method ("FireServer")
+                        -- This is equivalent to cardEvC:FireServer("Pick", pendingIdx)
+                        -- but goes through the original __namecall instead of our hook
+                        pcall(old, cardEvC, "Pick", pendingIdx)
+                    end
+                    -- Redirect if player manually taps a card
+                    if self == cardEvC then
+                        local args = {...}
+                        if args[1] == "Pick" and (getAutoPick() or getAutoRagnawCards())
+                        and currentOffer then
+                            local opts = type(currentOffer) == "table"
+                                and currentOffer.Options
+                            if type(opts) == "table" and #opts > 0 then
+                                local bestIdx, bestScore = args[2] or 1, -1
+                                for i, card in ipairs(opts) do
+                                    if type(card) == "table" then
+                                        local s = rarityScore(tostring(card.Rarity or ""):lower())
+                                        if s > bestScore then bestIdx=i; bestScore=s end
+                                    end
+                                end
+                                args[2] = bestIdx
+                            end
+                            return old(self, table.unpack(args))
+                        end
+                    end
+                end
+                return old(self, ...)
+            end)
+        end
+    end)
+end
 
 end -- close Odyssey do block
 
