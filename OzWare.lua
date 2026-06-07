@@ -1452,6 +1452,75 @@ do
     local advNet = Net:FindFirstChild("Odyssey")
     advNet = advNet and advNet:FindFirstChild("Adventure")
 
+    -- Card pick: hookmetamethod redirects player's tap to highest rarity card
+    -- + auto-clicks card 1 via VirtualUser so no manual tap needed.
+    -- Flow: VirtualUser.Button1Down → game click handler → FireServer("Pick",1)
+    --       → our hook intercepts → redirects to best rarity → old() to server
+    local cardEvL = advNet and advNet:FindFirstChild("CardPickEvent")
+    if cardEvL and typeof(hookmetamethod) == "function" then
+        local currentOffer = nil
+        local vu = game:GetService("VirtualUser")
+
+        -- Store offer data when server sends it
+        cardEvL.OnClientEvent:Connect(function(action, data)
+            if action == "Offer" then
+                currentOffer = data
+                if not (getAutoPick() or getAutoRagnawCards()) then return end
+                -- Auto-click a card to trigger the game's own pick handler
+                task.spawn(function()
+                    -- Wait for card panel to become visible
+                    local waited = 0
+                    local btn = nil
+                    while not btn and waited < 3 do
+                        task.wait(0.1); waited = waited + 0.1
+                        local cards = getCardButtons()
+                        if cards and #cards > 0 then btn = cards[1].btn end
+                    end
+                    if not btn then return end
+                    local pos = btn.AbsolutePosition
+                    local sz  = btn.AbsoluteSize
+                    local cx  = pos.X + sz.X * 0.5
+                    local cy  = pos.Y + sz.Y * 0.5
+                    -- Click card 1 — hook will redirect to best rarity
+                    pcall(function() vu:Button1Down(Vector2.new(cx, cy), CFrame.new()) end)
+                    task.wait(0.05)
+                    pcall(function() vu:Button1Up(Vector2.new(cx, cy), CFrame.new()) end)
+                end)
+            elseif action == "BasicCardGranted" or action == "CharacterCardGranted"
+                or action == "Skipped" then
+                currentOffer = nil
+            end
+        end)
+
+        -- Hook intercepts the game's own FireServer("Pick") and swaps to best card
+        local old; old = hookmetamethod(game, "__namecall", function(self, ...)
+            local m = getnamecallmethod()
+            if (m == "FireServer" or m == "InvokeServer") and self == cardEvL then
+                local args = {...}
+                if args[1] == "Pick" and (getAutoPick() or getAutoRagnawCards())
+                and currentOffer then
+                    local options = type(currentOffer) == "table"
+                        and currentOffer.Options or nil
+                    if type(options) == "table" and #options > 0 then
+                        local bestIdx, bestScore = args[2] or 1, -1
+                        for i, card in ipairs(options) do
+                            if type(card) == "table" then
+                                local rarity = tostring(card.Rarity or ""):lower()
+                                local score = rarityScore(rarity)
+                                if score > bestScore then
+                                    bestIdx = i; bestScore = score
+                                end
+                            end
+                        end
+                        args[2] = bestIdx
+                    end
+                    return old(self, table.unpack(args))
+                end
+            end
+            return old(self, ...)
+        end)
+    end
+
     -- Vote: fire once when VoteStarted received
     local voteEv = advNet and advNet:FindFirstChild("VoteEvent")
     if voteEv then
@@ -1522,17 +1591,29 @@ do
     end)
 end
 
--- Auto Next Room fallback heartbeat (3s interval, in case VoteStarted was missed)
+-- Auto Next Room: fire on VoteStarted only, with one retry after 2s
 do
-    local roomClock = 0
-    RunSvc.Heartbeat:Connect(function()
-        if not getAutoNextRoom() then return end
-        if not inGameMode() then return end
-        local now = os.clock()
-        if now - roomClock < 3 then return end
-        roomClock = now
-        task.spawn(requestNextRoom)
-    end)
+    local voteActive = false
+    local voteEv2 = Net:FindFirstChild("Odyssey")
+    voteEv2 = voteEv2 and voteEv2:FindFirstChild("Adventure")
+    voteEv2 = voteEv2 and voteEv2:FindFirstChild("VoteEvent")
+    if voteEv2 then
+        voteEv2.OnClientEvent:Connect(function(action)
+            if action == "VoteStarted" then
+                voteActive = true
+                if not getAutoNextRoom() then return end
+                task.spawn(requestNextRoom)
+                -- one retry in case first vote was missed
+                task.delay(2, function()
+                    if voteActive and getAutoNextRoom() then
+                        task.spawn(requestNextRoom)
+                    end
+                end)
+            elseif action == "VoteEnded" or action == "VoteCancelled" then
+                voteActive = false
+            end
+        end)
+    end
 end
 
 -- Confirm Odyssey block executed successfully
