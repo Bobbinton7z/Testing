@@ -422,7 +422,7 @@ contentArea.ZIndex           = 11
 
 -- ── Tab system ────────────────────────────────────────────────────
 local tabButtons, tabLabels, tabIcons, tabPages, activeTab = {}, {}, {}, {}, nil
-local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","Macro"}
+local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","SpringLTM","Macro"}
 
 local function makePage()
     local p=Instance.new("ScrollingFrame")
@@ -1160,74 +1160,65 @@ end
 -- CONFIRMED paths: workspace.Terrain, game:GetService("Lighting")
 -- Makes everything flat grey — no textures, no sky, no particles.
 local fpsApplied = false
+local function applyFPSBoost()
+    if fpsApplied then return end
+    fpsApplied = true
+    local Lighting = game:GetService("Lighting")
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    for _, c in ipairs(Lighting:GetChildren()) do pcall(function() c:Destroy() end) end
+    Lighting.GlobalShadows=false; Lighting.FogEnd=9e9; Lighting.FogStart=9e9
+    Lighting.Brightness=0; Lighting.Ambient=Color3.fromRGB(200,200,200)
+    Lighting.OutdoorAmbient=Color3.fromRGB(200,200,200); Lighting.ClockTime=14
+    Lighting.ExposureCompensation=0
+    Lighting.ColorShift_Bottom=Color3.new(0,0,0); Lighting.ColorShift_Top=Color3.new(0,0,0)
+    local Terrain = workspace.Terrain
+    Terrain.WaterWaveSize=0; Terrain.WaterWaveSpeed=0
+    Terrain.WaterReflectance=0; Terrain.WaterTransparency=1
+    pcall(function() Terrain.Decoration=false end)
+    for _, c in ipairs(Terrain:GetChildren()) do
+        if c:IsA("Clouds") then pcall(function() c:Destroy() end) end
+    end
+    local function simplify(inst)
+        if inst:IsA("BasePart") then
+            pcall(function()
+                inst.Material=Enum.Material.SmoothPlastic
+                inst.CastShadow=false; inst.Reflectance=0
+                inst.BrickColor=BrickColor.new("Medium stone grey")
+            end)
+        end
+        local cls=inst.ClassName
+        if cls=="ParticleEmitter" or cls=="Trail" or cls=="Beam"
+        or cls=="Smoke" or cls=="Fire" or cls=="Sparkles"
+        or cls=="SelectionBox" or cls=="Atmosphere" or cls=="Sky"
+        or cls=="Clouds" or cls=="PointLight" or cls=="SpotLight"
+        or cls=="SurfaceLight" then
+            pcall(function() inst:Destroy() end)
+        elseif inst:IsA("Decal") or inst:IsA("Texture") then
+            pcall(function() inst.Transparency=1 end)
+        elseif inst:IsA("SpecialMesh") then
+            pcall(function() inst.MeshType=Enum.MeshType.Block end)
+        end
+    end
+    for _, inst in ipairs(workspace:GetDescendants()) do simplify(inst) end
+    workspace.DescendantAdded:Connect(function(inst)
+        if getBoostFPS() then simplify(inst) end
+    end)
+    notify("FPS Boost ON", true)
+end
+
 local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.fpsbst")
 onBoostFPS(function(on)
-    if on and not fpsApplied then
-        fpsApplied = true
-        local Lighting = game:GetService("Lighting")
-
-        -- Lowest quality setting
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-
-        -- Nuke all Lighting children (Sky, Atmosphere, PostEffects, etc.)
-        for _, c in ipairs(Lighting:GetChildren()) do
-            pcall(function() c:Destroy() end)
+    if on then
+        -- Only apply during a match, not in lobby
+        if inGameMode() then
+            applyFPSBoost()
+        else
+            task.spawn(function()
+                local w = 0
+                while not inGameMode() and w < 120 do task.wait(1); w=w+1 end
+                if inGameMode() and getBoostFPS() then applyFPSBoost() end
+            end)
         end
-        -- Flat grey lighting
-        Lighting.GlobalShadows        = false
-        Lighting.FogEnd               = 9e9
-        Lighting.FogStart             = 9e9
-        Lighting.Brightness           = 0
-        Lighting.Ambient              = Color3.fromRGB(200, 200, 200)
-        Lighting.OutdoorAmbient       = Color3.fromRGB(200, 200, 200)
-        Lighting.ClockTime            = 14
-        Lighting.ExposureCompensation = 0
-        Lighting.ColorShift_Bottom    = Color3.new(0,0,0)
-        Lighting.ColorShift_Top       = Color3.new(0,0,0)
-
-        -- Terrain: flat grey, no decoration, no water effects
-        local Terrain = workspace.Terrain
-        Terrain.WaterWaveSize     = 0
-        Terrain.WaterWaveSpeed    = 0
-        Terrain.WaterReflectance  = 0
-        Terrain.WaterTransparency = 1
-        pcall(function() Terrain.Decoration = false end)
-        -- Remove clouds from Terrain
-        for _, c in ipairs(Terrain:GetChildren()) do
-            if c:IsA("Clouds") then pcall(function() c:Destroy() end) end
-        end
-
-        -- Simplify every instance in workspace
-        local function simplify(inst)
-            if inst:IsA("BasePart") then
-                pcall(function()
-                    inst.Material    = Enum.Material.SmoothPlastic
-                    inst.CastShadow  = false
-                    inst.Reflectance = 0
-                    -- Make terrain-adjacent parts grey
-                    inst.BrickColor  = BrickColor.new("Medium stone grey")
-                end)
-            end
-            local cls = inst.ClassName
-            if cls=="ParticleEmitter" or cls=="Trail" or cls=="Beam"
-            or cls=="Smoke" or cls=="Fire" or cls=="Sparkles"
-            or cls=="SelectionBox" or cls=="Atmosphere" or cls=="Sky"
-            or cls=="Clouds" or cls=="PointLight" or cls=="SpotLight"
-            or cls=="SurfaceLight" then
-                pcall(function() inst:Destroy() end)
-            elseif inst:IsA("Decal") or inst:IsA("Texture") then
-                pcall(function() inst.Transparency = 1 end)
-            elseif inst:IsA("SpecialMesh") then
-                pcall(function() inst.MeshType = Enum.MeshType.Block end)
-            end
-        end
-
-        for _, inst in ipairs(workspace:GetDescendants()) do simplify(inst) end
-        workspace.DescendantAdded:Connect(function(inst)
-            if getBoostFPS() then simplify(inst) end
-        end)
-
-        notify("FPS Boost ON", true)
     elseif not on and fpsApplied then
         fpsApplied = false
         notify("FPS Boost OFF — rejoin to fully restore", true)
@@ -1972,6 +1963,90 @@ do
 end
 
 end -- close Odyssey do block
+
+-- ======================
+-- SPRING LTM TAB
+-- ======================
+do
+local springPage = tabPages["SpringLTM"]
+local springSec = section(springPage, "Spring LTM", 1)
+
+-- ── Confirm Placement ─────────────────────────────────────────────
+local _, getConfirmPlacement = toggle(springSec, "Confirm Placement", 1, false, "spring.confirmplacement")
+label(springSec, "Auto-confirms unit placement when the confirm UI appears", 2)
+do
+    local confirmFired = false
+    RunSvc.Heartbeat:Connect(function()
+        if not getConfirmPlacement() then confirmFired = false; return end
+        if not inGameMode() then confirmFired = false; return end
+        -- Search realGui for any visible "Confirm" button
+        local found = nil
+        for _, gui in ipairs(realGui:GetChildren()) do
+            if not gui:IsA("ScreenGui") then continue end
+            for _, d in ipairs(gui:GetDescendants()) do
+                if d.Visible and (d:IsA("TextButton") or d:IsA("ImageButton"))
+                and d.Text and d.Text:lower():find("confirm") then
+                    found = d; break
+                end
+            end
+            if found then break end
+        end
+        if found then
+            if not confirmFired then
+                confirmFired = true
+                local springEv = Net:FindFirstChild("SpringEvent")
+                local ev = springEv and springEv:FindFirstChild("ConfirmPlacement")
+                if ev then pcall(function() ev:FireServer() end) end
+            end
+        else
+            confirmFired = false  -- reset when UI disappears
+        end
+    end)
+end
+
+-- ── Wave Purchase (Skip 5 at waves 5, 10, 15, 20) ────────────────
+local _, getWavePurchase = toggle(springSec, "Wave Purchase (Skip 5)", 3, false, "spring.wavepurchase")
+label(springSec, "Purchases Skip Waves x5 at waves 5 → 10 → 15 → 20", 4)
+do
+    local MILESTONES = {5, 10, 15, 20}
+    local fired = {}  -- {[5]=true, [10]=true, ...} tracks which were fired this match
+    local waveCache = nil
+    RunSvc.Heartbeat:Connect(function()
+        if not getWavePurchase() then
+            fired = {}; return
+        end
+        if not inGameMode() then
+            fired = {}; waveCache = nil; return
+        end
+        -- Find or refresh wave label
+        if not waveCache or not waveCache.Parent then
+            waveCache = nil
+            for _, gui in ipairs(realGui:GetChildren()) do
+                for _, d in ipairs(gui:GetDescendants()) do
+                    if d:IsA("TextLabel") and d.Text:match("Wave%s+%d+/%d+") then
+                        waveCache = d; break
+                    end
+                end
+                if waveCache then break end
+            end
+        end
+        if not waveCache then return end
+        local cur = tonumber(waveCache.Text:match("Wave%s+(%d+)"))
+        if not cur then return end
+        -- Reset if wave dropped below 5 (match restarted / new match)
+        if cur < 5 then fired = {}; return end
+        -- Fire at each milestone once
+        for _, w in ipairs(MILESTONES) do
+            if cur >= w and not fired[w] then
+                fired[w] = true
+                local springEv = Net:FindFirstChild("SpringEvent")
+                local ev = springEv and springEv:FindFirstChild("ShopEvent")
+                if ev then pcall(function() ev:FireServer("Purchase", "SkipWaves5") end) end
+            end
+        end
+    end)
+end
+end
 
 -- ======================
 -- MACRO TAB
