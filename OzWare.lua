@@ -201,11 +201,11 @@ win.Name             = "Window"
 win.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
 win.AnchorPoint      = Vector2.new(0.5, 0.5)
 win.Position         = UDim2.new(0.5, 0, 0.5, 0)
-win.BackgroundColor3 = Color3.fromRGB(13, 13, 20)
+win.BackgroundColor3 = Color3.fromRGB(11, 9, 18)
 win.BorderSizePixel  = 0
 win.ClipsDescendants = true
 win.Active           = true
-win.Visible          = false   -- starts hidden; float button reveals it
+win.Visible          = false
 
 -- ── Open/close animation (top-level so accessible at boot) ────────
 local isOpen = false
@@ -233,24 +233,63 @@ local function closeWindow()
     end)
 end
 
-win.ZIndex           = 10
-win.Parent           = gui
-Instance.new("UICorner", win).CornerRadius = UDim.new(0, 14)
-local winStroke = Instance.new("UIStroke", win)
-winStroke.Color = Color3.fromRGB(60, 30, 90)
-winStroke.Thickness = 1
+win.ZIndex = 10
+win.Parent = gui
 
--- Subtle inner gradient on window background
+-- Rounded corners
+Instance.new("UICorner", win).CornerRadius = UDim.new(0, 16)
+
+-- Outer glowing border — 2px purple/magenta
+local winStroke = Instance.new("UIStroke", win)
+winStroke.Color     = Color3.fromRGB(120, 40, 200)
+winStroke.Thickness = 2
+winStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+-- Main background gradient — deep diagonal purple-to-black texture
 do
     local bg = Instance.new("Frame", win)
-    bg.Size = UDim2.new(1,0,1,0); bg.BackgroundColor3 = Color3.fromRGB(20,10,35)
-    bg.BorderSizePixel = 0; bg.ZIndex = 0
-    local g = Instance.new("UIGradient", bg)
-    g.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(22,10,38)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(10,10,18)),
+    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(14,10,24)
+    bg.BorderSizePixel=0; bg.ZIndex=0
+    Instance.new("UICorner", bg).CornerRadius=UDim.new(0,16)
+    local g=Instance.new("UIGradient", bg)
+    g.Color=ColorSequence.new({
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(28, 14, 48)),
+        ColorSequenceKeypoint.new(0.35, Color3.fromRGB(16, 10, 28)),
+        ColorSequenceKeypoint.new(0.65, Color3.fromRGB(12,  8, 20)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(8,   6, 14)),
     })
     g.Rotation = 135
+end
+
+-- Texture layer 1: subtle top-left highlight bleed
+do
+    local hi = Instance.new("Frame", win)
+    hi.Size=UDim2.new(0.6,0,0.45,0); hi.Position=UDim2.new(0,0,0,0)
+    hi.BackgroundColor3=Color3.fromRGB(90,30,160); hi.BorderSizePixel=0
+    hi.BackgroundTransparency=0.92; hi.ZIndex=1
+    Instance.new("UICorner",hi).CornerRadius=UDim.new(0,16)
+end
+
+-- Texture layer 2: bottom-right dark vignette
+do
+    local vg=Instance.new("Frame", win)
+    vg.Size=UDim2.new(0.5,0,0.4,0); vg.AnchorPoint=Vector2.new(1,1)
+    vg.Position=UDim2.new(1,0,1,0)
+    vg.BackgroundColor3=Color3.fromRGB(4,2,10); vg.BorderSizePixel=0
+    vg.BackgroundTransparency=0.85; vg.ZIndex=1
+    Instance.new("UICorner",vg).CornerRadius=UDim.new(0,16)
+end
+
+-- Inner border glow — softer inner stroke for depth
+do
+    local innerBorder=Instance.new("Frame", win)
+    innerBorder.Size=UDim2.new(1,-4,1,-4); innerBorder.Position=UDim2.new(0,2,0,2)
+    innerBorder.BackgroundTransparency=1; innerBorder.BorderSizePixel=0
+    innerBorder.ZIndex=2
+    local ib=Instance.new("UIStroke", innerBorder)
+    ib.Color=Color3.fromRGB(180,80,255); ib.Thickness=1
+    ib.Transparency=0.75; ib.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
+    Instance.new("UICorner",innerBorder).CornerRadius=UDim.new(0,15)
 end
 
 -- ── Header (logo banner) ─────────────────────────────────────────
@@ -680,63 +719,38 @@ for i, b in ipairs(BANNERS) do
     end)
 end
 
--- Claimers (each has a Run button + Loop toggle)
+-- Claimers: each is a toggle (auto-loop when ON) + one-shot run button
 local claimSec = section(lobbyPage, "Claimer", 2)
 local CLAIMERS = {
-    { name="Claim All Quests", color=C.GREEN, fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
-    { name="Claim All Milestones", color=Color3.fromRGB(60,130,220), fn=function()
+    { name="Claim All Quests",     key="claim.quests",     color=C.GREEN,                        fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
+    { name="Claim All Milestones", key="claim.milestones", color=Color3.fromRGB(60,130,220),      fn=function()
         for _,m in ipairs({10,25,50,70,100,150,200,250,300,400,500,750,1000}) do
             Net.Milestones.MilestonesEvent:FireServer("Claim", m); task.wait(0.08)
         end
     end},
-    { name="Claim Daily Reward", color=C.YELLOW, fn=function()
+    { name="Claim Daily Reward",   key="claim.daily",      color=C.YELLOW,                       fn=function()
         for day=1,7 do Net.DailyRewardEvent:FireServer("Claim",{[1]="Special",[2]=day}); task.wait(0.08) end
     end},
-    { name="Claim Battle Pass", color=Color3.fromRGB(160,60,220), fn=function() Net.BattlepassEvent:FireServer("ClaimAll") end},
+    { name="Claim Battle Pass",    key="claim.battlepass", color=Color3.fromRGB(160,60,220),      fn=function() Net.BattlepassEvent:FireServer("ClaimAll") end},
 }
-local loopGetters = {}
+local claimGetters = {}
 for i,c in ipairs(CLAIMERS) do
-    -- Row holding button + loop pill
-    local row=Instance.new("Frame")
-    row.Size=UDim2.new(1,0,0,34); row.BackgroundTransparency=1
-    row.LayoutOrder=i; row.ZIndex=3; row.Parent=claimSec
-    local b=Instance.new("TextButton")
-    b.Size=UDim2.new(1,-78,1,0); b.Position=UDim2.new(0,0,0,0)
-    b.BackgroundColor3=c.color; b.Text=c.name; b.TextColor3=C.TEXT
-    b.TextSize=14; b.Font=FONT_BOLD; b.BorderSizePixel=0
-    b.ZIndex=3; b.Parent=row; corner(b,7)
-    gradient(b,c.color,c.color:Lerp(Color3.new(0,0,0),0.25),90)
-    b.MouseButton1Click:Connect(function() safeCall(c.fn, c.name.." done!", "Claim failed") end)
-    -- Loop pill (toggle)
-    local track=Instance.new("TextButton")
-    track.Size=UDim2.new(0,72,1,0); track.Position=UDim2.new(1,-72,0,0)
-    track.BackgroundColor3=C.DISABLED; track.Text="Loop OFF"; track.TextColor3=C.TEXT
-    track.TextSize=11; track.Font=FONT_BOLD; track.BorderSizePixel=0
-    track.AutoButtonColor=false; track.ZIndex=3; track.Parent=row; corner(track,7)
-    local on=false
-    track.MouseButton1Click:Connect(function()
-        on = not on
-        tween(track,{BackgroundColor3 = on and C.GREEN or C.DISABLED})
-        track.Text = on and "Loop ON" or "Loop OFF"
-    end)
-    loopGetters[i] = function() return on end
+    local _, getter = toggle(claimSec, c.name, i, false, c.key)
+    claimGetters[i] = getter
 end
-local allBtn = btn(claimSec, "Run All Claims", C.ACCENT, #CLAIMERS+10)
+local allBtn = btn(claimSec, "Run All Claims", C.ACCENT, #CLAIMERS+1)
 allBtn.MouseButton1Click:Connect(function()
     safeCall(function() for _,c in ipairs(CLAIMERS) do c.fn(); task.wait(0.2) end end, "All rewards claimed!", "Claim all failed")
 end)
--- Looper: fires each enabled claimer once per 5-second cycle, only in lobby.
--- Uses a single connection instead of a while-true loop so it never blocks
--- or interrupts other coroutines.
+-- Loop: fires each enabled claimer every 5s in lobby
 do
     local loopClock = 0
     RunSvc.Heartbeat:Connect(function()
         if os.clock() - loopClock < 5 then return end
         loopClock = os.clock()
-        -- Claimers are lobby-only actions; skip entirely while in a match.
         if inGameMode() then return end
         for i, c in ipairs(CLAIMERS) do
-            if loopGetters[i] and loopGetters[i]() then
+            if claimGetters[i] and claimGetters[i]() then
                 task.spawn(function() pcall(c.fn) end)
             end
         end
@@ -1226,23 +1240,31 @@ label(modSec, "Picks highest-priority modifier when offered", 2)
 
 -- Collapsible: ALL modifiers (Additive + Starting)
 local allColBtn = Instance.new("TextButton", modSec)
-allColBtn.Size=UDim2.new(1,0,0,28); allColBtn.BackgroundColor3=C.PANEL
+allColBtn.Size=UDim2.new(1,0,0,30); allColBtn.BackgroundColor3=C.PANEL
 allColBtn.BorderSizePixel=0; allColBtn.LayoutOrder=3
-allColBtn.Text="▼  All Modifier Priorities"
+allColBtn.Text="▶  All Modifier Priorities"
 allColBtn.TextColor3=C.ACCENT2; allColBtn.TextSize=12; allColBtn.Font=FONT_SEMI
 allColBtn.AutoButtonColor=false; allColBtn.ZIndex=3
-corner(allColBtn,7); stroke(allColBtn,C.BORDER,1)
+corner(allColBtn,8); stroke(allColBtn,C.ACCENT,1)
 
 local allListFrame = Instance.new("Frame", modSec)
-allListFrame.Size=UDim2.new(1,0,0,0); allListFrame.AutomaticSize=Enum.AutomaticSize.Y
+allListFrame.Size=UDim2.new(1,0,0,0); allListFrame.AutomaticSize=Enum.AutomaticSize.None
 allListFrame.BackgroundTransparency=1; allListFrame.BorderSizePixel=0
-allListFrame.LayoutOrder=4; allListFrame.ClipsDescendants=false
+allListFrame.LayoutOrder=4; allListFrame.ClipsDescendants=true
 listLayout(allListFrame, nil, 4)
 
-local allOpen = true
+local allOpen = false  -- starts closed
+allColBtn.Text = "▶  All Modifier Priorities"
 allColBtn.MouseButton1Click:Connect(function()
     allOpen = not allOpen
-    allListFrame.Visible = allOpen
+    if allOpen then
+        allListFrame.AutomaticSize = Enum.AutomaticSize.Y
+        allListFrame.ClipsDescendants = false
+    else
+        allListFrame.AutomaticSize = Enum.AutomaticSize.None
+        allListFrame.Size = UDim2.new(1,0,0,0)
+        allListFrame.ClipsDescendants = true
+    end
     allColBtn.Text = (allOpen and "▼" or "▶") .. "  All Modifier Priorities"
 end)
 
@@ -1252,23 +1274,31 @@ label(modSec, "Restarts match until a priority starting modifier appears", 6)
 
 -- Collapsible: Starting modifiers only
 local rstColBtn = Instance.new("TextButton", modSec)
-rstColBtn.Size=UDim2.new(1,0,0,28); rstColBtn.BackgroundColor3=C.PANEL
+rstColBtn.Size=UDim2.new(1,0,0,30); rstColBtn.BackgroundColor3=C.PANEL
 rstColBtn.BorderSizePixel=0; rstColBtn.LayoutOrder=7
-rstColBtn.Text="▼  Starting Modifier Priorities"
+rstColBtn.Text="▶  Starting Modifier Priorities"
 rstColBtn.TextColor3=C.ACCENT2; rstColBtn.TextSize=12; rstColBtn.Font=FONT_SEMI
 rstColBtn.AutoButtonColor=false; rstColBtn.ZIndex=3
-corner(rstColBtn,7); stroke(rstColBtn,C.BORDER,1)
+corner(rstColBtn,8); stroke(rstColBtn,C.ACCENT,1)
 
 local rstListFrame = Instance.new("Frame", modSec)
-rstListFrame.Size=UDim2.new(1,0,0,0); rstListFrame.AutomaticSize=Enum.AutomaticSize.Y
+rstListFrame.Size=UDim2.new(1,0,0,0); rstListFrame.AutomaticSize=Enum.AutomaticSize.None
 rstListFrame.BackgroundTransparency=1; rstListFrame.BorderSizePixel=0
-rstListFrame.LayoutOrder=8; rstListFrame.ClipsDescendants=false
+rstListFrame.LayoutOrder=8; rstListFrame.ClipsDescendants=true
 listLayout(rstListFrame, nil, 4)
 
-local rstOpen = true
+local rstOpen = false  -- starts closed
+rstColBtn.Text = "▶  Starting Modifier Priorities"
 rstColBtn.MouseButton1Click:Connect(function()
     rstOpen = not rstOpen
-    rstListFrame.Visible = rstOpen
+    if rstOpen then
+        rstListFrame.AutomaticSize = Enum.AutomaticSize.Y
+        rstListFrame.ClipsDescendants = false
+    else
+        rstListFrame.AutomaticSize = Enum.AutomaticSize.None
+        rstListFrame.Size = UDim2.new(1,0,0,0)
+        rstListFrame.ClipsDescendants = true
+    end
     rstColBtn.Text = (rstOpen and "▼" or "▶") .. "  Starting Modifier Priorities"
 end)
 
