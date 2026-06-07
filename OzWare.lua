@@ -1463,10 +1463,19 @@ do
             if ev then pcall(function() ev:FireServer("Close") end) end
         end
 
-        -- Skip unit reward: server skips if reward pending, ignores if not
+        -- Skip unit reward: ONLY fire when the reward panel (Frame >400px) is visible
         if getSkipUnitReward() then
-            local ev = getONet("UnitRewardEvent")
-            if ev then pcall(function() ev:FireServer("Skip") end) end
+            local hud = getAdventureHUD()
+            if hud then
+                for _, child in ipairs(hud:GetChildren()) do
+                    if child.Name == "Frame" and child:IsA("GuiObject")
+                    and child.Visible and child.AbsoluteSize.X > 400 then
+                        local ev = getONet("UnitRewardEvent")
+                        if ev then pcall(function() ev:FireServer("Skip") end) end
+                        break
+                    end
+                end
+            end
         end
     end)
 end
@@ -1518,71 +1527,58 @@ do
 end
 
 -- ── Card pick: respond to server Offer via OnClientEvent ─────────
--- Cobalt spy confirmed: server sends CardPickEvent:FireClient("Offer", data)
--- to activate the pick session. We connect to OnClientEvent and respond
--- with FireServer("Pick", bestIdx) the instant the session opens.
--- Server accepts it because it just established the session itself.
+-- Decompiled source confirmed:
+--   - Offer data structure: {Kind, Options=[{Rarity, CardName, ...}], ExistingCards, RerollsRemaining}
+--   - Game fires CardPickEvent:FireServer("Pick", index) with no extra token
+--   - v_u_49 (reactive source) stores offer; UI mounts after this is set
+-- We use task.defer to let the game's own OnClientEvent handler run first
+-- (which sets up the reactive state), then fire our pick in the next frame.
 do
-    local cardEv = Net:FindFirstChild("Odyssey")
-    cardEv = cardEv and cardEv:FindFirstChild("Adventure")
-    cardEv = cardEv and cardEv:FindFirstChild("CardPickEvent")
-
-    if cardEv then
-        cardEv.OnClientEvent:Connect(function(action, data)
+    local function connectCardPick(ev)
+        ev.OnClientEvent:Connect(function(action, data)
             if action ~= "Offer" then return end
             if not (getAutoPick() or getAutoRagnawCards()) then return end
             if not inGameMode() then return end
 
-            -- Parse card rarities from offer data to pick best
-            local bestIdx = 1
-            local bestScore = -1
-
-            -- data.BasicCards = [{Rarity=..., CardId=..., ...}, ...]
-            local cards = (type(data) == "table") and (data.BasicCards or data.Cards or data) or nil
-            if type(cards) == "table" then
-                for i, card in ipairs(cards) do
-                    if type(card) == "table" then
-                        local rarity = tostring(card.Rarity or card.rarity or ""):lower()
-                        local score = rarityScore(rarity)
-                        if score > bestScore then
-                            bestScore = score
-                            bestIdx = i
-                        end
-                    end
-                end
-            end
-
-            -- Small delay so server finishes setting up session state
-            task.wait(0.1)
-            pcall(function() cardEv:FireServer("Pick", bestIdx) end)
-        end)
-    else
-        -- Fallback: resolve after Adventure folder appears
-        task.spawn(function()
-            local ody = Net:WaitForChild("Odyssey", 30)
-            if not ody then return end
-            local adv = ody:WaitForChild("Adventure", 30)
-            if not adv then return end
-            local ev = adv:WaitForChild("CardPickEvent", 30)
-            if not ev then return end
-            ev.OnClientEvent:Connect(function(action, data)
-                if action ~= "Offer" then return end
-                if not (getAutoPick() or getAutoRagnawCards()) then return end
+            -- Let game's own handler run first (sets reactive state, mounts panel)
+            task.defer(function()
+                -- Find best card from data.Options (confirmed field name from decompile)
                 local bestIdx = 1
                 local bestScore = -1
-                local cards = (type(data) == "table") and (data.BasicCards or data.Cards or data) or nil
-                if type(cards) == "table" then
-                    for i, card in ipairs(cards) do
+                local options = type(data) == "table" and data.Options or nil
+                if type(options) == "table" then
+                    for i, card in ipairs(options) do
                         if type(card) == "table" then
-                            local rarity = tostring(card.Rarity or card.rarity or ""):lower()
+                            local rarity = tostring(card.Rarity or ""):lower()
                             local score = rarityScore(rarity)
-                            if score > bestScore then bestScore = score; bestIdx = i end
+                            if score > bestScore then
+                                bestScore = score
+                                bestIdx = i
+                            end
                         end
                     end
                 end
-                task.wait(0.1)
+
                 pcall(function() ev:FireServer("Pick", bestIdx) end)
             end)
+        end)
+    end
+
+    -- Try immediate connection
+    local ody = Net:FindFirstChild("Odyssey")
+    local adv = ody and ody:FindFirstChild("Adventure")
+    local ev  = adv and adv:FindFirstChild("CardPickEvent")
+    if ev then
+        connectCardPick(ev)
+    else
+        task.spawn(function()
+            local o = Net:WaitForChild("Odyssey", 60)
+            if not o then return end
+            local a = o:WaitForChild("Adventure", 60)
+            if not a then return end
+            local e = a:WaitForChild("CardPickEvent", 60)
+            if not e then return end
+            connectCardPick(e)
         end)
     end
 end
