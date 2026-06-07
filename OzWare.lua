@@ -294,24 +294,11 @@ end
 
 -- ── Header (logo banner) ─────────────────────────────────────────
 local header = Instance.new("Frame", win)
-header.Size             = UDim2.new(1, 0, 0, 78)
-header.BackgroundColor3 = Color3.fromRGB(16, 10, 28)
-header.BorderSizePixel  = 0
-header.ZIndex           = 12
+header.Size                  = UDim2.new(1, 0, 0, 78)
+header.BackgroundTransparency = 1
+header.BorderSizePixel        = 0
+header.ZIndex                 = 12
 Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
--- Cover bottom-round on header
-local headerCover = Instance.new("Frame", header)
-headerCover.Size             = UDim2.new(1,0,0,14)
-headerCover.Position         = UDim2.new(0,0,1,-14)
-headerCover.BackgroundColor3 = Color3.fromRGB(16,10,28)
-headerCover.BorderSizePixel  = 0; headerCover.ZIndex = 13
--- Subtle gradient on header
-local hgrad = Instance.new("UIGradient", header)
-hgrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(30,12,50)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(13,10,22)),
-})
-hgrad.Rotation = 90
 -- Bottom separator line
 local sep = Instance.new("Frame", win)
 sep.Size             = UDim2.new(1,0,0,1)
@@ -666,7 +653,28 @@ do
 local lobbyPage = tabPages["Lobby"]
 
 local sumSec = section(lobbyPage, "Auto Summoner", 1)
-label(sumSec, "Loops summon using the game's own max/current currency handling.", 1)
+
+-- Collapsible toggle list
+local sumColBtn = Instance.new("TextButton", sumSec)
+sumColBtn.Size=UDim2.new(1,0,0,30); sumColBtn.BackgroundColor3=C.PANEL
+sumColBtn.BorderSizePixel=0; sumColBtn.LayoutOrder=1
+sumColBtn.Text="▶  Summoner"; sumColBtn.TextColor3=C.ACCENT2
+sumColBtn.TextSize=12; sumColBtn.Font=FONT_SEMI
+sumColBtn.AutoButtonColor=false; sumColBtn.ZIndex=3
+corner(sumColBtn,8); stroke(sumColBtn,C.ACCENT,1)
+
+local sumListFrame = Instance.new("Frame", sumSec)
+sumListFrame.Size=UDim2.new(1,0,0,0); sumListFrame.AutomaticSize=Enum.AutomaticSize.Y
+sumListFrame.BackgroundTransparency=1; sumListFrame.BorderSizePixel=0
+sumListFrame.LayoutOrder=2; sumListFrame.Visible=false
+listLayout(sumListFrame, nil, 4)
+
+local sumOpen = false
+sumColBtn.MouseButton1Click:Connect(function()
+    sumOpen = not sumOpen
+    sumListFrame.Visible = sumOpen
+    sumColBtn.Text = (sumOpen and "▼" or "▶") .. "  Summoner"
+end)
 
 -- Logger-confirmed signature (UPD 12.5):
 --   ALL banners use ONE remote: Networking.Units.SummonEvent
@@ -708,7 +716,7 @@ local BANNERS = {
 }
 
 for i, b in ipairs(BANNERS) do
-    local _, getOn = toggle(sumSec, "Auto: "..b.name, i+1, false, "summon-v7:"..b.id)
+    local _, getOn = toggle(sumListFrame, "Auto: "..b.name, i, false, "summon-v7:"..b.id)
     task.spawn(function()
         while true do
             if getOn() and not inGameMode() then
@@ -719,29 +727,47 @@ for i, b in ipairs(BANNERS) do
     end)
 end
 
--- Claimers: each is a toggle (auto-loop when ON) + one-shot run button
+-- Claimers: collapsible selector, each toggle auto-loops every 5s in lobby
 local claimSec = section(lobbyPage, "Claimer", 2)
+
+local clmColBtn = Instance.new("TextButton", claimSec)
+clmColBtn.Size=UDim2.new(1,0,0,30); clmColBtn.BackgroundColor3=C.PANEL
+clmColBtn.BorderSizePixel=0; clmColBtn.LayoutOrder=1
+clmColBtn.Text="▶  Claimers"; clmColBtn.TextColor3=C.ACCENT2
+clmColBtn.TextSize=12; clmColBtn.Font=FONT_SEMI
+clmColBtn.AutoButtonColor=false; clmColBtn.ZIndex=3
+corner(clmColBtn,8); stroke(clmColBtn,C.ACCENT,1)
+
+local clmListFrame = Instance.new("Frame", claimSec)
+clmListFrame.Size=UDim2.new(1,0,0,0); clmListFrame.AutomaticSize=Enum.AutomaticSize.Y
+clmListFrame.BackgroundTransparency=1; clmListFrame.BorderSizePixel=0
+clmListFrame.LayoutOrder=2; clmListFrame.Visible=false
+listLayout(clmListFrame, nil, 4)
+
+local clmOpen = false
+clmColBtn.MouseButton1Click:Connect(function()
+    clmOpen = not clmOpen
+    clmListFrame.Visible = clmOpen
+    clmColBtn.Text = (clmOpen and "▼" or "▶") .. "  Claimers"
+end)
+
 local CLAIMERS = {
-    { name="Claim All Quests",     key="claim.quests",     color=C.GREEN,                        fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
-    { name="Claim All Milestones", key="claim.milestones", color=Color3.fromRGB(60,130,220),      fn=function()
+    { name="Claim All Quests",     key="claim.quests",     fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
+    { name="Claim All Milestones", key="claim.milestones", fn=function()
         for _,m in ipairs({10,25,50,70,100,150,200,250,300,400,500,750,1000}) do
             Net.Milestones.MilestonesEvent:FireServer("Claim", m); task.wait(0.08)
         end
     end},
-    { name="Claim Daily Reward",   key="claim.daily",      color=C.YELLOW,                       fn=function()
+    { name="Claim Daily Reward",   key="claim.daily",      fn=function()
         for day=1,7 do Net.DailyRewardEvent:FireServer("Claim",{[1]="Special",[2]=day}); task.wait(0.08) end
     end},
-    { name="Claim Battle Pass",    key="claim.battlepass", color=Color3.fromRGB(160,60,220),      fn=function() Net.BattlepassEvent:FireServer("ClaimAll") end},
+    { name="Claim Battle Pass",    key="claim.battlepass", fn=function() Net.BattlepassEvent:FireServer("ClaimAll") end},
 }
 local claimGetters = {}
 for i,c in ipairs(CLAIMERS) do
-    local _, getter = toggle(claimSec, c.name, i, false, c.key)
+    local _, getter = toggle(clmListFrame, c.name, i, false, c.key)
     claimGetters[i] = getter
 end
-local allBtn = btn(claimSec, "Run All Claims", C.ACCENT, #CLAIMERS+1)
-allBtn.MouseButton1Click:Connect(function()
-    safeCall(function() for _,c in ipairs(CLAIMERS) do c.fn(); task.wait(0.2) end end, "All rewards claimed!", "Claim all failed")
-end)
 -- Loop: fires each enabled claimer every 5s in lobby
 do
     local loopClock = 0
@@ -1248,23 +1274,16 @@ allColBtn.AutoButtonColor=false; allColBtn.ZIndex=3
 corner(allColBtn,8); stroke(allColBtn,C.ACCENT,1)
 
 local allListFrame = Instance.new("Frame", modSec)
-allListFrame.Size=UDim2.new(1,0,0,0); allListFrame.AutomaticSize=Enum.AutomaticSize.None
+allListFrame.Size=UDim2.new(1,0,0,0); allListFrame.AutomaticSize=Enum.AutomaticSize.Y
 allListFrame.BackgroundTransparency=1; allListFrame.BorderSizePixel=0
-allListFrame.LayoutOrder=4; allListFrame.ClipsDescendants=true
+allListFrame.LayoutOrder=4; allListFrame.Visible=false
 listLayout(allListFrame, nil, 4)
 
-local allOpen = false  -- starts closed
+local allOpen = false
 allColBtn.Text = "▶  All Modifier Priorities"
 allColBtn.MouseButton1Click:Connect(function()
     allOpen = not allOpen
-    if allOpen then
-        allListFrame.AutomaticSize = Enum.AutomaticSize.Y
-        allListFrame.ClipsDescendants = false
-    else
-        allListFrame.AutomaticSize = Enum.AutomaticSize.None
-        allListFrame.Size = UDim2.new(1,0,0,0)
-        allListFrame.ClipsDescendants = true
-    end
+    allListFrame.Visible = allOpen
     allColBtn.Text = (allOpen and "▼" or "▶") .. "  All Modifier Priorities"
 end)
 
@@ -1282,23 +1301,16 @@ rstColBtn.AutoButtonColor=false; rstColBtn.ZIndex=3
 corner(rstColBtn,8); stroke(rstColBtn,C.ACCENT,1)
 
 local rstListFrame = Instance.new("Frame", modSec)
-rstListFrame.Size=UDim2.new(1,0,0,0); rstListFrame.AutomaticSize=Enum.AutomaticSize.None
+rstListFrame.Size=UDim2.new(1,0,0,0); rstListFrame.AutomaticSize=Enum.AutomaticSize.Y
 rstListFrame.BackgroundTransparency=1; rstListFrame.BorderSizePixel=0
-rstListFrame.LayoutOrder=8; rstListFrame.ClipsDescendants=true
+rstListFrame.LayoutOrder=8; rstListFrame.Visible=false
 listLayout(rstListFrame, nil, 4)
 
-local rstOpen = false  -- starts closed
+local rstOpen = false
 rstColBtn.Text = "▶  Starting Modifier Priorities"
 rstColBtn.MouseButton1Click:Connect(function()
     rstOpen = not rstOpen
-    if rstOpen then
-        rstListFrame.AutomaticSize = Enum.AutomaticSize.Y
-        rstListFrame.ClipsDescendants = false
-    else
-        rstListFrame.AutomaticSize = Enum.AutomaticSize.None
-        rstListFrame.Size = UDim2.new(1,0,0,0)
-        rstListFrame.ClipsDescendants = true
-    end
+    rstListFrame.Visible = rstOpen
     rstColBtn.Text = (rstOpen and "▼" or "▶") .. "  Starting Modifier Priorities"
 end)
 
@@ -1418,19 +1430,42 @@ end -- close Game Tab do block
 -- ======================
 do
 local odysseyPage = tabPages["Odyssey"]
-local autoSec = section(odysseyPage, "Auto Behavior", 1)
-local _, getAutoNextRoom      = toggle(autoSec, "Auto Next Room",                    1, false, "odyssey.auto_next_room")
-label(autoSec, "Continues to the next room automatically", 2)
-local _, getAutoPick          = toggle(autoSec, "Auto Select Cards",                 3, true,  "odyssey.auto_select_cards")
-label(autoSec, "Picks highest rarity card when card screen appears", 4)
-local _, getAutoRagnawCards   = toggle(autoSec, "Auto Select Unit Cards (Ragnaw)",   5, false, "odyssey.auto_ragnaw_unit_cards")
-label(autoSec, "Prioritises Ragnaw unit cards when picking", 6)
-local _, getAutoSkipShop      = toggle(autoSec, "Auto Skip Shop",                    7, false, "odyssey.auto_skip_shop.v3")
-label(autoSec, "Closes Stiches' Shop automatically", 8)
-local _, getAutoCollectChests = toggle(autoSec, "Auto Collect Chests",               9, false, "odyssey.auto_collect_chest.v3")
-label(autoSec, "Opens all chests in Treasure Room", 10)
-local _, getSkipUnitReward    = toggle(autoSec, "Skip Unit Reward",                 11, false, "odyssey.skip_unit_reward")
-label(autoSec, "Skips unit reward panel after elite rooms", 12)
+local autoSec = section(odysseyPage, "Adventure", 1)
+
+-- Collapsible adventure toggles
+local advColBtn = Instance.new("TextButton", autoSec)
+advColBtn.Size=UDim2.new(1,0,0,30); advColBtn.BackgroundColor3=C.PANEL
+advColBtn.BorderSizePixel=0; advColBtn.LayoutOrder=1
+advColBtn.Text="▶  Adventure Settings"; advColBtn.TextColor3=C.ACCENT2
+advColBtn.TextSize=12; advColBtn.Font=FONT_SEMI
+advColBtn.AutoButtonColor=false; advColBtn.ZIndex=3
+corner(advColBtn,8); stroke(advColBtn,C.ACCENT,1)
+
+local advListFrame = Instance.new("Frame", autoSec)
+advListFrame.Size=UDim2.new(1,0,0,0); advListFrame.AutomaticSize=Enum.AutomaticSize.Y
+advListFrame.BackgroundTransparency=1; advListFrame.BorderSizePixel=0
+advListFrame.LayoutOrder=2; advListFrame.Visible=false
+listLayout(advListFrame, nil, 4)
+
+local advOpen = false
+advColBtn.MouseButton1Click:Connect(function()
+    advOpen = not advOpen
+    advListFrame.Visible = advOpen
+    advColBtn.Text = (advOpen and "▼" or "▶") .. "  Adventure Settings"
+end)
+
+local _, getAutoNextRoom      = toggle(advListFrame, "Auto Next Room",                    1, false, "odyssey.auto_next_room")
+label(advListFrame, "Continues to the next room automatically", 2)
+local _, getAutoPick          = toggle(advListFrame, "Auto Select Cards",                 3, true,  "odyssey.auto_select_cards")
+label(advListFrame, "Picks highest rarity card when card screen appears", 4)
+local _, getAutoRagnawCards   = toggle(advListFrame, "Auto Select Unit Cards (Ragnaw)",   5, false, "odyssey.auto_ragnaw_unit_cards")
+label(advListFrame, "Prioritises Ragnaw unit cards when picking", 6)
+local _, getAutoSkipShop      = toggle(advListFrame, "Auto Skip Shop",                    7, false, "odyssey.auto_skip_shop.v3")
+label(advListFrame, "Closes Stiches' Shop automatically", 8)
+local _, getAutoCollectChests = toggle(advListFrame, "Auto Collect Chests",               9, false, "odyssey.auto_collect_chest.v3")
+label(advListFrame, "Opens all chests in Treasure Room", 10)
+local _, getSkipUnitReward    = toggle(advListFrame, "Skip Unit Reward",                 11, false, "odyssey.skip_unit_reward")
+label(advListFrame, "Skips unit reward panel after elite rooms", 12)
 
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
