@@ -1517,70 +1517,72 @@ do
     end)
 end
 
--- ── Card pick: hookmetamethod intercept ──────────────────────────
--- Direct FireServer is silently ignored by server (Result: true nil confirmed).
--- Solution: hook __namecall, intercept the game's FireServer("Pick", idx)
--- and redirect to the highest rarity card index.
--- Combined with a UIS input trigger to auto-fire without needing a tap.
+-- ── Card pick: respond to server Offer via OnClientEvent ─────────
+-- Cobalt spy confirmed: server sends CardPickEvent:FireClient("Offer", data)
+-- to activate the pick session. We connect to OnClientEvent and respond
+-- with FireServer("Pick", bestIdx) the instant the session opens.
+-- Server accepts it because it just established the session itself.
 do
-    if typeof(hookmetamethod) ~= "function" then
-        notify("Card hook unavailable", false)
-    else
-        local cardEv = getONet("CardPickEvent")
+    local cardEv = Net:FindFirstChild("Odyssey")
+    cardEv = cardEv and cardEv:FindFirstChild("Adventure")
+    cardEv = cardEv and cardEv:FindFirstChild("CardPickEvent")
 
-        local old; old = hookmetamethod(game, "__namecall", function(self, ...)
-            local m = getnamecallmethod()
-            if (m == "FireServer" or m == "InvokeServer")
-            and self == cardEv then
-                local args = {...}
-                if args[1] == "Pick" and (getAutoPick() or getAutoRagnawCards()) then
-                    local cards = getCardButtons()
-                    if cards and #cards > 0 then
-                        local bestIdx, bestScore = args[2] or 1, -1
-                        for i, c in ipairs(cards) do
-                            local s = rarityScore(c.text)
-                            if s > bestScore then bestIdx=i; bestScore=s end
-                        end
-                        args[2] = bestIdx
-                    end
-                    return old(self, table.unpack(args))
-                end
-            end
-            return old(self, ...)
-        end)
-
-        -- Auto-trigger: when card screen appears, simulate a tap on card 1
-        -- so the hook intercepts it and redirects to best card
-        local cardFlag = false
-        RunSvc.Heartbeat:Connect(function()
-            if not inGameMode() then cardFlag = false; return end
+    if cardEv then
+        cardEv.OnClientEvent:Connect(function(action, data)
+            if action ~= "Offer" then return end
             if not (getAutoPick() or getAutoRagnawCards()) then return end
-            local cp = findPanel("ChooseCard")
-            if cp and cp.Visible then
-                if not cardFlag then
-                    cardFlag = true
-                    task.spawn(function()
-                        task.wait(0.15)
-                        local cards = getCardButtons()
-                        if not cards or #cards == 0 then return end
-                        -- Simulate tap via VirtualUser at card 1's position
-                        -- Hook will redirect to best card automatically
-                        local btn = cards[1].btn
-                        local pos = btn.AbsolutePosition
-                        local sz  = btn.AbsoluteSize
-                        local cx  = pos.X + sz.X * 0.5
-                        local cy  = pos.Y + sz.Y * 0.5
-                        local vu  = game:GetService("VirtualUser")
-                        pcall(function()
-                            vu:Button1Down(Vector2.new(cx, cy), CFrame.new())
-                            task.wait(0.05)
-                            vu:Button1Up(Vector2.new(cx, cy), CFrame.new())
-                        end)
-                    end)
+            if not inGameMode() then return end
+
+            -- Parse card rarities from offer data to pick best
+            local bestIdx = 1
+            local bestScore = -1
+
+            -- data.BasicCards = [{Rarity=..., CardId=..., ...}, ...]
+            local cards = (type(data) == "table") and (data.BasicCards or data.Cards or data) or nil
+            if type(cards) == "table" then
+                for i, card in ipairs(cards) do
+                    if type(card) == "table" then
+                        local rarity = tostring(card.Rarity or card.rarity or ""):lower()
+                        local score = rarityScore(rarity)
+                        if score > bestScore then
+                            bestScore = score
+                            bestIdx = i
+                        end
+                    end
                 end
-            else
-                cardFlag = false
             end
+
+            -- Small delay so server finishes setting up session state
+            task.wait(0.1)
+            pcall(function() cardEv:FireServer("Pick", bestIdx) end)
+        end)
+    else
+        -- Fallback: resolve after Adventure folder appears
+        task.spawn(function()
+            local ody = Net:WaitForChild("Odyssey", 30)
+            if not ody then return end
+            local adv = ody:WaitForChild("Adventure", 30)
+            if not adv then return end
+            local ev = adv:WaitForChild("CardPickEvent", 30)
+            if not ev then return end
+            ev.OnClientEvent:Connect(function(action, data)
+                if action ~= "Offer" then return end
+                if not (getAutoPick() or getAutoRagnawCards()) then return end
+                local bestIdx = 1
+                local bestScore = -1
+                local cards = (type(data) == "table") and (data.BasicCards or data.Cards or data) or nil
+                if type(cards) == "table" then
+                    for i, card in ipairs(cards) do
+                        if type(card) == "table" then
+                            local rarity = tostring(card.Rarity or card.rarity or ""):lower()
+                            local score = rarityScore(rarity)
+                            if score > bestScore then bestScore = score; bestIdx = i end
+                        end
+                    end
+                end
+                task.wait(0.1)
+                pcall(function() ev:FireServer("Pick", bestIdx) end)
+            end)
         end)
     end
 end
