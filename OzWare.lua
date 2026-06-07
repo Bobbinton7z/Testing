@@ -1446,154 +1446,92 @@ local function requestNextRoom()
     if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
 end
 
--- ── Simple direct-fire automation ────────────────────────────────
--- Shop, unit reward, and chests work by firing remotes directly.
--- Server validates state — if not applicable it's a no-op.
+-- ── Odyssey automation: event-driven ────────────────────────────
+-- Each function fires ONCE when the server event fires. No spam.
 do
-    local clock = 0
-    RunSvc.Heartbeat:Connect(function()
-        if not inGameMode() then return end
-        local now = os.clock()
-        if now - clock < 1.5 then return end
-        clock = now
+    local advNet = Net:FindFirstChild("Odyssey")
+    advNet = advNet and advNet:FindFirstChild("Adventure")
 
-        -- Skip shop: server closes it if open, ignores if not
-        if getAutoSkipShop() then
-            local ev = getONet("ShopEvent")
-            if ev then pcall(function() ev:FireServer("Close") end) end
-        end
-
-        -- Skip unit reward: ONLY fire when the reward panel (Frame >400px) is visible
-        if getSkipUnitReward() then
-            local hud = getAdventureHUD()
-            if hud then
-                for _, child in ipairs(hud:GetChildren()) do
-                    if child.Name == "Frame" and child:IsA("GuiObject")
-                    and child.Visible and child.AbsoluteSize.X > 400 then
-                        local ev = getONet("UnitRewardEvent")
-                        if ev then pcall(function() ev:FireServer("Skip") end) end
-                        break
-                    end
-                end
-            end
-        end
-    end)
-end
-
--- Chests: fire instantly when each OdysseyChest model appears in workspace.Ignore
-do
-    local function tryOpenChest(model)
-        if not getAutoCollectChests() then return end
-        if not model.Name:sub(1,13) == "OdysseyChest_" then return end
-        if model.Name:sub(1,17) == "OdysseyChestPing_" then return end
-        local uuid = model.Name:sub(14)
-        local cr = getONet("OdysseyChest")
-        if not cr then
-            local sm = Net:FindFirstChild("StageMechanics")
-            cr = sm and sm:FindFirstChild("OdysseyChest")
-        end
-        if cr then pcall(function() cr:FireServer("OpenChest", uuid) end) end
-    end
-
-    -- Watch for chests spawning
-    local ignoreFolder = workspace:FindFirstChild("Ignore")
-    if ignoreFolder then
-        ignoreFolder.ChildAdded:Connect(function(model)
-            task.wait(0.1) -- tiny delay for model to fully replicate
-            tryOpenChest(model)
-        end)
-        -- Also open any chests already present
-        task.spawn(function()
-            while true do
-                task.wait(1)
-                if not getAutoCollectChests() or not inGameMode() then continue end
-                local folder = workspace:FindFirstChild("Ignore")
-                if not folder then continue end
-                for _, model in ipairs(folder:GetChildren()) do
-                    tryOpenChest(model)
-                end
-            end
+    -- Vote: fire once when VoteStarted received
+    local voteEv = advNet and advNet:FindFirstChild("VoteEvent")
+    if voteEv then
+        voteEv.OnClientEvent:Connect(function(action)
+            if action ~= "VoteStarted" then return end
+            if not getAutoNextRoom() then return end
+            task.spawn(requestNextRoom)
         end)
     end
-    -- Also hook if Ignore folder appears later
-    workspace.ChildAdded:Connect(function(child)
-        if child.Name == "Ignore" then
-            child.ChildAdded:Connect(function(model)
-                task.wait(0.1)
-                tryOpenChest(model)
-            end)
-        end
-    end)
-end
 
--- ── Card pick: respond to server Offer via OnClientEvent ─────────
--- Decompiled source confirmed:
---   - Offer data structure: {Kind, Options=[{Rarity, CardName, ...}], ExistingCards, RerollsRemaining}
---   - Game fires CardPickEvent:FireServer("Pick", index) with no extra token
---   - v_u_49 (reactive source) stores offer; UI mounts after this is set
--- We use task.defer to let the game's own OnClientEvent handler run first
--- (which sets up the reactive state), then fire our pick in the next frame.
-do
-    local function connectCardPick(ev)
-        ev.OnClientEvent:Connect(function(action, data)
-            if action ~= "Offer" then return end
-            if not (getAutoPick() or getAutoRagnawCards()) then return end
-            if not inGameMode() then return end
-
-            -- Let game's own handler run first (sets reactive state, mounts panel)
+    -- Shop: fire Close once when shop opens
+    local shopEvL = advNet and advNet:FindFirstChild("ShopEvent")
+    if shopEvL then
+        shopEvL.OnClientEvent:Connect(function(action)
+            if action ~= "Open" then return end
+            if not getAutoSkipShop() then return end
             task.defer(function()
-                -- Find best card from data.Options (confirmed field name from decompile)
-                local bestIdx = 1
-                local bestScore = -1
-                local options = type(data) == "table" and data.Options or nil
-                if type(options) == "table" then
-                    for i, card in ipairs(options) do
-                        if type(card) == "table" then
-                            local rarity = tostring(card.Rarity or ""):lower()
-                            local score = rarityScore(rarity)
-                            if score > bestScore then
-                                bestScore = score
-                                bestIdx = i
-                            end
-                        end
-                    end
-                end
-
-                pcall(function() ev:FireServer("Pick", bestIdx) end)
+                pcall(function() shopEvL:FireServer("Close") end)
             end)
         end)
     end
 
-    -- Try immediate connection
-    local ody = Net:FindFirstChild("Odyssey")
-    local adv = ody and ody:FindFirstChild("Adventure")
-    local ev  = adv and adv:FindFirstChild("CardPickEvent")
-    if ev then
-        connectCardPick(ev)
-    else
-        task.spawn(function()
-            local o = Net:WaitForChild("Odyssey", 60)
-            if not o then return end
-            local a = o:WaitForChild("Adventure", 60)
-            if not a then return end
-            local e = a:WaitForChild("CardPickEvent", 60)
-            if not e then return end
-            connectCardPick(e)
+    -- Unit reward: fire Skip once when offer received
+    local unitEvL = advNet and advNet:FindFirstChild("UnitRewardEvent")
+    if unitEvL then
+        unitEvL.OnClientEvent:Connect(function(action)
+            if action ~= "Offer" then return end
+            if not getSkipUnitReward() then return end
+            task.defer(function()
+                pcall(function() unitEvL:FireServer("Skip", nil) end)
+            end)
         end)
     end
+
+    -- Treasure: collect chests when floor begins
+    local treasureEvL = advNet and advNet:FindFirstChild("TreasureEvent")
+    if treasureEvL then
+        treasureEvL.OnClientEvent:Connect(function(action)
+            if action ~= "Begin" then return end
+            if not getAutoCollectChests() then return end
+            task.spawn(function()
+                task.wait(0.3)
+                collectAndCloseTreasure()
+            end)
+        end)
+    end
+
+    -- Chests: open instantly when spawned in workspace.Ignore
+    local openedChestIds = {}
+    local function hookIgnore(folder)
+        folder.ChildAdded:Connect(function(model)
+            if not getAutoCollectChests() then return end
+            local n = model.Name
+            if n:sub(1,13) ~= "OdysseyChest_" then return end
+            if n:sub(1,17) == "OdysseyChestPing_" then return end
+            if openedChestIds[n] then return end
+            openedChestIds[n] = true
+            task.wait(0.1)
+            local sm = Net:FindFirstChild("StageMechanics")
+            local cr = sm and sm:FindFirstChild("OdysseyChest")
+            if cr then pcall(function() cr:FireServer("OpenChest", n:sub(14)) end) end
+        end)
+    end
+    local ignoreFolder = workspace:FindFirstChild("Ignore")
+    if ignoreFolder then hookIgnore(ignoreFolder) end
+    workspace.ChildAdded:Connect(function(c)
+        if c.Name == "Ignore" then openedChestIds = {}; hookIgnore(c) end
+    end)
 end
 
--- Auto Next Room heartbeat
+-- Auto Next Room fallback heartbeat (3s interval, in case VoteStarted was missed)
 do
     local roomClock = 0
     RunSvc.Heartbeat:Connect(function()
         if not getAutoNextRoom() then return end
         if not inGameMode() then return end
         local now = os.clock()
-        if now - roomClock >= 2 then
-            roomClock = now
-            task.spawn(requestNextRoom)
-        end
+        if now - roomClock < 3 then return end
+        roomClock = now
+        task.spawn(requestNextRoom)
     end)
 end
 
