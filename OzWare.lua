@@ -1194,6 +1194,193 @@ onBoostFPS(function(on)
     end
 end)
 
+-- ── Modifier Selector ─────────────────────────────────────────────
+do
+local HttpSvc      = game:GetService("HttpService")
+local AUTO_SAVE    = "OzWare_mod_auto.json"
+local RESTART_SAVE = "OzWare_mod_restart.json"
+
+-- Two separate priority tables
+local autoPri    = {}  -- for Auto Pick (all modifiers)
+local restartPri = {}  -- for Restart Modifier (starting only)
+pcall(function()
+    if isfile and isfile(AUTO_SAVE) then
+        local t = HttpSvc:JSONDecode(readfile(AUTO_SAVE))
+        if type(t) == "table" then autoPri = t end
+    end
+end)
+pcall(function()
+    if isfile and isfile(RESTART_SAVE) then
+        local t = HttpSvc:JSONDecode(readfile(RESTART_SAVE))
+        if type(t) == "table" then restartPri = t end
+    end
+end)
+local function saveAuto()    pcall(function() writefile(AUTO_SAVE,    HttpSvc:JSONEncode(autoPri))    end) end
+local function saveRestart() pcall(function() writefile(RESTART_SAVE, HttpSvc:JSONEncode(restartPri)) end) end
+
+local modSec = section(gamePage, "Modifier Selector", 3)
+
+-- ── AUTO PICK MODIFIER ────────────────────────────────────────────
+local _, getAutoMod = toggle(modSec, "Auto Pick Modifier", 1, false, "game.auto_modifier")
+label(modSec, "Picks highest-priority modifier when offered", 2)
+
+-- Collapsible: ALL modifiers (Additive + Starting)
+local allColBtn = Instance.new("TextButton", modSec)
+allColBtn.Size=UDim2.new(1,0,0,28); allColBtn.BackgroundColor3=C.PANEL
+allColBtn.BorderSizePixel=0; allColBtn.LayoutOrder=3
+allColBtn.Text="▼  All Modifier Priorities"
+allColBtn.TextColor3=C.ACCENT2; allColBtn.TextSize=12; allColBtn.Font=FONT_SEMI
+allColBtn.AutoButtonColor=false; allColBtn.ZIndex=3
+corner(allColBtn,7); stroke(allColBtn,C.BORDER,1)
+
+local allListFrame = Instance.new("Frame", modSec)
+allListFrame.Size=UDim2.new(1,0,0,0); allListFrame.AutomaticSize=Enum.AutomaticSize.Y
+allListFrame.BackgroundTransparency=1; allListFrame.BorderSizePixel=0
+allListFrame.LayoutOrder=4; allListFrame.ClipsDescendants=false
+listLayout(allListFrame, nil, 4)
+
+local allOpen = true
+allColBtn.MouseButton1Click:Connect(function()
+    allOpen = not allOpen
+    allListFrame.Visible = allOpen
+    allColBtn.Text = (allOpen and "▼" or "▶") .. "  All Modifier Priorities"
+end)
+
+-- ── RESTART MODIFIER ──────────────────────────────────────────────
+local _, getRestartMod = toggle(modSec, "Restart Modifier", 5, false, "game.restart_modifier")
+label(modSec, "Restarts match until a priority starting modifier appears", 6)
+
+-- Collapsible: Starting modifiers only
+local rstColBtn = Instance.new("TextButton", modSec)
+rstColBtn.Size=UDim2.new(1,0,0,28); rstColBtn.BackgroundColor3=C.PANEL
+rstColBtn.BorderSizePixel=0; rstColBtn.LayoutOrder=7
+rstColBtn.Text="▼  Starting Modifier Priorities"
+rstColBtn.TextColor3=C.ACCENT2; rstColBtn.TextSize=12; rstColBtn.Font=FONT_SEMI
+rstColBtn.AutoButtonColor=false; rstColBtn.ZIndex=3
+corner(rstColBtn,7); stroke(rstColBtn,C.BORDER,1)
+
+local rstListFrame = Instance.new("Frame", modSec)
+rstListFrame.Size=UDim2.new(1,0,0,0); rstListFrame.AutomaticSize=Enum.AutomaticSize.Y
+rstListFrame.BackgroundTransparency=1; rstListFrame.BorderSizePixel=0
+rstListFrame.LayoutOrder=8; rstListFrame.ClipsDescendants=false
+listLayout(rstListFrame, nil, 4)
+
+local rstOpen = true
+rstColBtn.MouseButton1Click:Connect(function()
+    rstOpen = not rstOpen
+    rstListFrame.Visible = rstOpen
+    rstColBtn.Text = (rstOpen and "▼" or "▶") .. "  Starting Modifier Priorities"
+end)
+
+-- Row builder
+local function makeModRow(parent, name, priTable, saveFn, order)
+    local row = Instance.new("Frame", parent)
+    row.Size=UDim2.new(1,0,0,32); row.BackgroundColor3=C.CARD
+    row.BorderSizePixel=0; row.LayoutOrder=order or 999; row.ZIndex=3
+    corner(row,6); stroke(row,C.BORDER,1)
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size=UDim2.new(1,-66,1,0); lbl.Position=UDim2.new(0,8,0,0)
+    lbl.BackgroundTransparency=1; lbl.Text=name
+    lbl.TextColor3=C.TEXT; lbl.TextSize=12; lbl.Font=FONT_REG
+    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4
+    lbl.TextTruncate=Enum.TextTruncate.AtEnd
+    local box = Instance.new("TextBox", row)
+    box.Size=UDim2.new(0,52,0,24); box.AnchorPoint=Vector2.new(1,0.5)
+    box.Position=UDim2.new(1,-4,0.5,0)
+    box.BackgroundColor3=C.BG; box.BorderSizePixel=0
+    box.Text=tostring(priTable[name] or 0)
+    box.PlaceholderText="0"; box.PlaceholderColor3=C.DIM
+    box.TextColor3=C.ACCENT2; box.TextSize=13; box.Font=FONT_BOLD
+    box.TextXAlignment=Enum.TextXAlignment.Center; box.ZIndex=4
+    corner(box,5); stroke(box,C.BORDER,1)
+    box.FocusLost:Connect(function()
+        local n = tonumber(box.Text) or 0
+        priTable[name] = n; box.Text = tostring(n); saveFn()
+    end)
+end
+
+-- Group header helper
+local function groupHdr(parent, text, order)
+    local h = Instance.new("TextLabel", parent)
+    h.Size=UDim2.new(1,0,0,20); h.BackgroundColor3=C.PANEL
+    h.BorderSizePixel=0; h.Text="── "..text.." ──"
+    h.TextColor3=C.ACCENT2; h.TextSize=11; h.Font=FONT_BOLD
+    h.ZIndex=3; h.LayoutOrder=order; corner(h,5)
+end
+
+-- Populate ALL list (Additive + Starting)
+local ADDITIVE = {"Strong","Fast","Dodge","Damage","Cooldown","Range","Slayer",
+    "Press It","Common Loot","Uncommon Loot","Champions","Precise Attack",
+    "Planning Ahead","Harvest"}
+local STARTING = {"Immunity","Exploding","Revitalize","Thrice","Quake","Regen",
+    "Shielded","Drowsy","No Trait No Problem","Money Surge","King's Burden",
+    "Lifeline","Exterminator","Warding off Evil","Fisticuffs","Limit Break",
+    "Tyrant Destroyer","Sphere Finder","High Class","Tyrant Arrives"}
+
+local o = 1
+groupHdr(allListFrame, "Additive", o); o=o+1
+for _, n in ipairs(ADDITIVE) do makeModRow(allListFrame, n, autoPri, saveAuto, o); o=o+1 end
+groupHdr(allListFrame, "Starting", o); o=o+1
+for _, n in ipairs(STARTING) do makeModRow(allListFrame, n, autoPri, saveAuto, o); o=o+1 end
+
+-- Populate RESTART list (Starting only)
+local r = 1
+groupHdr(rstListFrame, "Starting", r); r=r+1
+for _, n in ipairs(STARTING) do makeModRow(rstListFrame, n, restartPri, saveRestart, r); r=r+1 end
+
+-- ── Event logic ──────────────────────────────────────────────────
+local modPickFired = false
+local modEv = Net:FindFirstChild("ModifierEvent")
+if modEv then
+    modEv.OnClientEvent:Connect(function(action, mods)
+        if action == "End" then modPickFired = false; return end
+        if action ~= "Start" then return end
+        modPickFired = false
+
+        if not getAutoMod() and not getRestartMod() then return end
+        if modPickFired then return end
+
+        -- Collect offered modifier names
+        local offered = {}
+        if type(mods) == "table" then
+            for _, mod in ipairs(mods) do
+                local n = type(mod) == "table" and mod.Name or tostring(mod)
+                if n and n ~= "" then offered[n] = true end
+            end
+        end
+
+        -- Auto Pick: highest autoPri modifier from offered set
+        if getAutoMod() then
+            local bestName, bestPri = nil, 0
+            for n in pairs(offered) do
+                local pri = autoPri[n] or 0
+                if pri > bestPri then bestName=n; bestPri=pri end
+            end
+            if bestName and bestPri > 0 then
+                modPickFired = true
+                task.defer(function()
+                    pcall(function() modEv:FireServer("Choose", bestName) end)
+                end)
+                return
+            end
+        end
+
+        -- Restart Modifier: restart if no priority starting mod offered
+        if getRestartMod() and not modPickFired then
+            local found = false
+            for n in pairs(offered) do
+                if (restartPri[n] or 0) > 0 then found = true; break end
+            end
+            if not found then
+                modPickFired = true
+                local rev = Net:FindFirstChild("MatchRestartSettingEvent")
+                if rev then pcall(function() rev:FireServer("Vote") end) end
+            end
+        end
+    end)
+end
+end -- close modifier do block
+
 end -- close Game Tab do block
 
 -- ======================
@@ -1218,211 +1405,6 @@ label(autoSec, "Skips unit reward panel after elite rooms", 12)
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
 
--- ── Modifier Selector ────────────────────────────────────────────
-do
-local MOD_SAVE = "OzWare_modifiers.json"
-local HttpSvc  = game:GetService("HttpService")
-
--- Load saved modifier priorities: {name = priority}
-local modPriorities = {}
-pcall(function()
-    if isfile and isfile(MOD_SAVE) then
-        local raw = readfile(MOD_SAVE)
-        local t = HttpSvc:JSONDecode(raw)
-        if type(t) == "table" then modPriorities = t end
-    end
-end)
-local function saveModPriorities()
-    pcall(function()
-        writefile(MOD_SAVE, HttpSvc:JSONEncode(modPriorities))
-    end)
-end
-
--- Section header
-local modSec = section(odysseyPage, "Modifier Selector", 2)
-local _, getAutoMod,     onAutoMod     = toggle(modSec, "Auto Pick Modifier",      1, false, "odyssey.auto_modifier")
-label(modSec, "Picks highest-priority modifier when offered", 2)
-local _, getRestartMod,  onRestartMod  = toggle(modSec, "Restart if not offered",  3, false, "odyssey.modifier_restart")
-label(modSec, "Restarts match if no priority modifier is offered", 4)
-
--- Collapsible modifier list
-local collapseBtn = Instance.new("TextButton", modSec)
-collapseBtn.Size=UDim2.new(1,0,0,30); collapseBtn.BackgroundColor3=C.PANEL
-collapseBtn.BorderSizePixel=0; collapseBtn.Text="▼  Modifier Priorities"
-collapseBtn.TextColor3=C.ACCENT2; collapseBtn.TextSize=12; collapseBtn.Font=FONT_SEMI
-collapseBtn.AutoButtonColor=false; collapseBtn.LayoutOrder=5; collapseBtn.ZIndex=3
-corner(collapseBtn,7); stroke(collapseBtn,C.BORDER,1)
-
-local modListFrame = Instance.new("Frame", modSec)
-modListFrame.Size=UDim2.new(1,0,0,0); modListFrame.AutomaticSize=Enum.AutomaticSize.Y
-modListFrame.BackgroundTransparency=1; modListFrame.BorderSizePixel=0
-modListFrame.LayoutOrder=6; modListFrame.ClipsDescendants=true
-listLayout(modListFrame, nil, 4)
-label(modListFrame, "Modifiers appear here when offered in a run.", 1)
-
-local listOpen = true
-collapseBtn.MouseButton1Click:Connect(function()
-    listOpen = not listOpen
-    modListFrame.Visible = listOpen
-    collapseBtn.Text = (listOpen and "▼" or "▶") .. "  Modifier Priorities"
-end)
-
-local modRows = {}  -- name → {frame, textBox}
-local function ensureModRow(name, _, layoutOrder)
-    if modRows[name] then return end
-    local row = Instance.new("Frame", modListFrame)
-    row.Size=UDim2.new(1,0,0,32); row.BackgroundColor3=C.CARD
-    row.BorderSizePixel=0; row.LayoutOrder=layoutOrder or 999; row.ZIndex=3
-    corner(row,6); stroke(row,C.BORDER,1)
-
-    local nameLbl = Instance.new("TextLabel", row)
-    nameLbl.Size=UDim2.new(1,-66,1,0); nameLbl.Position=UDim2.new(0,8,0,0)
-    nameLbl.BackgroundTransparency=1; nameLbl.Text=name
-    nameLbl.TextColor3=C.TEXT; nameLbl.TextSize=12; nameLbl.Font=FONT_REG
-    nameLbl.TextXAlignment=Enum.TextXAlignment.Left; nameLbl.ZIndex=4
-    nameLbl.TextTruncate=Enum.TextTruncate.AtEnd
-
-    local priBox = Instance.new("TextBox", row)
-    priBox.Size=UDim2.new(0,52,0,24); priBox.AnchorPoint=Vector2.new(1,0.5)
-    priBox.Position=UDim2.new(1,-4,0.5,0)
-    priBox.BackgroundColor3=C.BG; priBox.BorderSizePixel=0
-    priBox.Text=tostring(modPriorities[name] or 0)
-    priBox.PlaceholderText="0"; priBox.PlaceholderColor3=C.DIM
-    priBox.TextColor3=C.ACCENT2; priBox.TextSize=13; priBox.Font=FONT_BOLD
-    priBox.TextXAlignment=Enum.TextXAlignment.Center; priBox.ZIndex=4
-    corner(priBox,5); stroke(priBox,C.BORDER,1)
-
-    priBox.FocusLost:Connect(function()
-        local n = tonumber(priBox.Text) or 0
-        modPriorities[name] = n
-        priBox.Text = tostring(n)
-        saveModPriorities()
-    end)
-
-    modRows[name] = {frame=row, box=priBox}
-end
-
--- Restore previously seen modifiers from saved data
--- Pre-populate with all known modifiers from ModifierData
-local KNOWN_MODIFIERS = {
-    -- ── Additive (appear mid-run in most maps) ────────────────────
-    { name = "Strong",          rarity = "Rare",       group = "Additive" },
-    { name = "Fast",            rarity = "Uncommon",   group = "Additive" },
-    { name = "Dodge",           rarity = "Rare",       group = "Additive" },
-    { name = "Damage",          rarity = "Uncommon",   group = "Additive" },
-    { name = "Cooldown",        rarity = "Uncommon",   group = "Additive" },
-    { name = "Range",           rarity = "Uncommon",   group = "Additive" },
-    { name = "Slayer",          rarity = "Uncommon",   group = "Additive" },
-    { name = "Press It",        rarity = "Uncommon",   group = "Additive" },
-    { name = "Common Loot",     rarity = "Rare",       group = "Additive" },
-    { name = "Uncommon Loot",   rarity = "Rare",       group = "Additive" },
-    { name = "Champions",       rarity = "Rare",       group = "Additive" },
-    { name = "Precise Attack",  rarity = "Super Rare", group = "Additive" },
-    { name = "Planning Ahead",  rarity = "Super Rare", group = "Additive" },
-    { name = "Harvest",         rarity = "Super Rare", group = "Additive" },
-    -- ── Starting (appear at match start, map-specific) ─────────────
-    { name = "Immunity",        rarity = "Special",    group = "Starting" },
-    { name = "Exploding",       rarity = "Special",    group = "Starting" },
-    { name = "Revitalize",      rarity = "Special",    group = "Starting" },
-    { name = "Thrice",          rarity = "Special",    group = "Starting" },
-    { name = "Quake",           rarity = "Special",    group = "Starting" },
-    { name = "Regen",           rarity = "Special",    group = "Starting" },
-    { name = "Shielded",        rarity = "Special",    group = "Starting" },
-    { name = "Drowsy",          rarity = "Special",    group = "Starting" },
-    { name = "No Trait No Problem", rarity = "Special", group = "Starting" },
-    { name = "Money Surge",     rarity = "Special",    group = "Starting" },
-    { name = "King's Burden",   rarity = "Special",    group = "Starting" },
-    { name = "Lifeline",        rarity = "Special",    group = "Starting" },
-    { name = "Exterminator",    rarity = "Special",    group = "Starting" },
-    { name = "Warding off Evil",rarity = "Special",    group = "Starting" },
-    { name = "Fisticuffs",      rarity = "Special",    group = "Starting" },
-    { name = "Limit Break",     rarity = "Special",    group = "Starting" },
-    { name = "Tyrant Destroyer",rarity = "Special",    group = "Starting" },
-    { name = "Sphere Finder",   rarity = "Special",    group = "Starting" },
-    { name = "High Class",      rarity = "Special",    group = "Starting" },
-    { name = "Tyrant Arrives",  rarity = "Special",    group = "Starting" },
-}
-
--- Remove placeholder label
-for _, c in ipairs(modListFrame:GetChildren()) do
-    if c:IsA("TextLabel") then c:Destroy() end
-end
-
--- Add group headers + pre-populated rows
-local lastGroup = nil
-local rowOrder = 10
-local function addGroupHeader(groupName)
-    local hdr = Instance.new("TextLabel", modListFrame)
-    hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundColor3=C.PANEL
-    hdr.BorderSizePixel=0; hdr.Text="── "..groupName.." ──"
-    hdr.TextColor3=C.ACCENT2; hdr.TextSize=11; hdr.Font=FONT_BOLD
-    hdr.ZIndex=3; hdr.LayoutOrder=rowOrder; rowOrder=rowOrder+1
-    corner(hdr,5)
-end
-
-for _, mod in ipairs(KNOWN_MODIFIERS) do
-    if mod.group ~= lastGroup then
-        addGroupHeader(mod.group)
-        lastGroup = mod.group
-    end
-    ensureModRow(mod.name, mod.rarity, rowOrder)
-    rowOrder = rowOrder + 1
-end
-
--- Also restore any previously saved modifiers not in the known list
-for name, _ in pairs(modPriorities) do
-    if not modRows[name] then
-        ensureModRow(name, "Odyssey", rowOrder)
-        rowOrder = rowOrder + 1
-    end
-end
-
--- Listen for modifier offers — fire exactly once per offer
-local modPickFired = false
-local modEv = Net:FindFirstChild("ModifierEvent")
-if modEv then
-    modEv.OnClientEvent:Connect(function(action, mods)
-        if action == "End" then
-            modPickFired = false  -- reset for next offer
-            return
-        end
-        if action ~= "Start" then return end
-        modPickFired = false  -- new offer, reset flag
-
-        -- Add any new modifier names discovered this offer
-        if type(mods) == "table" then
-            for _, mod in ipairs(mods) do
-                local n = type(mod) == "table" and mod.Name or tostring(mod)
-                if n and n ~= "" then ensureModRow(n, nil, rowOrder) end
-            end
-        end
-
-        -- Auto-pick: fire once, only if a priority modifier is offered
-        if not getAutoMod() then return end
-        if modPickFired then return end
-
-        local bestName, bestPri = nil, 0
-        if type(mods) == "table" then
-            for _, mod in ipairs(mods) do
-                local n = type(mod) == "table" and mod.Name or tostring(mod)
-                local pri = (n and modPriorities[n]) or 0
-                if pri > bestPri then bestName=n; bestPri=pri end
-            end
-        end
-
-        if bestName and bestPri > 0 then
-            modPickFired = true
-            task.defer(function()
-                pcall(function() modEv:FireServer("Choose", bestName) end)
-            end)
-        elseif getRestartMod() then
-            modPickFired = true
-            local rev = Net:FindFirstChild("MatchRestartSettingEvent")
-            if rev then pcall(function() rev:FireServer("Vote") end) end
-        end
-    end)
-end
-end -- close modifier do block
 -- ======================
 -- Confirmed remote locations (UPD 12.5):
 --   Networking.Units.SummonEvent                          — summoning
