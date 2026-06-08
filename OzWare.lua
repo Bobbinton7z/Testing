@@ -10,10 +10,13 @@ local RunSvc       = game:GetService("RunService")
 local UIS          = game:GetService("UserInputService")
 local HttpService  = game:GetService("HttpService")
 
--- task.defer may not exist in some Delta builds; fall back to task.spawn
-if task and not task.defer then task.defer = task.spawn end
-
-warn("[OzWare] 1: services ready")
+-- task.defer / task.delay may not exist in all Delta builds; polyfill both
+if task and not task.defer then
+    task.defer = task.spawn
+end
+if task and not task.delay then
+    task.delay = function(t, f) task.spawn(function() task.wait(t); f() end) end
+end
 
 local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
@@ -24,7 +27,6 @@ local realGui   = player:WaitForChild("PlayerGui")
 task.wait(2)
 
 local Net = RS:WaitForChild("Networking")
-warn("[OzWare] 2: Net found")
 
 -- ======================
 -- THEME (dark purple / grunge)
@@ -664,7 +666,6 @@ end
 -- ======================
 -- LOBBY TAB - AUTO SUMMON TOGGLES
 -- ======================
-warn("[OzWare] 3: Lobby tab")
 do
 local lobbyPage = tabPages["Lobby"]
 
@@ -815,7 +816,6 @@ end
 -- ======================
 -- JOINER TAB
 -- ======================
-warn("[OzWare] 4: Joiner tab")
 do
 local joinerPage = tabPages["Joiner"]
 
@@ -952,7 +952,6 @@ end
 -- ======================
 -- GAME TAB
 -- ======================
-warn("[OzWare] 5: Game tab")
 do
 local gamePage = tabPages["Game"]
 
@@ -1527,7 +1526,6 @@ end -- close Game Tab do block
 -- ======================
 -- ODYSSEY TAB  (dynamic, no UUIDs)
 -- ======================
-warn("[OzWare] 6: Odyssey tab")
 do
 local odysseyPage = tabPages["Odyssey"]
 local autoSec = section(odysseyPage, "Adventure", 1)
@@ -2076,7 +2074,6 @@ end -- close Odyssey do block
 -- ======================
 -- SPRING LTM TAB
 -- ======================
-warn("[OzWare] 7: Spring tab")
 do
 local springPage = tabPages["SpringLTM"]
 local springSec = section(springPage, "Spring LTM", 1)
@@ -2156,7 +2153,6 @@ end
 -- ======================
 -- MACRO TAB
 -- ======================
-warn("[OzWare] 8: Macro tab")
 do
 local macroPage = tabPages["Macro"]
 local Net        = RS:FindFirstChild("Networking")
@@ -2540,10 +2536,8 @@ end -- close Macro Tab do block
 -- ======================
 -- BOOT
 -- ======================
-warn("[OzWare] 9: boot")
 switchTab("Lobby")
 notify("OzWare V3 loaded", true)
-warn("[OzWare] 10: opening window")
 task.spawn(openWindow) -- task.defer replaced with task.spawn for executor compat
 
 -- ======================
