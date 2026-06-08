@@ -950,30 +950,30 @@ local currentWave = 0
 do
     local waveConn = nil
 
+    local function parseWave(txt)
+        -- Handles: "5", "5/15", "5/∞", "Wave 5", "Wave 5/15"
+        return tonumber(txt:match("(%d+)"))
+    end
+
     local function connectWaveLabel()
-        local hud  = realGui:FindFirstChild("HUD")
-        local map  = hud  and hud:FindFirstChild("Map")
-        local lbl  = map  and map:FindFirstChild("WavesAmount")
+        local hud = realGui:FindFirstChild("HUD")
+        local map = hud and hud:FindFirstChild("Map")
+        local lbl = map and map:FindFirstChild("WavesAmount")
         if not lbl then return false end
-        -- Read immediately
-        local n = tonumber(lbl.Text:match("^(%d+)"))
+        local n = parseWave(lbl.Text)
         if n then currentWave = n end
-        -- Connect signal so every wave change updates instantly
         if waveConn then waveConn:Disconnect() end
         waveConn = lbl:GetPropertyChangedSignal("Text"):Connect(function()
-            local v = tonumber(lbl.Text:match("^(%d+)"))
+            local v = parseWave(lbl.Text)
             if v then currentWave = v end
         end)
         return true
     end
 
-    -- Try to connect now; retry via Heartbeat until HUD is ready
     local connected = false
     RunSvc.Heartbeat:Connect(function()
         if not inGameMode() then
-            currentWave = 0
-            connected   = false
-            return
+            currentWave = 0; connected = false; return
         end
         if not connected then
             connected = connectWaveLabel()
@@ -989,7 +989,21 @@ label(matchSec, "Votes to restart when the wave number is reached", 2)
 
 -- Wave number stepper (default 15, live-updating)
 do
-    local targetWave = 15
+    local WAVE_SAVE = "OzWare_settings.json"
+    local settings  = {}
+    pcall(function()
+        if isfile and isfile(WAVE_SAVE) then
+            local t = game:GetService("HttpService"):JSONDecode(readfile(WAVE_SAVE))
+            if type(t) == "table" then settings = t end
+        end
+    end)
+    local function saveSettings()
+        pcall(function()
+            writefile(WAVE_SAVE, game:GetService("HttpService"):JSONEncode(settings))
+        end)
+    end
+
+    local targetWave = tonumber(settings.restartWave) or 15
     local ROW_ORDER  = 3
 
     local row = Instance.new("Frame")
@@ -1034,9 +1048,11 @@ do
     local restartFired = false
 
     local function setWave(n)
-        targetWave    = math.clamp(n, 1, 999)
-        numLbl.Text   = tostring(targetWave)
-        restartFired  = false  -- re-check immediately; fires if already past target
+        targetWave        = math.clamp(n, 1, 999)
+        numLbl.Text       = tostring(targetWave)
+        restartFired      = false
+        settings.restartWave = targetWave
+        saveSettings()
     end
 
     btnM.MouseButton1Click:Connect(function() setWave(targetWave - 1) end)
@@ -1225,19 +1241,6 @@ local function applyFPSBoost()
         end
     end
     for _, inst in ipairs(workspace:GetDescendants()) do simplify(inst) end
-    workspace.DescendantAdded:Connect(function(inst)
-        if not getBoostFPS() then return end
-        local cls = inst.ClassName
-        -- Only destroy/disable visual effects — skip expensive BasePart property sets
-        if cls == "ParticleEmitter" or cls == "Trail" or cls == "Beam"
-        or cls == "Smoke" or cls == "Fire" or cls == "Sparkles"
-        or cls == "Atmosphere" or cls == "Sky" or cls == "Clouds"
-        or cls == "PointLight" or cls == "SpotLight" or cls == "SurfaceLight" then
-            pcall(function() inst:Destroy() end)
-        elseif inst:IsA("Decal") or inst:IsA("Texture") then
-            pcall(function() inst.Transparency = 1 end)
-        end
-    end)
     notify("FPS Boost ON", true)
 end
 
@@ -2007,20 +2010,19 @@ local springPage = tabPages["SpringLTM"]
 local springSec = section(springPage, "Spring LTM", 1)
 
 -- ── Confirm Placement ─────────────────────────────────────────────
--- UI path: PlayerGui.HUD.SpringEventHUD.WallPlacementHUD.ConfirmHolder
+-- UI path: PlayerGui.HUD.SpringEventHUD.WallPlacementHUD (watches whole panel)
 -- Remote:  Networking.SpringEvent.ConfirmPlacement
 local _, getConfirmPlacement = toggle(springSec, "Confirm Placement", 1, false, "spring.confirmplacement")
 label(springSec, "Auto-confirms wall placement when the placement phase begins", 2)
 do
     local confirmFired = false
-    local confirmHolder = nil
-    local holderConn   = nil
+    local wpHUD        = nil
+    local wpConn       = nil
 
-    local function getConfirmHolder()
-        local hud    = realGui:FindFirstChild("HUD")
-        local sHUD   = hud   and hud:FindFirstChild("SpringEventHUD")
-        local wpHUD  = sHUD  and sHUD:FindFirstChild("WallPlacementHUD")
-        return wpHUD and wpHUD:FindFirstChild("ConfirmHolder")
+    local function getWallPlacementHUD()
+        local hud  = realGui:FindFirstChild("HUD")
+        local sHUD = hud  and hud:FindFirstChild("SpringEventHUD")
+        return sHUD and sHUD:FindFirstChild("WallPlacementHUD")
     end
 
     local function fireConfirm()
@@ -2031,26 +2033,27 @@ do
         if ev then pcall(function() ev:FireServer() end) end
     end
 
-    -- Heartbeat: find ConfirmHolder once, then watch via signal
+    local function hookWPHUD(panel)
+        wpHUD = panel
+        if wpConn then wpConn:Disconnect() end
+        wpConn = panel:GetPropertyChangedSignal("Visible"):Connect(function()
+            if panel.Visible and getConfirmPlacement() then
+                fireConfirm()
+            else
+                confirmFired = false
+            end
+        end)
+        -- Fire immediately if already visible when we connect
+        if panel.Visible and getConfirmPlacement() then fireConfirm() end
+    end
+
+    -- Heartbeat: find WallPlacementHUD once, then rely on signal
     RunSvc.Heartbeat:Connect(function()
         if not getConfirmPlacement() then confirmFired = false; return end
         if not inGameMode()          then confirmFired = false; return end
-        -- Already watching a valid holder
-        if confirmHolder and confirmHolder.Parent then return end
-        -- Try to find it
-        confirmHolder = getConfirmHolder()
-        if not confirmHolder then return end
-        -- Connect visibility signal — fires only when state changes
-        if holderConn then holderConn:Disconnect() end
-        holderConn = confirmHolder:GetPropertyChangedSignal("Visible"):Connect(function()
-            if confirmHolder.Visible then
-                fireConfirm()
-            else
-                confirmFired = false  -- reset when placement phase ends
-            end
-        end)
-        -- Handle case where it was already visible when we found it
-        if confirmHolder.Visible then fireConfirm() end
+        if wpHUD and wpHUD.Parent   then return end  -- already hooked
+        local panel = getWallPlacementHUD()
+        if panel then hookWPHUD(panel) end
     end)
 end
 
