@@ -789,9 +789,9 @@ do
 local matchStartSec = section(lobbyPage, "Match Settings", 3)
 local _, getAutoSkipStart, onAutoSkipStart = toggle(matchStartSec, "Auto Start Match", 1, false, "lobby.autoskipstart")
 label(matchStartSec, "Automatically votes to start the match", 2)
-local settingsEvLobby = Net:FindFirstChild("SettingsEvent")
+local settingsEvLobby = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
 onAutoSkipStart(function()
-    local ev = settingsEvLobby or Net:FindFirstChild("SettingsEvent")
+    local ev = settingsEvLobby or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
     if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
 end)
 end
@@ -938,6 +938,26 @@ end
 do
 local gamePage = tabPages["Game"]
 
+-- Track current wave via WaveInfoEvent (more reliable than parsing UI text)
+local currentWave = 0
+do
+    local waveEv = Net:FindFirstChild("WaveInfoEvent")
+    if waveEv then
+        waveEv.OnClientEvent:Connect(function(data)
+            if type(data) == "table" then
+                currentWave = tonumber(data.Wave or data.Current or data[1]) or currentWave
+            elseif type(data) == "number" then
+                currentWave = data
+            end
+        end)
+    end
+    -- Reset wave on match end/restart
+    game:GetService("RunService").Heartbeat:Connect(function()
+        if not inGameMode() then currentWave = 0 end
+    end)
+end
+
+
 local matchSec = section(gamePage, "Match Controls", 1)
 
 -- Restart on Wave: votes to restart when the current wave reaches the target
@@ -989,7 +1009,6 @@ do
     corner(btnP,5)
 
     local restartFired = false
-    local waveCache    = nil
 
     local function setWave(n)
         targetWave    = math.clamp(n, 1, 999)
@@ -1005,22 +1024,8 @@ do
         if not getRestartOnWave() then restartFired = false; return end
         if not inGameMode() then restartFired = false; return end
 
-        -- Find or refresh the wave label (searches once, caches result)
-        if not waveCache or not waveCache.Parent then
-            waveCache = nil
-            for _, gui in ipairs(realGui:GetChildren()) do
-                for _, d in ipairs(gui:GetDescendants()) do
-                    if d:IsA("TextLabel") and d.Text:match("Wave%s+%d+/%d+") then
-                        waveCache = d; break
-                    end
-                end
-                if waveCache then break end
-            end
-        end
-        if not waveCache then return end
-
-        local cur = tonumber(waveCache.Text:match("Wave%s+(%d+)"))
-        if not cur then return end
+        local cur = currentWave
+        if cur == 0 then return end
 
         if cur >= targetWave and not restartFired then
             restartFired = true
@@ -1033,14 +1038,11 @@ end
 
 -- Skip Wave: toggle, fires every 3s while on and in-match
 local _, getSkipWave, onSkipWave = toggle(matchSec, "Skip Wave", 1, false, "game.skipwave")
--- Use game's own AutoSkipWaves setting — toggle it ON/OFF with SettingsEvent
--- This is cleaner than spamming SkipWaveEvent every few seconds
-local settingsEv = Net:FindFirstChild("SettingsEvent")
-onSkipWave(function(on)
-    local ev = settingsEv or Net:FindFirstChild("SettingsEvent")
-    if ev then
-        pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
-    end
+-- Correct path: Networking.Settings.SettingsEvent (NOT directly under Networking)
+local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+onSkipWave(function()
+    local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+    if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end) end
 end)
 
 -- ======================
@@ -1972,35 +1974,50 @@ local springPage = tabPages["SpringLTM"]
 local springSec = section(springPage, "Spring LTM", 1)
 
 -- ── Confirm Placement ─────────────────────────────────────────────
+-- UI path: PlayerGui.HUD.SpringEventHUD.WallPlacementHUD.ConfirmHolder
+-- Remote:  Networking.SpringEvent.ConfirmPlacement
 local _, getConfirmPlacement = toggle(springSec, "Confirm Placement", 1, false, "spring.confirmplacement")
-label(springSec, "Auto-confirms unit placement when the confirm UI appears", 2)
+label(springSec, "Auto-confirms wall placement when the placement phase begins", 2)
 do
     local confirmFired = false
+    local confirmHolder = nil
+    local holderConn   = nil
+
+    local function getConfirmHolder()
+        local hud    = realGui:FindFirstChild("HUD")
+        local sHUD   = hud   and hud:FindFirstChild("SpringEventHUD")
+        local wpHUD  = sHUD  and sHUD:FindFirstChild("WallPlacementHUD")
+        return wpHUD and wpHUD:FindFirstChild("ConfirmHolder")
+    end
+
+    local function fireConfirm()
+        if confirmFired then return end
+        confirmFired = true
+        local ev = Net:FindFirstChild("SpringEvent")
+        ev = ev and ev:FindFirstChild("ConfirmPlacement")
+        if ev then pcall(function() ev:FireServer() end) end
+    end
+
+    -- Heartbeat: find ConfirmHolder once, then watch via signal
     RunSvc.Heartbeat:Connect(function()
         if not getConfirmPlacement() then confirmFired = false; return end
-        if not inGameMode() then confirmFired = false; return end
-        -- Search realGui for any visible "Confirm" button
-        local found = nil
-        for _, gui in ipairs(realGui:GetChildren()) do
-            if not gui:IsA("ScreenGui") then continue end
-            for _, d in ipairs(gui:GetDescendants()) do
-                if d.Visible and (d:IsA("TextButton") or d:IsA("ImageButton"))
-                and d.Text and d.Text:lower():find("confirm") then
-                    found = d; break
-                end
+        if not inGameMode()          then confirmFired = false; return end
+        -- Already watching a valid holder
+        if confirmHolder and confirmHolder.Parent then return end
+        -- Try to find it
+        confirmHolder = getConfirmHolder()
+        if not confirmHolder then return end
+        -- Connect visibility signal — fires only when state changes
+        if holderConn then holderConn:Disconnect() end
+        holderConn = confirmHolder:GetPropertyChangedSignal("Visible"):Connect(function()
+            if confirmHolder.Visible then
+                fireConfirm()
+            else
+                confirmFired = false  -- reset when placement phase ends
             end
-            if found then break end
-        end
-        if found then
-            if not confirmFired then
-                confirmFired = true
-                local springEv = Net:FindFirstChild("SpringEvent")
-                local ev = springEv and springEv:FindFirstChild("ConfirmPlacement")
-                if ev then pcall(function() ev:FireServer() end) end
-            end
-        else
-            confirmFired = false  -- reset when UI disappears
-        end
+        end)
+        -- Handle case where it was already visible when we found it
+        if confirmHolder.Visible then fireConfirm() end
     end)
 end
 
@@ -2009,33 +2026,13 @@ local _, getWavePurchase = toggle(springSec, "Wave Purchase (Skip 5)", 3, false,
 label(springSec, "Purchases Skip Waves x5 at waves 5 → 10 → 15 → 20", 4)
 do
     local MILESTONES = {5, 10, 15, 20}
-    local fired = {}  -- {[5]=true, [10]=true, ...} tracks which were fired this match
-    local waveCache = nil
+    local fired = {}
     RunSvc.Heartbeat:Connect(function()
-        if not getWavePurchase() then
-            fired = {}; return
-        end
-        if not inGameMode() then
-            fired = {}; waveCache = nil; return
-        end
-        -- Find or refresh wave label
-        if not waveCache or not waveCache.Parent then
-            waveCache = nil
-            for _, gui in ipairs(realGui:GetChildren()) do
-                for _, d in ipairs(gui:GetDescendants()) do
-                    if d:IsA("TextLabel") and d.Text:match("Wave%s+%d+/%d+") then
-                        waveCache = d; break
-                    end
-                end
-                if waveCache then break end
-            end
-        end
-        if not waveCache then return end
-        local cur = tonumber(waveCache.Text:match("Wave%s+(%d+)"))
-        if not cur then return end
-        -- Reset if wave dropped below 5 (match restarted / new match)
+        if not getWavePurchase() then fired = {}; return end
+        if not inGameMode() then fired = {}; return end
+        local cur = currentWave
+        if cur == 0 then return end
         if cur < 5 then fired = {}; return end
-        -- Fire at each milestone once
         for _, w in ipairs(MILESTONES) do
             if cur >= w and not fired[w] then
                 fired[w] = true
