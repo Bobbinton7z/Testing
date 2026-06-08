@@ -48,19 +48,26 @@ local function getMapRoot()
         or workspace:FindFirstChild("Stage")
 end
 
+local _inGameCache = false
+local _inGameStamp = 0
 local function inGameMode()
-    if getMapRoot() then return true end
+    local now = os.clock()
+    if now - _inGameStamp < 0.5 then return _inGameCache end
+    _inGameStamp = now
+    -- Only re-evaluate every 0.5s — avoids 20+ FindFirstChild per frame
+    if getMapRoot() then _inGameCache = true; return true end
     local net = RS:FindFirstChild("Networking")
     local ody = net and net:FindFirstChild("Odyssey")
     local adv = ody and ody:FindFirstChild("Adventure")
-    if adv and adv:FindFirstChild("VoteEvent") then return true end
+    if adv and adv:FindFirstChild("VoteEvent") then _inGameCache = true; return true end
     for _, name in ipairs({
         "OdysseyRoom","AdventureRoom","Adventure","OdysseyMap","AdventureMap",
         "Odyssey","OdysseyStage","AdventureStage","OdysseyHolder","AdventureHolder",
         "GameMap","GameFolder","BattleMap","Match","MatchFolder",
     }) do
-        if workspace:FindFirstChild(name) then return true end
+        if workspace:FindFirstChild(name) then _inGameCache = true; return true end
     end
+    _inGameCache = false
     return false
 end
 
@@ -938,25 +945,41 @@ end
 do
 local gamePage = tabPages["Game"]
 
--- Track current wave via WaveInfoEvent (more reliable than parsing UI text)
+-- Track current wave via PlayerGui.HUD.Map.WavesAmount (confirmed path)
 local currentWave = 0
 do
-    local waveEv = Net:FindFirstChild("WaveInfoEvent")
-    if waveEv then
-        waveEv.OnClientEvent:Connect(function(data)
-            if type(data) == "table" then
-                currentWave = tonumber(data.Wave or data.Current or data[1]) or currentWave
-            elseif type(data) == "number" then
-                currentWave = data
-            end
+    local waveConn = nil
+
+    local function connectWaveLabel()
+        local hud  = realGui:FindFirstChild("HUD")
+        local map  = hud  and hud:FindFirstChild("Map")
+        local lbl  = map  and map:FindFirstChild("WavesAmount")
+        if not lbl then return false end
+        -- Read immediately
+        local n = tonumber(lbl.Text:match("^(%d+)"))
+        if n then currentWave = n end
+        -- Connect signal so every wave change updates instantly
+        if waveConn then waveConn:Disconnect() end
+        waveConn = lbl:GetPropertyChangedSignal("Text"):Connect(function()
+            local v = tonumber(lbl.Text:match("^(%d+)"))
+            if v then currentWave = v end
         end)
+        return true
     end
-    -- Reset wave on match end/restart
-    game:GetService("RunService").Heartbeat:Connect(function()
-        if not inGameMode() then currentWave = 0 end
+
+    -- Try to connect now; retry via Heartbeat until HUD is ready
+    local connected = false
+    RunSvc.Heartbeat:Connect(function()
+        if not inGameMode() then
+            currentWave = 0
+            connected   = false
+            return
+        end
+        if not connected then
+            connected = connectWaveLabel()
+        end
     end)
 end
-
 
 local matchSec = section(gamePage, "Match Controls", 1)
 
@@ -1203,7 +1226,17 @@ local function applyFPSBoost()
     end
     for _, inst in ipairs(workspace:GetDescendants()) do simplify(inst) end
     workspace.DescendantAdded:Connect(function(inst)
-        if getBoostFPS() then simplify(inst) end
+        if not getBoostFPS() then return end
+        local cls = inst.ClassName
+        -- Only destroy/disable visual effects — skip expensive BasePart property sets
+        if cls == "ParticleEmitter" or cls == "Trail" or cls == "Beam"
+        or cls == "Smoke" or cls == "Fire" or cls == "Sparkles"
+        or cls == "Atmosphere" or cls == "Sky" or cls == "Clouds"
+        or cls == "PointLight" or cls == "SpotLight" or cls == "SurfaceLight" then
+            pcall(function() inst:Destroy() end)
+        elseif inst:IsA("Decal") or inst:IsA("Texture") then
+            pcall(function() inst.Transparency = 1 end)
+        end
     end)
     notify("FPS Boost ON", true)
 end
