@@ -21,23 +21,23 @@ task.wait(2)
 local Net = RS:WaitForChild("Networking")
 
 -- ======================
--- THEME (dark purple / grunge)
+-- THEME (dark grey / light pink text)
 -- ======================
 local C = {
-    BG       = Color3.fromRGB(255, 220, 225),         -- light pink background
-    PANEL    = Color3.fromRGB(180, 130, 100),         -- light coffee sidebar/panels
-    CARD     = Color3.fromRGB(245, 210, 215),         -- soft pink cards
-    BORDER   = Color3.fromRGB(255, 255, 255),         -- white border
-    ACCENT   = Color3.fromRGB(180, 60, 255),          -- vivid purple (buttons)
-    ACCENT2  = Color3.fromRGB(200, 80, 255),          -- purple highlight text
+    BG       = Color3.fromRGB(45, 45, 48),           -- dark grey background
+    PANEL    = Color3.fromRGB(80, 80, 85),           -- light grey sidebar/panels/tabs
+    CARD     = Color3.fromRGB(58, 58, 62),           -- slightly lighter dark grey cards
+    BORDER   = Color3.fromRGB(255, 255, 255),        -- white border
+    ACCENT   = Color3.fromRGB(255, 160, 200),        -- light pink buttons
+    ACCENT2  = Color3.fromRGB(255, 180, 210),        -- light pink highlight text
     GREEN    = Color3.fromRGB(80, 200, 140),
     RED      = Color3.fromRGB(220, 70, 100),
     YELLOW   = Color3.fromRGB(230, 180, 60),
-    TEXT     = Color3.fromRGB(40, 20, 30),            -- dark text on light bg
-    SUBTEXT  = Color3.fromRGB(100, 70, 80),
-    DIM      = Color3.fromRGB(150, 110, 120),
-    DISABLED = Color3.fromRGB(200, 170, 175),
-    ACTIVE   = Color3.fromRGB(180, 60, 255),          -- active tab pill
+    TEXT     = Color3.fromRGB(255, 190, 215),        -- light pink text
+    SUBTEXT  = Color3.fromRGB(220, 150, 180),        -- dimmer light pink
+    DIM      = Color3.fromRGB(180, 120, 150),
+    DISABLED = Color3.fromRGB(120, 100, 110),
+    ACTIVE   = Color3.fromRGB(255, 160, 200),        -- active tab pill
 }
 local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
@@ -211,7 +211,7 @@ win.Name             = "Window"
 win.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
 win.AnchorPoint      = Vector2.new(0.5, 0.5)
 win.Position         = UDim2.new(0.5, 0, 0.5, 0)
-win.BackgroundColor3 = Color3.fromRGB(11, 9, 18)
+win.BackgroundColor3 = Color3.fromRGB(45, 45, 48)
 win.BorderSizePixel  = 0
 win.ClipsDescendants = true
 win.Active           = true
@@ -255,17 +255,17 @@ winStroke.Color     = Color3.fromRGB(255, 255, 255)
 winStroke.Thickness = 4
 winStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
--- Main background gradient — light pink
+-- Main background gradient — dark grey
 do
     local bg = Instance.new("Frame", win)
-    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(255,220,225)
+    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(45,45,48)
     bg.BorderSizePixel=0; bg.ZIndex=0
     Instance.new("UICorner", bg).CornerRadius=UDim.new(0,16)
     local g=Instance.new("UIGradient", bg)
     g.Color=ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 230, 235)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 215, 222)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(250, 200, 210)),
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(55, 55, 60)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(45, 45, 48)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(38, 38, 42)),
     })
     g.Rotation = 135
 end
