@@ -10,6 +10,9 @@ local RunSvc       = game:GetService("RunService")
 local UIS          = game:GetService("UserInputService")
 local HttpService  = game:GetService("HttpService")
 
+-- Wrap everything in a protected function so the crash location is surfaced on screen.
+local function main()
+
 local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
 local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
@@ -2600,3 +2603,44 @@ UIS.InputChanged:Connect(function(i)
 end)
 
 end -- close Float button do block
+
+end -- ── close main() ──────────────────────────────────────────────────────────
+
+-- ======================
+-- ERROR CATCHER
+-- Runs main() through xpcall; if it crashes, shows the real traceback on screen.
+-- Remove this block once the crash is diagnosed and fixed.
+-- ======================
+local _OZ_OK, _OZ_ERR = xpcall(main, function(e)
+    local t = (debug and debug.traceback) and debug.traceback(e, 2) or tostring(e)
+    return t
+end)
+
+if not _OZ_OK then
+    task.spawn(function()
+        task.wait(0.3)
+        pcall(function()
+            local _pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui", 10)
+            if not _pg then return end
+            if _pg:FindFirstChild("OzErr") then _pg.OzErr:Destroy() end
+            local _g  = Instance.new("ScreenGui", _pg)
+            _g.Name="OzErr"; _g.DisplayOrder=1000; _g.ResetOnSpawn=false
+            local _f  = Instance.new("ScrollingFrame", _g)
+            _f.Size=UDim2.new(0.95,0,0.55,0); _f.Position=UDim2.new(0.025,0,0.22,0)
+            _f.BackgroundColor3=Color3.fromRGB(15,0,5); _f.BorderSizePixel=0
+            _f.CanvasSize=UDim2.new(0,0,0,0); _f.AutomaticCanvasSize=Enum.AutomaticSize.Y
+            _f.ScrollBarThickness=5; _f.ScrollBarImageColor3=Color3.fromRGB(255,60,60)
+            Instance.new("UICorner",_f).CornerRadius=UDim.new(0,10)
+            local _pad=Instance.new("UIPadding",_f)
+            _pad.PaddingLeft=UDim.new(0,8); _pad.PaddingRight=UDim.new(0,8)
+            _pad.PaddingTop=UDim.new(0,8); _pad.PaddingBottom=UDim.new(0,8)
+            local _lbl=Instance.new("TextLabel",_f)
+            _lbl.Size=UDim2.new(1,0,0,0); _lbl.AutomaticSize=Enum.AutomaticSize.Y
+            _lbl.BackgroundTransparency=1
+            _lbl.Text="OzWare crashed:\n\n"..tostring(_OZ_ERR)
+            _lbl.TextColor3=Color3.fromRGB(255,110,110); _lbl.TextSize=12
+            _lbl.TextWrapped=true; _lbl.TextXAlignment=Enum.TextXAlignment.Left
+            _lbl.TextYAlignment=Enum.TextYAlignment.Top; _lbl.Font=Enum.Font.Code
+        end)
+    end)
+end
