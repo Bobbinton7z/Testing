@@ -1,215 +1,168 @@
--- ======================
--- |        OzWare       |
--- |    V3 Dashboard     |
--- ======================
-
 local Players      = game.Players
 local RS           = game.ReplicatedStorage
 local TweenSvc     = game.TweenService
 local RunSvc       = game.RunService
 local UIS          = game.UserInputService
 local HttpService  = game.HttpService
-
--- Safe task-library aliases — fallback to deprecated globals if task.X is nil.
--- Delta on Android may not expose the full task library.
 local _tw = (task and task.wait)  or wait
 local _ts = (task and task.spawn) or function(f,...) coroutine.resume(coroutine.create(f),...) end
 local _td = (task and task.defer) or _ts
 local _tD = (task and task.delay) or function(t,f) _ts(function() _tw(t);f() end) end
-
 local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
 local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
 local realGui   = player:WaitForChild("PlayerGui")
-
 local Net = RS:WaitForChild("Networking")
-
--- ======================
--- THEME (dark purple / grunge)
--- ======================
 local C = {
-    BG       = Color3.fromRGB(255, 220, 225),         -- light pink background
-    PANEL    = Color3.fromRGB(180, 130, 100),         -- light coffee sidebar/panels
-    CARD     = Color3.fromRGB(245, 210, 215),         -- soft pink cards
-    BORDER   = Color3.fromRGB(255, 255, 255),         -- white border
-    ACCENT   = Color3.fromRGB(180, 60, 255),          -- vivid purple (buttons)
-    ACCENT2  = Color3.fromRGB(200, 80, 255),          -- purple highlight text
-    GREEN    = Color3.fromRGB(80, 200, 140),
-    RED      = Color3.fromRGB(220, 70, 100),
-    YELLOW   = Color3.fromRGB(230, 180, 60),
-    TEXT     = Color3.fromRGB(40, 20, 30),            -- dark text on light bg
-    SUBTEXT  = Color3.fromRGB(100, 70, 80),
-    DIM      = Color3.fromRGB(150, 110, 120),
-    DISABLED = Color3.fromRGB(200, 170, 175),
-    ACTIVE   = Color3.fromRGB(180, 60, 255),          -- active tab pill
+BG       = Color3.fromRGB(255, 220, 225),
+PANEL    = Color3.fromRGB(180, 130, 100),
+CARD     = Color3.fromRGB(245, 210, 215),
+BORDER   = Color3.fromRGB(255, 255, 255),
+ACCENT   = Color3.fromRGB(180, 60, 255),
+ACCENT2  = Color3.fromRGB(200, 80, 255),
+GREEN    = Color3.fromRGB(80, 200, 140),
+RED      = Color3.fromRGB(220, 70, 100),
+YELLOW   = Color3.fromRGB(230, 180, 60),
+TEXT     = Color3.fromRGB(40, 20, 30),
+SUBTEXT  = Color3.fromRGB(100, 70, 80),
+DIM      = Color3.fromRGB(150, 110, 120),
+DISABLED = Color3.fromRGB(200, 170, 175),
+ACTIVE   = Color3.fromRGB(180, 60, 255),
 }
 local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
 local FONT_REG  = Enum.Font.Gotham
-
-
 local function getMapRoot()
-    return workspace:FindFirstChild("Map")
-        or workspace:FindFirstChild("MapHolder")
-        or workspace:FindFirstChild("Maps")
-        or workspace:FindFirstChild("Stage")
+return workspace:FindFirstChild("Map")
+or workspace:FindFirstChild("MapHolder")
+or workspace:FindFirstChild("Maps")
+or workspace:FindFirstChild("Stage")
 end
-
 local _inGameCache = false
 local _inGameStamp = 0
 local function inGameMode()
-    local now = os.clock()
-    if now - _inGameStamp < 0.5 then return _inGameCache end
-    _inGameStamp = now
-    -- Only re-evaluate every 0.5s — avoids 20+ FindFirstChild per frame
-    if getMapRoot() then _inGameCache = true; return true end
-    local net = RS:FindFirstChild("Networking")
-    local ody = net and net:FindFirstChild("Odyssey")
-    local adv = ody and ody:FindFirstChild("Adventure")
-    if adv and adv:FindFirstChild("VoteEvent") then _inGameCache = true; return true end
-    for _, name in ipairs({
-        "OdysseyRoom","AdventureRoom","Adventure","OdysseyMap","AdventureMap",
-        "Odyssey","OdysseyStage","AdventureStage","OdysseyHolder","AdventureHolder",
-        "GameMap","GameFolder","BattleMap","Match","MatchFolder",
-    }) do
-        if workspace:FindFirstChild(name) then _inGameCache = true; return true end
-    end
-    _inGameCache = false
-    return false
+local now = os.clock()
+if now - _inGameStamp < 0.5 then return _inGameCache end
+_inGameStamp = now
+if getMapRoot() then _inGameCache = true; return true end
+local net = RS:FindFirstChild("Networking")
+local ody = net and net:FindFirstChild("Odyssey")
+local adv = ody and ody:FindFirstChild("Adventure")
+if adv and adv:FindFirstChild("VoteEvent") then _inGameCache = true; return true end
+for _, name in ipairs({
+"OdysseyRoom","AdventureRoom","Adventure","OdysseyMap","AdventureMap",
+"Odyssey","OdysseyStage","AdventureStage","OdysseyHolder","AdventureHolder",
+"GameMap","GameFolder","BattleMap","Match","MatchFolder",
+}) do
+if workspace:FindFirstChild(name) then _inGameCache = true; return true end
 end
-
--- ======================
--- HELPERS
--- ======================
+_inGameCache = false
+return false
+end
 local function tween(o, p, t) TweenSvc:Create(o, TweenInfo.new(t or 0.18, Enum.EasingStyle.Quad), p):Play() end
 local function corner(p, r)   local c=Instance.new("UICorner");  c.CornerRadius=UDim.new(0,r or 8); c.Parent=p; return c end
 local function stroke(p, col, th) local s=Instance.new("UIStroke"); s.Color=col or C.BORDER; s.Thickness=th or 1; s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; s.Parent=p; return s end
 local function gradient(p, a, b, rot)
-    local g=Instance.new("UIGradient")
-    g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,a), ColorSequenceKeypoint.new(1,b or a)})
-    g.Rotation=rot or 90; g.Parent=p; return g
+local g=Instance.new("UIGradient")
+g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,a), ColorSequenceKeypoint.new(1,b or a)})
+g.Rotation=rot or 90; g.Parent=p; return g
 end
 local function padding(p, all, t, b, l, r)
-    local pd=Instance.new("UIPadding")
-    pd.PaddingTop=UDim.new(0,t or all or 0); pd.PaddingBottom=UDim.new(0,b or all or 0)
-    pd.PaddingLeft=UDim.new(0,l or all or 0); pd.PaddingRight=UDim.new(0,r or all or 0)
-    pd.Parent=p; return pd
+local pd=Instance.new("UIPadding")
+pd.PaddingTop=UDim.new(0,t or all or 0); pd.PaddingBottom=UDim.new(0,b or all or 0)
+pd.PaddingLeft=UDim.new(0,l or all or 0); pd.PaddingRight=UDim.new(0,r or all or 0)
+pd.Parent=p; return pd
 end
 local function listLayout(p, dir, pad, align)
-    local l=Instance.new("UIListLayout")
-    l.FillDirection=dir or Enum.FillDirection.Vertical
-    l.SortOrder=Enum.SortOrder.LayoutOrder
-    l.Padding=UDim.new(0, pad or 6)
-    l.HorizontalAlignment=align or Enum.HorizontalAlignment.Left
-    l.Parent=p; return l
+local l=Instance.new("UIListLayout")
+l.FillDirection=dir or Enum.FillDirection.Vertical
+l.SortOrder=Enum.SortOrder.LayoutOrder
+l.Padding=UDim.new(0, pad or 6)
+l.HorizontalAlignment=align or Enum.HorizontalAlignment.Left
+l.Parent=p; return l
 end
-
--- ======================
--- ROOT
--- ======================
 if playerGui:FindFirstChild("OzWare") then playerGui.OzWare:Destroy() end
 local gui = Instance.new("ScreenGui")
 gui.Name="OzWare"; gui.ResetOnSpawn=false
 gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
--- Keep OzWare below game GUIs so it never intercepts their clicks.
--- Game ScreenGuis typically use DisplayOrder 0–10; we stay at -1 so
--- only our own explicit interactive elements (win, floatBtn) receive input.
 gui.DisplayOrder = -1
 gui.Parent=playerGui
-
 local notifQueue = {}
 local function notify(msg, ok)
-    local color = ok and C.GREEN or C.RED
-    local f=Instance.new("Frame")
-    f.Size=UDim2.new(0,300,0,40); f.Position=UDim2.new(0.5,-150,1,20)
-    f.BackgroundColor3=C.PANEL; f.ZIndex=100; f.Parent=gui
-    corner(f,10); stroke(f,color,1)
-    local accent=Instance.new("Frame"); accent.Size=UDim2.new(0,3,1,-12)
-    accent.Position=UDim2.new(0,8,0,6); accent.BackgroundColor3=color
-    accent.ZIndex=101; accent.Parent=f; corner(accent,2)
-    local lbl=Instance.new("TextLabel"); lbl.Size=UDim2.new(1,-22,1,0)
-    lbl.Position=UDim2.new(0,20,0,0); lbl.BackgroundTransparency=1
-    lbl.Text=(ok and "+ " or "x ")..msg; lbl.TextColor3=C.TEXT
-    lbl.TextSize=12; lbl.Font=FONT_SEMI; lbl.TextXAlignment=Enum.TextXAlignment.Left
-    lbl.TextTruncate=Enum.TextTruncate.AtEnd; lbl.ZIndex=101; lbl.Parent=f
-    local targetY = 1 - (0.06 * (#notifQueue + 1))
-    table.insert(notifQueue, f)
-    tween(f, {Position=UDim2.new(0.5,-150,targetY,-50)}, 0.3)
-    _tD(3, function()
-        tween(f,{Position=UDim2.new(0.5,-150,1,20), BackgroundTransparency=1},0.25)
-        tween(lbl,{TextTransparency=1},0.25)
-        _tw(0.3)
-        local i=table.find(notifQueue,f); if i then table.remove(notifQueue,i) end
-        f:Destroy()
-    end)
+local color = ok and C.GREEN or C.RED
+local f=Instance.new("Frame")
+f.Size=UDim2.new(0,300,0,40); f.Position=UDim2.new(0.5,-150,1,20)
+f.BackgroundColor3=C.PANEL; f.ZIndex=100; f.Parent=gui
+corner(f,10); stroke(f,color,1)
+local accent=Instance.new("Frame"); accent.Size=UDim2.new(0,3,1,-12)
+accent.Position=UDim2.new(0,8,0,6); accent.BackgroundColor3=color
+accent.ZIndex=101; accent.Parent=f; corner(accent,2)
+local lbl=Instance.new("TextLabel"); lbl.Size=UDim2.new(1,-22,1,0)
+lbl.Position=UDim2.new(0,20,0,0); lbl.BackgroundTransparency=1
+lbl.Text=(ok and "+ " or "x ")..msg; lbl.TextColor3=C.TEXT
+lbl.TextSize=12; lbl.Font=FONT_SEMI; lbl.TextXAlignment=Enum.TextXAlignment.Left
+lbl.TextTruncate=Enum.TextTruncate.AtEnd; lbl.ZIndex=101; lbl.Parent=f
+local targetY = 1 - (0.06 * (#notifQueue + 1))
+table.insert(notifQueue, f)
+tween(f, {Position=UDim2.new(0.5,-150,targetY,-50)}, 0.3)
+_tD(3, function()
+tween(f,{Position=UDim2.new(0.5,-150,1,20), BackgroundTransparency=1},0.25)
+tween(lbl,{TextTransparency=1},0.25)
+_tw(0.3)
+local i=table.find(notifQueue,f); if i then table.remove(notifQueue,i) end
+f:Destroy()
+end)
 end
 local function safeCall(fn, okMsg, failPrefix)
-    local ok, err = pcall(fn)
-    if okMsg or not ok then notify(ok and okMsg or ((failPrefix or "Error")..": "..tostring(err)), ok) end
-    return ok
+local ok, err = pcall(fn)
+if okMsg or not ok then notify(ok and okMsg or ((failPrefix or "Error")..": "..tostring(err)), ok) end
+return ok
 end
-
--- ======================
--- SETTINGS AUTOSAVE
--- ======================
 local OZWARE_SAVE_FILE = "OzWare_Settings.json"
 local OzSaved = { toggles = {}, characters = {}, selectedCharacter = nil }
-
 local function canUseFiles()
-    return typeof(readfile) == "function" and typeof(writefile) == "function"
+return typeof(readfile) == "function" and typeof(writefile) == "function"
 end
-
 local function loadOzSettings()
-    if not canUseFiles() then return end
-    local exists = false
-    if typeof(isfile) == "function" then
-        local ok, result = pcall(isfile, OZWARE_SAVE_FILE)
-        exists = ok and result
-    else
-        exists = true
-    end
-    if not exists then return end
-    local okRead, raw = pcall(readfile, OZWARE_SAVE_FILE)
-    if not okRead or type(raw) ~= "string" or raw == "" then return end
-    local okDecode, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
-    if okDecode and typeof(decoded) == "table" then
-        OzSaved = decoded
-        OzSaved.toggles = OzSaved.toggles or {}
-        OzSaved.characters = OzSaved.characters or {}
-    end
+if not canUseFiles() then return end
+local exists = false
+if typeof(isfile) == "function" then
+local ok, result = pcall(isfile, OZWARE_SAVE_FILE)
+exists = ok and result
+else
+exists = true
 end
-
+if not exists then return end
+local okRead, raw = pcall(readfile, OZWARE_SAVE_FILE)
+if not okRead or type(raw) ~= "string" or raw == "" then return end
+local okDecode, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+if okDecode and typeof(decoded) == "table" then
+OzSaved = decoded
+OzSaved.toggles = OzSaved.toggles or {}
+OzSaved.characters = OzSaved.characters or {}
+end
+end
 local function saveOzSettings()
-    if not canUseFiles() then return end
-    pcall(function()
-        writefile(OZWARE_SAVE_FILE, HttpService:JSONEncode(OzSaved))
-    end)
+if not canUseFiles() then return end
+pcall(function()
+writefile(OZWARE_SAVE_FILE, HttpService:JSONEncode(OzSaved))
+end)
 end
-
 local function getSavedToggle(key, default)
-    OzSaved.toggles = OzSaved.toggles or {}
-    local saved = OzSaved.toggles[key]
-    if typeof(saved) == "boolean" then return saved end
-    return default and true or false
+OzSaved.toggles = OzSaved.toggles or {}
+local saved = OzSaved.toggles[key]
+if typeof(saved) == "boolean" then return saved end
+return default and true or false
 end
-
 local function setSavedToggle(key, value)
-    OzSaved.toggles = OzSaved.toggles or {}
-    OzSaved.toggles[key] = value and true or false
-    saveOzSettings()
+OzSaved.toggles = OzSaved.toggles or {}
+OzSaved.toggles[key] = value and true or false
+saveOzSettings()
 end
-
 loadOzSettings()
-
--- ======================
--- WINDOW  (premium redesign)
--- Logo image: upload OzWare logo to Roblox, replace LOGO_ASSET_ID below
--- ======================
-local LOGO_ASSET = "rbxassetid://YOUR_LOGO_ID"  -- replace with your uploaded asset ID
+local LOGO_ASSET = "rbxassetid://YOUR_LOGO_ID"
 local WIN_W, WIN_H = 740, 475
 local SIDEBAR_W    = 144
-
--- ── Window frame ─────────────────────────────────────────────────
 local win = Instance.new("Frame")
 win.Name             = "Window"
 win.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
@@ -220,106 +173,84 @@ win.BorderSizePixel  = 0
 win.ClipsDescendants = true
 win.Active           = true
 win.Visible          = false
-
--- ── Open/close animation (top-level so accessible at boot) ────────
 local isOpen = false
-
 local function openWindow()
-    isOpen = true
-    win.Visible = true
-    win.Size    = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
-    win.AnchorPoint = Vector2.new(0.5, 0.5)
-    win.Position    = UDim2.new(0.5, 0, 0.5, 0)
-    TweenSvc:Create(win, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, WIN_W, 0, WIN_H)
-    }):Play()
+isOpen = true
+win.Visible = true
+win.Size    = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
+win.AnchorPoint = Vector2.new(0.5, 0.5)
+win.Position    = UDim2.new(0.5, 0, 0.5, 0)
+TweenSvc:Create(win, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+Size = UDim2.new(0, WIN_W, 0, WIN_H)
+}):Play()
 end
-
 local function closeWindow()
-    isOpen = false
-    local t = TweenSvc:Create(win, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-        Size = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
-    })
-    t:Play()
-    t.Completed:Connect(function()
-        win.Visible = false
-        win.Size    = UDim2.new(0, WIN_W, 0, WIN_H)
-    end)
+isOpen = false
+local t = TweenSvc:Create(win, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+Size = UDim2.new(0, WIN_W * 0.55, 0, WIN_H * 0.55)
+})
+t:Play()
+t.Completed:Connect(function()
+win.Visible = false
+win.Size    = UDim2.new(0, WIN_W, 0, WIN_H)
+end)
 end
-
 win.ZIndex = 10
 win.Parent = gui
-
--- Rounded corners
 Instance.new("UICorner", win).CornerRadius = UDim.new(0, 16)
-
--- Outer border — 4px white, bulky
 local winStroke = Instance.new("UIStroke", win)
 winStroke.Color     = Color3.fromRGB(255, 255, 255)
 winStroke.Thickness = 4
 winStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-
--- Main background gradient — light pink
 do
-    local bg = Instance.new("Frame", win)
-    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(255,220,225)
-    bg.BorderSizePixel=0; bg.ZIndex=0
-    Instance.new("UICorner", bg).CornerRadius=UDim.new(0,16)
-    local g=Instance.new("UIGradient", bg)
-    g.Color=ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 230, 235)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 215, 222)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(250, 200, 210)),
-    })
-    g.Rotation = 135
+local bg = Instance.new("Frame", win)
+bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(255,220,225)
+bg.BorderSizePixel=0; bg.ZIndex=0
+Instance.new("UICorner", bg).CornerRadius=UDim.new(0,16)
+local g=Instance.new("UIGradient", bg)
+g.Color=ColorSequence.new({
+ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 230, 235)),
+ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 215, 222)),
+ColorSequenceKeypoint.new(1,   Color3.fromRGB(250, 200, 210)),
+})
+g.Rotation = 135
 end
-
--- Texture layer 1: soft highlight bleed top-left
 do
-    local hi = Instance.new("Frame", win)
-    hi.Size=UDim2.new(0.6,0,0.45,0); hi.Position=UDim2.new(0,0,0,0)
-    hi.BackgroundColor3=Color3.fromRGB(255,255,255); hi.BorderSizePixel=0
-    hi.BackgroundTransparency=0.88; hi.ZIndex=1
-    Instance.new("UICorner",hi).CornerRadius=UDim.new(0,16)
+local hi = Instance.new("Frame", win)
+hi.Size=UDim2.new(0.6,0,0.45,0); hi.Position=UDim2.new(0,0,0,0)
+hi.BackgroundColor3=Color3.fromRGB(255,255,255); hi.BorderSizePixel=0
+hi.BackgroundTransparency=0.88; hi.ZIndex=1
+Instance.new("UICorner",hi).CornerRadius=UDim.new(0,16)
 end
-
--- Texture layer 2: bottom-right soft shadow
 do
-    local vg=Instance.new("Frame", win)
-    vg.Size=UDim2.new(0.5,0,0.4,0); vg.AnchorPoint=Vector2.new(1,1)
-    vg.Position=UDim2.new(1,0,1,0)
-    vg.BackgroundColor3=Color3.fromRGB(220,160,175); vg.BorderSizePixel=0
-    vg.BackgroundTransparency=0.82; vg.ZIndex=1
-    Instance.new("UICorner",vg).CornerRadius=UDim.new(0,16)
+local vg=Instance.new("Frame", win)
+vg.Size=UDim2.new(0.5,0,0.4,0); vg.AnchorPoint=Vector2.new(1,1)
+vg.Position=UDim2.new(1,0,1,0)
+vg.BackgroundColor3=Color3.fromRGB(220,160,175); vg.BorderSizePixel=0
+vg.BackgroundTransparency=0.82; vg.ZIndex=1
+Instance.new("UICorner",vg).CornerRadius=UDim.new(0,16)
 end
-
--- Inner border glow — subtle white inset
 do
-    local innerBorder=Instance.new("Frame", win)
-    innerBorder.Size=UDim2.new(1,-6,1,-6); innerBorder.Position=UDim2.new(0,3,0,3)
-    innerBorder.BackgroundTransparency=1; innerBorder.BorderSizePixel=0
-    innerBorder.ZIndex=2
-    local ib=Instance.new("UIStroke", innerBorder)
-    ib.Color=Color3.fromRGB(255,255,255); ib.Thickness=1
-    ib.Transparency=0.6; ib.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
-    Instance.new("UICorner",innerBorder).CornerRadius=UDim.new(0,14)
+local innerBorder=Instance.new("Frame", win)
+innerBorder.Size=UDim2.new(1,-6,1,-6); innerBorder.Position=UDim2.new(0,3,0,3)
+innerBorder.BackgroundTransparency=1; innerBorder.BorderSizePixel=0
+innerBorder.ZIndex=2
+local ib=Instance.new("UIStroke", innerBorder)
+ib.Color=Color3.fromRGB(255,255,255); ib.Thickness=1
+ib.Transparency=0.6; ib.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
+Instance.new("UICorner",innerBorder).CornerRadius=UDim.new(0,14)
 end
-
--- ── Header (logo banner) ─────────────────────────────────────────
 local header = Instance.new("Frame", win)
 header.Size                  = UDim2.new(1, 0, 0, 78)
 header.BackgroundTransparency = 1
 header.BorderSizePixel        = 0
 header.ZIndex                 = 12
 Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
--- Bottom separator line
 local sep = Instance.new("Frame", win)
 sep.Size             = UDim2.new(1,0,0,1)
 sep.Position         = UDim2.new(0,0,0,78)
 sep.BackgroundColor3 = Color3.fromRGB(60,30,90)
 sep.BorderSizePixel  = 0; sep.ZIndex = 14
-
--- Logo image centered in header
 local logoImg = Instance.new("ImageLabel", header)
 logoImg.Size             = UDim2.new(0, 160, 0, 56)
 logoImg.AnchorPoint      = Vector2.new(0.5, 0.5)
@@ -328,7 +259,6 @@ logoImg.BackgroundTransparency = 1
 logoImg.Image            = LOGO_ASSET
 logoImg.ScaleType        = Enum.ScaleType.Fit
 logoImg.ZIndex           = 14
--- Fallback text if no asset ID yet
 local logoFallback = Instance.new("TextLabel", header)
 logoFallback.Size             = UDim2.new(0, 200, 1, 0)
 logoFallback.AnchorPoint      = Vector2.new(0.5, 0.5)
@@ -341,14 +271,13 @@ logoFallback.Font             = FONT_BOLD
 logoFallback.ZIndex           = 15
 logoFallback.Visible          = (LOGO_ASSET == "rbxassetid://YOUR_LOGO_ID")
 do
-    local g2 = Instance.new("UIGradient", logoFallback)
-    g2.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(200,80,255)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255,60,200)),
-    })
-    g2.Rotation = 0
+local g2 = Instance.new("UIGradient", logoFallback)
+g2.Color = ColorSequence.new({
+ColorSequenceKeypoint.new(0, Color3.fromRGB(200,80,255)),
+ColorSequenceKeypoint.new(1, Color3.fromRGB(255,60,200)),
+})
+g2.Rotation = 0
 end
--- Version badge
 local verBadge = Instance.new("TextLabel", header)
 verBadge.Size             = UDim2.new(0,28,0,16)
 verBadge.AnchorPoint      = Vector2.new(1,0)
@@ -360,51 +289,43 @@ verBadge.TextColor3       = Color3.fromRGB(255,255,255)
 verBadge.TextSize         = 10; verBadge.Font = FONT_BOLD
 verBadge.ZIndex           = 15
 Instance.new("UICorner",verBadge).CornerRadius = UDim.new(0,4)
-
--- Drag via header
 local dragging, dragStart, winStart = false, nil, nil
 header.InputBegan:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-        dragging=true; dragStart=i.Position; winStart=win.Position
-    end
+if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+dragging=true; dragStart=i.Position; winStart=win.Position
+end
 end)
 header.InputEnded:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-        dragging=false
-    end
+if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+dragging=false
+end
 end)
 UIS.InputChanged:Connect(function(i)
-    if not dragging then return end
-    if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
-        local d=i.Position-dragStart
-        win.Position=UDim2.new(winStart.X.Scale,winStart.X.Offset+d.X,winStart.Y.Scale,winStart.Y.Offset+d.Y)
-    end
+if not dragging then return end
+if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
+local d=i.Position-dragStart
+win.Position=UDim2.new(winStart.X.Scale,winStart.X.Offset+d.X,winStart.Y.Scale,winStart.Y.Offset+d.Y)
+end
 end)
-
--- ── Sidebar ───────────────────────────────────────────────────────
 local sidebar = Instance.new("Frame", win)
 sidebar.Size             = UDim2.new(0, SIDEBAR_W, 1, -96)
 sidebar.Position         = UDim2.new(0, 0, 0, 86)
-sidebar.BackgroundColor3 = Color3.fromRGB(180, 130, 100)  -- light coffee
+sidebar.BackgroundColor3 = Color3.fromRGB(180, 130, 100)
 sidebar.BorderSizePixel  = 0; sidebar.ZIndex = 11
--- Right border only
 local sideStroke = Instance.new("Frame", sidebar)
 sideStroke.Size             = UDim2.new(0,2,1,0)
 sideStroke.Position         = UDim2.new(1,-2,0,0)
-sideStroke.BackgroundColor3 = Color3.fromRGB(255,255,255)  -- white
+sideStroke.BackgroundColor3 = Color3.fromRGB(255,255,255)
 sideStroke.BorderSizePixel  = 0; sideStroke.ZIndex = 12
-
 local tabList = Instance.new("Frame", sidebar)
 tabList.Size                = UDim2.new(1,0,1,-60)
 tabList.Position            = UDim2.new(0,0,0,8)
 tabList.BackgroundTransparency = 1; tabList.ZIndex = 12
 listLayout(tabList, nil, 2, Enum.HorizontalAlignment.Center)
-
--- Avatar footer
 local footer = Instance.new("Frame", sidebar)
 footer.Size             = UDim2.new(1,-12,0,50)
 footer.Position         = UDim2.new(0,6,1,-56)
-footer.BackgroundColor3 = Color3.fromRGB(160, 110, 80)  -- darker coffee
+footer.BackgroundColor3 = Color3.fromRGB(160, 110, 80)
 footer.BorderSizePixel  = 0; footer.ZIndex = 12
 Instance.new("UICorner",footer).CornerRadius=UDim.new(0,8)
 local avImg = Instance.new("ImageLabel", footer)
@@ -413,10 +334,10 @@ avImg.BackgroundColor3=C.CARD; avImg.BorderSizePixel=0; avImg.ZIndex=13
 Instance.new("UICorner",avImg).CornerRadius=UDim.new(0,16)
 stroke(avImg,C.ACCENT,1)
 _ts(function()
-    local ok,url=pcall(function()
-        return Players:GetUserThumbnailAsync(player.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size48x48)
-    end)
-    if ok then avImg.Image=url end
+local ok,url=pcall(function()
+return Players:GetUserThumbnailAsync(player.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size48x48)
+end)
+if ok then avImg.Image=url end
 end)
 local avName = Instance.new("TextLabel", footer)
 avName.Size=UDim2.new(1,-50,1,0); avName.Position=UDim2.new(0,46,0,0)
@@ -424,250 +345,208 @@ avName.BackgroundTransparency=1; avName.Text=player.DisplayName or player.Name
 avName.TextColor3=Color3.fromRGB(220,220,235); avName.TextSize=11; avName.Font=FONT_SEMI
 avName.TextXAlignment=Enum.TextXAlignment.Left
 avName.TextTruncate=Enum.TextTruncate.AtEnd; avName.ZIndex=13
-
--- ── Content area ──────────────────────────────────────────────────
 local contentArea = Instance.new("Frame", win)
 contentArea.Size             = UDim2.new(1, -(SIDEBAR_W+14), 1, -96)
 contentArea.Position         = UDim2.new(0, SIDEBAR_W+8, 0, 86)
 contentArea.BackgroundTransparency = 1
 contentArea.ClipsDescendants = true
 contentArea.ZIndex           = 11
-
--- ── Tab system ────────────────────────────────────────────────────
 local tabButtons, tabLabels, tabIcons, tabPages, activeTab = {}, {}, {}, {}, nil
 local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","SpringLTM","Macro"}
-
 local function makePage()
-    local p=Instance.new("ScrollingFrame")
-    p.Size=UDim2.new(1,0,1,0); p.BackgroundTransparency=1; p.BorderSizePixel=0
-    p.ScrollBarThickness=3; p.ScrollBarImageColor3=Color3.fromRGB(180,60,255)
-    p.CanvasSize=UDim2.new(0,0,0,0); p.AutomaticCanvasSize=Enum.AutomaticSize.Y
-    p.Visible=false; p.ZIndex=12; p.Parent=contentArea
-    listLayout(p,nil,8); padding(p,nil,4,12,2,8)
-    return p
+local p=Instance.new("ScrollingFrame")
+p.Size=UDim2.new(1,0,1,0); p.BackgroundTransparency=1; p.BorderSizePixel=0
+p.ScrollBarThickness=3; p.ScrollBarImageColor3=Color3.fromRGB(180,60,255)
+p.CanvasSize=UDim2.new(0,0,0,0); p.AutomaticCanvasSize=Enum.AutomaticSize.Y
+p.Visible=false; p.ZIndex=12; p.Parent=contentArea
+listLayout(p,nil,8); padding(p,nil,4,12,2,8)
+return p
 end
-
 local function switchTab(name)
-    for n,_ in pairs(tabPages) do
-        tabPages[n].Visible=false
-        if tabButtons[n] then
-            tween(tabButtons[n],{BackgroundTransparency=1},0.15)
-            if tabLabels[n] then tabLabels[n].TextColor3=Color3.fromRGB(120,100,150) end
-            if tabIcons[n]  then tabIcons[n].TextColor3=Color3.fromRGB(120,100,150) end
-            -- hide active indicator
-            local ind = tabButtons[n]:FindFirstChild("ActiveBar")
-            if ind then tween(ind,{BackgroundTransparency=1},0.15) end
-        end
-    end
-    tabPages[name].Visible=true
-    tween(tabButtons[name],{BackgroundTransparency=0.88},0.15)
-    tabLabels[name].TextColor3=Color3.fromRGB(255,255,255)
-    tabIcons[name].TextColor3=C.ACCENT2
-    local ind = tabButtons[name]:FindFirstChild("ActiveBar")
-    if ind then tween(ind,{BackgroundTransparency=0},0.2) end
-    activeTab=name
+for n,_ in pairs(tabPages) do
+tabPages[n].Visible=false
+if tabButtons[n] then
+tween(tabButtons[n],{BackgroundTransparency=1},0.15)
+if tabLabels[n] then tabLabels[n].TextColor3=Color3.fromRGB(120,100,150) end
+if tabIcons[n]  then tabIcons[n].TextColor3=Color3.fromRGB(120,100,150) end
+local ind = tabButtons[n]:FindFirstChild("ActiveBar")
+if ind then tween(ind,{BackgroundTransparency=1},0.15) end
 end
-
+end
+tabPages[name].Visible=true
+tween(tabButtons[name],{BackgroundTransparency=0.88},0.15)
+tabLabels[name].TextColor3=Color3.fromRGB(255,255,255)
+tabIcons[name].TextColor3=C.ACCENT2
+local ind = tabButtons[name]:FindFirstChild("ActiveBar")
+if ind then tween(ind,{BackgroundTransparency=0},0.2) end
+activeTab=name
+end
 for i,name in ipairs(TAB_NAMES) do
-    local b = Instance.new("TextButton", tabList)
-    b.Size=UDim2.new(1,0,0,40); b.BackgroundColor3=Color3.fromRGB(180,80,255)
-    b.BackgroundTransparency=1; b.Text=""; b.AutoButtonColor=false
-    b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=13
-    Instance.new("UICorner",b).CornerRadius=UDim.new(0,0)
-
-    -- Left accent bar (visible when active)
-    local bar = Instance.new("Frame", b)
-    bar.Name="ActiveBar"; bar.Size=UDim2.new(0,3,0.6,0)
-    bar.AnchorPoint=Vector2.new(0,0.5); bar.Position=UDim2.new(0,0,0.5,0)
-    bar.BackgroundColor3=C.ACCENT2; bar.BorderSizePixel=0; bar.ZIndex=15
-    bar.BackgroundTransparency=1
-    Instance.new("UICorner",bar).CornerRadius=UDim.new(0,2)
-
-    -- Label only — no icon
-    local lbl = Instance.new("TextLabel", b)
-    lbl.Size=UDim2.new(1,-16,1,0); lbl.Position=UDim2.new(0,14,0,0)
-    lbl.BackgroundTransparency=1; lbl.Text=name
-    lbl.TextColor3=Color3.fromRGB(110,95,140)
-    lbl.TextSize=13; lbl.Font=FONT_SEMI
-    lbl.TextXAlignment=Enum.TextXAlignment.Left
-    lbl.ZIndex=14
-
-    -- dummy ico table entry so switchTab doesn't error
-    local ico = Instance.new("TextLabel", b)
-    ico.Size=UDim2.new(0,0,0,0); ico.BackgroundTransparency=1
-    ico.Text=""; ico.ZIndex=0
-
-    tabButtons[name]=b; tabLabels[name]=lbl; tabIcons[name]=ico
-    tabPages[name]=makePage()
-
-    b.MouseButton1Click:Connect(function() switchTab(name) end)
-    b.MouseEnter:Connect(function()
-        if activeTab~=name then
-            tween(b,{BackgroundTransparency=0.93},0.1)
-            lbl.TextColor3=Color3.fromRGB(180,160,210)
-        end
-    end)
-    b.MouseLeave:Connect(function()
-        if activeTab~=name then
-            tween(b,{BackgroundTransparency=1},0.1)
-            lbl.TextColor3=Color3.fromRGB(110,95,140)
-        end
-    end)
+local b = Instance.new("TextButton", tabList)
+b.Size=UDim2.new(1,0,0,40); b.BackgroundColor3=Color3.fromRGB(180,80,255)
+b.BackgroundTransparency=1; b.Text=""; b.AutoButtonColor=false
+b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=13
+Instance.new("UICorner",b).CornerRadius=UDim.new(0,0)
+local bar = Instance.new("Frame", b)
+bar.Name="ActiveBar"; bar.Size=UDim2.new(0,3,0.6,0)
+bar.AnchorPoint=Vector2.new(0,0.5); bar.Position=UDim2.new(0,0,0.5,0)
+bar.BackgroundColor3=C.ACCENT2; bar.BorderSizePixel=0; bar.ZIndex=15
+bar.BackgroundTransparency=1
+Instance.new("UICorner",bar).CornerRadius=UDim.new(0,2)
+local lbl = Instance.new("TextLabel", b)
+lbl.Size=UDim2.new(1,-16,1,0); lbl.Position=UDim2.new(0,14,0,0)
+lbl.BackgroundTransparency=1; lbl.Text=name
+lbl.TextColor3=Color3.fromRGB(110,95,140)
+lbl.TextSize=13; lbl.Font=FONT_SEMI
+lbl.TextXAlignment=Enum.TextXAlignment.Left
+lbl.ZIndex=14
+local ico = Instance.new("TextLabel", b)
+ico.Size=UDim2.new(0,0,0,0); ico.BackgroundTransparency=1
+ico.Text=""; ico.ZIndex=0
+tabButtons[name]=b; tabLabels[name]=lbl; tabIcons[name]=ico
+tabPages[name]=makePage()
+b.MouseButton1Click:Connect(function() switchTab(name) end)
+b.MouseEnter:Connect(function()
+if activeTab~=name then
+tween(b,{BackgroundTransparency=0.93},0.1)
+lbl.TextColor3=Color3.fromRGB(180,160,210)
 end
-
--- ======================
--- COMPONENTS
--- ======================
+end)
+b.MouseLeave:Connect(function()
+if activeTab~=name then
+tween(b,{BackgroundTransparency=1},0.1)
+lbl.TextColor3=Color3.fromRGB(110,95,140)
+end
+end)
+end
 local function section(page, title, order)
-    local card=Instance.new("Frame")
-    card.Size=UDim2.new(1,-4,0,0); card.AutomaticSize=Enum.AutomaticSize.Y
-    card.BackgroundColor3=C.CARD; card.BorderSizePixel=0
-    card.LayoutOrder=order or 1; card.ZIndex=2; card.Parent=page
-    corner(card,10); stroke(card,C.BORDER,1)
-    listLayout(card,nil,6); padding(card,nil,10,12,12,12)
-    if title and title ~= "" then
-        local hdr=Instance.new("Frame")
-        hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundTransparency=1
-        hdr.LayoutOrder=0; hdr.ZIndex=3; hdr.Parent=card
-        local bar=Instance.new("Frame")
-        bar.Size=UDim2.new(0,3,1,0); bar.BackgroundColor3=C.ACCENT
-        bar.BorderSizePixel=0; bar.ZIndex=3; bar.Parent=hdr
-        corner(bar,2); gradient(bar,C.ACCENT2,C.ACCENT,90)
-        local lbl=Instance.new("TextLabel")
-        lbl.Size=UDim2.new(1,-12,1,0); lbl.Position=UDim2.new(0,10,0,0)
-        lbl.BackgroundTransparency=1; lbl.Text=title; lbl.TextColor3=C.TEXT
-        lbl.TextSize=13; lbl.Font=FONT_BOLD
-        lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=3; lbl.Parent=hdr
-    end
-    return card
+local card=Instance.new("Frame")
+card.Size=UDim2.new(1,-4,0,0); card.AutomaticSize=Enum.AutomaticSize.Y
+card.BackgroundColor3=C.CARD; card.BorderSizePixel=0
+card.LayoutOrder=order or 1; card.ZIndex=2; card.Parent=page
+corner(card,10); stroke(card,C.BORDER,1)
+listLayout(card,nil,6); padding(card,nil,10,12,12,12)
+if title and title ~= "" then
+local hdr=Instance.new("Frame")
+hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundTransparency=1
+hdr.LayoutOrder=0; hdr.ZIndex=3; hdr.Parent=card
+local bar=Instance.new("Frame")
+bar.Size=UDim2.new(0,3,1,0); bar.BackgroundColor3=C.ACCENT
+bar.BorderSizePixel=0; bar.ZIndex=3; bar.Parent=hdr
+corner(bar,2); gradient(bar,C.ACCENT2,C.ACCENT,90)
+local lbl=Instance.new("TextLabel")
+lbl.Size=UDim2.new(1,-12,1,0); lbl.Position=UDim2.new(0,10,0,0)
+lbl.BackgroundTransparency=1; lbl.Text=title; lbl.TextColor3=C.TEXT
+lbl.TextSize=13; lbl.Font=FONT_BOLD
+lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=3; lbl.Parent=hdr
 end
-
+return card
+end
 local function btn(parent, label, color, order)
-    color = color or C.ACCENT
-    local b=Instance.new("TextButton")
-    b.Size=UDim2.new(1,0,0,32); b.BackgroundColor3=color
-    b.Text=label; b.TextColor3=C.TEXT; b.TextSize=14; b.Font=FONT_BOLD
-    b.BorderSizePixel=0; b.LayoutOrder=order or 99; b.ZIndex=3; b.Parent=parent
-    corner(b,7); gradient(b,color,color:Lerp(Color3.new(0,0,0),0.25),90)
-    b.MouseEnter:Connect(function() tween(b,{BackgroundTransparency=0.2}) end)
-    b.MouseLeave:Connect(function() tween(b,{BackgroundTransparency=0}) end)
-    return b
+color = color or C.ACCENT
+local b=Instance.new("TextButton")
+b.Size=UDim2.new(1,0,0,32); b.BackgroundColor3=color
+b.Text=label; b.TextColor3=C.TEXT; b.TextSize=14; b.Font=FONT_BOLD
+b.BorderSizePixel=0; b.LayoutOrder=order or 99; b.ZIndex=3; b.Parent=parent
+corner(b,7); gradient(b,color,color:Lerp(Color3.new(0,0,0),0.25),90)
+b.MouseEnter:Connect(function() tween(b,{BackgroundTransparency=0.2}) end)
+b.MouseLeave:Connect(function() tween(b,{BackgroundTransparency=0}) end)
+return b
 end
-
 local function label(parent, text, order)
-    local l=Instance.new("TextLabel")
-    l.Size=UDim2.new(1,0,0,18); l.BackgroundTransparency=1
-    l.Text=text; l.TextColor3=C.SUBTEXT; l.TextSize=11; l.Font=FONT_REG
-    l.TextXAlignment=Enum.TextXAlignment.Left
-    l.LayoutOrder=order or 99; l.ZIndex=3; l.Parent=parent
-    return l
+local l=Instance.new("TextLabel")
+l.Size=UDim2.new(1,0,0,18); l.BackgroundTransparency=1
+l.Text=text; l.TextColor3=C.SUBTEXT; l.TextSize=11; l.Font=FONT_REG
+l.TextXAlignment=Enum.TextXAlignment.Left
+l.LayoutOrder=order or 99; l.ZIndex=3; l.Parent=parent
+return l
 end
-
 local function input(parent, placeholder, order)
-    local f=Instance.new("Frame")
-    f.Size=UDim2.new(1,0,0,32); f.BackgroundColor3=C.BG; f.BorderSizePixel=0
-    f.LayoutOrder=order or 99; f.ZIndex=3; f.Parent=parent
-    corner(f,7); stroke(f,C.BORDER,1)
-    local tb=Instance.new("TextBox")
-    tb.Size=UDim2.new(1,-16,1,0); tb.Position=UDim2.new(0,8,0,0)
-    tb.BackgroundTransparency=1; tb.Text=""
-    tb.PlaceholderText=placeholder; tb.PlaceholderColor3=C.DIM
-    tb.TextColor3=C.TEXT; tb.TextSize=13; tb.Font=FONT_REG
-    tb.TextXAlignment=Enum.TextXAlignment.Left; tb.ZIndex=4; tb.Parent=f
-    tb.Focused:Connect(function() tween(f,{BackgroundColor3=C.PANEL}) end)
-    tb.FocusLost:Connect(function() tween(f,{BackgroundColor3=C.BG}) end)
-    return tb
+local f=Instance.new("Frame")
+f.Size=UDim2.new(1,0,0,32); f.BackgroundColor3=C.BG; f.BorderSizePixel=0
+f.LayoutOrder=order or 99; f.ZIndex=3; f.Parent=parent
+corner(f,7); stroke(f,C.BORDER,1)
+local tb=Instance.new("TextBox")
+tb.Size=UDim2.new(1,-16,1,0); tb.Position=UDim2.new(0,8,0,0)
+tb.BackgroundTransparency=1; tb.Text=""
+tb.PlaceholderText=placeholder; tb.PlaceholderColor3=C.DIM
+tb.TextColor3=C.TEXT; tb.TextSize=13; tb.Font=FONT_REG
+tb.TextXAlignment=Enum.TextXAlignment.Left; tb.ZIndex=4; tb.Parent=f
+tb.Focused:Connect(function() tween(f,{BackgroundColor3=C.PANEL}) end)
+tb.FocusLost:Connect(function() tween(f,{BackgroundColor3=C.BG}) end)
+return tb
 end
-
 local function toggle(parent, text, order, default, saveKey)
-    -- Full-width row with a small indicator light. Only the circle lights up;
-    -- the row itself stays dark so enabled states do not flood the panel.
-    saveKey = saveKey or ("toggle:"..text)
-
-    local btnRow=Instance.new("TextButton")
-    btnRow.Size=UDim2.new(1,0,0,34); btnRow.AutoButtonColor=false
-    btnRow.BackgroundColor3=C.PANEL; btnRow.BorderSizePixel=0
-    btnRow.Text=""; btnRow.LayoutOrder=order or 99; btnRow.ZIndex=3; btnRow.Parent=parent
-    corner(btnRow,7); stroke(btnRow,C.BORDER,1)
-
-    local lbl=Instance.new("TextLabel")
-    lbl.Size=UDim2.new(1,-40,1,0); lbl.Position=UDim2.new(0,12,0,0)
-    lbl.BackgroundTransparency=1
-    lbl.Text=text; lbl.TextColor3=C.TEXT; lbl.TextSize=13; lbl.Font=FONT_SEMI
-    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4; lbl.Parent=btnRow
-
-    local light=Instance.new("Frame")
-    light.Size=UDim2.new(0,12,0,12); light.Position=UDim2.new(1,-22,0.5,-6)
-    light.BackgroundColor3=C.DISABLED; light.BorderSizePixel=0; light.ZIndex=5; light.Parent=btnRow
-    corner(light,6)
-
-    local glow=Instance.new("Frame")
-    glow.Size=UDim2.new(0,22,0,22); glow.Position=UDim2.new(0.5,-11,0.5,-11)
-    glow.BackgroundColor3=C.ACCENT; glow.BackgroundTransparency=1
-    glow.BorderSizePixel=0; glow.ZIndex=4; glow.Parent=light
-    corner(glow,11)
-
-    local enabled = getSavedToggle(saveKey, default)
-    local function apply()
-        tween(btnRow,{BackgroundColor3=C.PANEL})
-        if enabled then
-            tween(light,{BackgroundColor3=C.ACCENT})
-            tween(glow,{BackgroundTransparency=0.35})
-            lbl.TextColor3 = C.TEXT
-        else
-            tween(light,{BackgroundColor3=C.DISABLED})
-            tween(glow,{BackgroundTransparency=1})
-            lbl.TextColor3 = C.SUBTEXT
-        end
-    end
-    apply()
-
-    local callbacks = {}
-    btnRow.MouseButton1Click:Connect(function()
-        enabled = not enabled
-        setSavedToggle(saveKey, enabled)
-        apply()
-        for _,cb in ipairs(callbacks) do _ts(cb, enabled) end
-    end)
-    return btnRow, function() return enabled end, function(cb)
-        table.insert(callbacks, cb)
-        -- Fire immediately if already ON when script loads (e.g. saved state)
-        if enabled then _ts(cb, true) end
-    end
+saveKey = saveKey or ("toggle:"..text)
+local btnRow=Instance.new("TextButton")
+btnRow.Size=UDim2.new(1,0,0,34); btnRow.AutoButtonColor=false
+btnRow.BackgroundColor3=C.PANEL; btnRow.BorderSizePixel=0
+btnRow.Text=""; btnRow.LayoutOrder=order or 99; btnRow.ZIndex=3; btnRow.Parent=parent
+corner(btnRow,7); stroke(btnRow,C.BORDER,1)
+local lbl=Instance.new("TextLabel")
+lbl.Size=UDim2.new(1,-40,1,0); lbl.Position=UDim2.new(0,12,0,0)
+lbl.BackgroundTransparency=1
+lbl.Text=text; lbl.TextColor3=C.TEXT; lbl.TextSize=13; lbl.Font=FONT_SEMI
+lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4; lbl.Parent=btnRow
+local light=Instance.new("Frame")
+light.Size=UDim2.new(0,12,0,12); light.Position=UDim2.new(1,-22,0.5,-6)
+light.BackgroundColor3=C.DISABLED; light.BorderSizePixel=0; light.ZIndex=5; light.Parent=btnRow
+corner(light,6)
+local glow=Instance.new("Frame")
+glow.Size=UDim2.new(0,22,0,22); glow.Position=UDim2.new(0.5,-11,0.5,-11)
+glow.BackgroundColor3=C.ACCENT; glow.BackgroundTransparency=1
+glow.BorderSizePixel=0; glow.ZIndex=4; glow.Parent=light
+corner(glow,11)
+local enabled = getSavedToggle(saveKey, default)
+local function apply()
+tween(btnRow,{BackgroundColor3=C.PANEL})
+if enabled then
+tween(light,{BackgroundColor3=C.ACCENT})
+tween(glow,{BackgroundTransparency=0.35})
+lbl.TextColor3 = C.TEXT
+else
+tween(light,{BackgroundColor3=C.DISABLED})
+tween(glow,{BackgroundTransparency=1})
+lbl.TextColor3 = C.SUBTEXT
 end
-
+end
+apply()
+local callbacks = {}
+btnRow.MouseButton1Click:Connect(function()
+enabled = not enabled
+setSavedToggle(saveKey, enabled)
+apply()
+for _,cb in ipairs(callbacks) do _ts(cb, enabled) end
+end)
+return btnRow, function() return enabled end, function(cb)
+table.insert(callbacks, cb)
+if enabled then _ts(cb, true) end
+end
+end
 local function chip(parent, text, selected, onClick)
-    local c=Instance.new("TextButton")
-    c.AutomaticSize=Enum.AutomaticSize.X
-    c.Size=UDim2.new(0,0,1,-6)
-    c.BackgroundColor3=selected and C.ACCENT or C.PANEL
-    c.Text=text; c.TextColor3=selected and C.TEXT or C.SUBTEXT
-    c.TextSize=12; c.Font=FONT_SEMI; c.BorderSizePixel=0
-    c.ZIndex=4; c.Parent=parent; corner(c,6); padding(c,nil,0,0,10,10)
-    c.MouseButton1Click:Connect(onClick)
-    return c
+local c=Instance.new("TextButton")
+c.AutomaticSize=Enum.AutomaticSize.X
+c.Size=UDim2.new(0,0,1,-6)
+c.BackgroundColor3=selected and C.ACCENT or C.PANEL
+c.Text=text; c.TextColor3=selected and C.TEXT or C.SUBTEXT
+c.TextSize=12; c.Font=FONT_SEMI; c.BorderSizePixel=0
+c.ZIndex=4; c.Parent=parent; corner(c,6); padding(c,nil,0,0,10,10)
+c.MouseButton1Click:Connect(onClick)
+return c
 end
-
 local function hScroll(parent, h, order)
-    local s=Instance.new("ScrollingFrame")
-    s.Size=UDim2.new(1,0,0,h); s.BackgroundTransparency=1; s.BorderSizePixel=0
-    s.ScrollBarThickness=0; s.CanvasSize=UDim2.new(0,0,0,0)
-    s.AutomaticCanvasSize=Enum.AutomaticSize.X
-    s.ScrollingDirection=Enum.ScrollingDirection.X
-    s.LayoutOrder=order or 99; s.ZIndex=3; s.Parent=parent
-    listLayout(s,Enum.FillDirection.Horizontal,6); padding(s,nil,3,3,0,0)
-    return s
+local s=Instance.new("ScrollingFrame")
+s.Size=UDim2.new(1,0,0,h); s.BackgroundTransparency=1; s.BorderSizePixel=0
+s.ScrollBarThickness=0; s.CanvasSize=UDim2.new(0,0,0,0)
+s.AutomaticCanvasSize=Enum.AutomaticSize.X
+s.ScrollingDirection=Enum.ScrollingDirection.X
+s.LayoutOrder=order or 99; s.ZIndex=3; s.Parent=parent
+listLayout(s,Enum.FillDirection.Horizontal,6); padding(s,nil,3,3,0,0)
+return s
 end
-
--- ======================
--- LOBBY TAB - AUTO SUMMON TOGGLES
--- ======================
 do
 local lobbyPage = tabPages["Lobby"]
-
 local sumSec = section(lobbyPage, "Auto Summoner", 1)
-
--- Collapsible toggle list
 local sumColBtn = Instance.new("TextButton", sumSec)
 sumColBtn.Size=UDim2.new(1,0,0,30); sumColBtn.BackgroundColor3=C.PANEL
 sumColBtn.BorderSizePixel=0; sumColBtn.LayoutOrder=1
@@ -675,74 +554,50 @@ sumColBtn.Text="▶  Summoner"; sumColBtn.TextColor3=C.ACCENT2
 sumColBtn.TextSize=12; sumColBtn.Font=FONT_SEMI
 sumColBtn.AutoButtonColor=false; sumColBtn.ZIndex=3
 corner(sumColBtn,8); stroke(sumColBtn,C.ACCENT,1)
-
 local sumListFrame = Instance.new("Frame", sumSec)
 sumListFrame.Size=UDim2.new(1,0,0,0); sumListFrame.AutomaticSize=Enum.AutomaticSize.Y
 sumListFrame.BackgroundTransparency=1; sumListFrame.BorderSizePixel=0
 sumListFrame.LayoutOrder=2; sumListFrame.Visible=false
 listLayout(sumListFrame, nil, 4)
-
 local sumOpen = false
 sumColBtn.MouseButton1Click:Connect(function()
-    sumOpen = not sumOpen
-    sumListFrame.Visible = sumOpen
-    sumColBtn.Text = (sumOpen and "▼" or "▶") .. "  Summoner"
+sumOpen = not sumOpen
+sumListFrame.Visible = sumOpen
+sumColBtn.Text = (sumOpen and "▼" or "▶") .. "  Summoner"
 end)
-
--- Logger-confirmed signature (UPD 12.5):
---   ALL banners use ONE remote: Networking.Units.SummonEvent
---   SummonEvent:FireServer("SummonMany", bannerId, amount)
---   amount = 50 for all banners — game uses max-pull and deducts from currency.
---
---   bannerId confirmed from live captures:
---     Selection       "Selection"
---     Special         "Special"
---     StandardMemoria "StandardMemoria"
---     Spring26        "Spring26"
---     Spring26Memoria "Spring26Memoria"
-
--- Lazy-resolved so a slow RS replication doesn't silently return nil at load time
 local function getSummonRemote()
-    local units = Net:FindFirstChild("Units")
-    return units and units:FindFirstChild("SummonEvent")
+local units = Net:FindFirstChild("Units")
+return units and units:FindFirstChild("SummonEvent")
 end
-
 local function fireBanner(bannerId)
-    local remote = getSummonRemote()
-    if not remote then
-        notify("SummonEvent not found", false)
-        return false
-    end
-    -- amount=50: game accepts 50 as the max-pull value and deducts the correct
-    -- currency automatically, same as clicking the 10x/50x button manually.
-    return pcall(function()
-        remote:FireServer("SummonMany", bannerId, 50)
-    end)
+local remote = getSummonRemote()
+if not remote then
+notify("SummonEvent not found", false)
+return false
 end
-
+return pcall(function()
+remote:FireServer("SummonMany", bannerId, 50)
+end)
+end
 local BANNERS = {
-    { name = "Selection",        id = "Selection"        },
-    { name = "Special",          id = "Special"          },
-    { name = "Standard Memoria", id = "StandardMemoria"  },
-    { name = "Spring Banner",    id = "Spring26"         },
-    { name = "Spring Memoria",   id = "Spring26Memoria"  },
+{ name = "Selection",        id = "Selection"        },
+{ name = "Special",          id = "Special"          },
+{ name = "Standard Memoria", id = "StandardMemoria"  },
+{ name = "Spring Banner",    id = "Spring26"         },
+{ name = "Spring Memoria",   id = "Spring26Memoria"  },
 }
-
 for i, b in ipairs(BANNERS) do
-    local _, getOn = toggle(sumListFrame, "Auto: "..b.name, i, false, "summon-v7:"..b.id)
-    _ts(function()
-        while true do
-            if getOn() and not inGameMode() then
-                fireBanner(b.id)
-            end
-            _tw(1.25)
-        end
-    end)
+local _, getOn = toggle(sumListFrame, "Auto: "..b.name, i, false, "summon-v7:"..b.id)
+_ts(function()
+while true do
+if getOn() and not inGameMode() then
+fireBanner(b.id)
 end
-
--- Claimers: collapsible selector, each toggle auto-loops every 5s in lobby
+_tw(1.25)
+end
+end)
+end
 local claimSec = section(lobbyPage, "Claimer", 2)
-
 local clmColBtn = Instance.new("TextButton", claimSec)
 clmColBtn.Size=UDim2.new(1,0,0,30); clmColBtn.BackgroundColor3=C.PANEL
 clmColBtn.BorderSizePixel=0; clmColBtn.LayoutOrder=1
@@ -750,85 +605,70 @@ clmColBtn.Text="▶  Claimers"; clmColBtn.TextColor3=C.ACCENT2
 clmColBtn.TextSize=12; clmColBtn.Font=FONT_SEMI
 clmColBtn.AutoButtonColor=false; clmColBtn.ZIndex=3
 corner(clmColBtn,8); stroke(clmColBtn,C.ACCENT,1)
-
 local clmListFrame = Instance.new("Frame", claimSec)
 clmListFrame.Size=UDim2.new(1,0,0,0); clmListFrame.AutomaticSize=Enum.AutomaticSize.Y
 clmListFrame.BackgroundTransparency=1; clmListFrame.BorderSizePixel=0
 clmListFrame.LayoutOrder=2; clmListFrame.Visible=false
 listLayout(clmListFrame, nil, 4)
-
 local clmOpen = false
 clmColBtn.MouseButton1Click:Connect(function()
-    clmOpen = not clmOpen
-    clmListFrame.Visible = clmOpen
-    clmColBtn.Text = (clmOpen and "▼" or "▶") .. "  Claimers"
+clmOpen = not clmOpen
+clmListFrame.Visible = clmOpen
+clmColBtn.Text = (clmOpen and "▼" or "▶") .. "  Claimers"
 end)
-
 local CLAIMERS = {
-    { name="Claim All Quests",     key="claim.quests",     fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
-    { name="Claim All Milestones", key="claim.milestones", fn=function()
-        for _,m in ipairs({10,25,50,70,100,150,200,250,300,400,500,750,1000}) do
-            Net.Milestones.MilestonesEvent:FireServer("Claim", m); _tw(0.08)
-        end
-    end},
-    { name="Claim Daily Reward",   key="claim.daily",      fn=function()
-        for day=1,7 do Net.DailyRewardEvent:FireServer("Claim",{[1]="Special",[2]=day}); _tw(0.08) end
-    end},
-    { name="Claim Battle Pass",    key="claim.battlepass", fn=function() Net.BattlepassEvent:FireServer("ClaimAll") end},
+{ name="Claim All Quests",     key="claim.quests",     fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
+{ name="Claim All Milestones", key="claim.milestones", fn=function()
+for _,m in ipairs({10,25,50,70,100,150,200,250,300,400,500,750,1000}) do
+Net.Milestones.MilestonesEvent:FireServer("Claim", m); _tw(0.08)
+end
+end},
+{ name="Claim Daily Reward",   key="claim.daily",      fn=function()
+for day=1,7 do Net.DailyRewardEvent:FireServer("Claim",{[1]="Special",[2]=day}); _tw(0.08) end
+end},
+{ name="Claim Battle Pass",    key="claim.battlepass", fn=function() Net.BattlepassEvent:FireServer("ClaimAll") end},
 }
 local claimGetters = {}
 for i,c in ipairs(CLAIMERS) do
-    local _, getter = toggle(clmListFrame, c.name, i, false, c.key)
-    claimGetters[i] = getter
+local _, getter = toggle(clmListFrame, c.name, i, false, c.key)
+claimGetters[i] = getter
 end
--- Loop: fires each enabled claimer every 5s in lobby
 do
-    local loopClock = 0
-    RunSvc.Heartbeat:Connect(function()
-        if os.clock() - loopClock < 5 then return end
-        loopClock = os.clock()
-        if inGameMode() then return end
-        for i, c in ipairs(CLAIMERS) do
-            if claimGetters[i] and claimGetters[i]() then
-                _ts(function() pcall(c.fn) end)
-            end
-        end
-    end)
+local loopClock = 0
+RunSvc.Heartbeat:Connect(function()
+if os.clock() - loopClock < 5 then return end
+loopClock = os.clock()
+if inGameMode() then return end
+for i, c in ipairs(CLAIMERS) do
+if claimGetters[i] and claimGetters[i]() then
+_ts(function() pcall(c.fn) end)
 end
 end
-
--- Auto Skip Start: uses game's own SettingsEvent("Toggle", "AutoSkipStart")
+end)
+end
+end
 do
 local matchStartSec = section(lobbyPage, "Match Settings", 3)
 local _, getAutoSkipStart, onAutoSkipStart = toggle(matchStartSec, "Auto Start Match", 1, false, "lobby.autoskipstart")
-label(matchStartSec, "Automatically votes to start the match", 2)
+label(matchStartSec,"Automatically votes to...", 2)
 local settingsEvLobby = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
 onAutoSkipStart(function()
-    local ev = settingsEvLobby or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
-    if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
+local ev = settingsEvLobby or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
 end)
 end
-
--- ======================
--- JOINER TAB
--- ======================
 do
 local joinerPage = tabPages["Joiner"]
-
--- Helper: build act lists of length n
 local function acts(n) local t={}; for i=1,n do t[i]="Act"..i end; return t end
-
 local STAGES = {
-    Story        = (function() local t={}; for i=1,12 do t["Stage"..i]=acts(6) end; return t end)(),
-    LegendStage  = (function() local t={}; for i=1,12 do t["Stage"..i]=acts(3) end; return t end)(),
-    Dungeon      = { Stage1={"Act1","Act2","Act3","OccultHunt"}, Stage2={"AntIsland"}, Stage3={"FrozenVolcano"}, Stage4=acts(9), Stage5={"Underworld"} },
-    Raid         = { Stage1=acts(4), Stage2=acts(5), Stage3=acts(2) },
-    Challenge    = { Stage1={"ChallengeAct"}, Stage2={"ChallengeAct"}, Stage3={"ChallengeAct"} },
-    BossEvent    = { IgrosEvent={"Act1","Act1Elite"}, SukonoEvent={"Act1"} },
+Story        = (function() local t={}; for i=1,12 do t["Stage"..i]=acts(6) end; return t end)(),
+LegendStage  = (function() local t={}; for i=1,12 do t["Stage"..i]=acts(3) end; return t end)(),
+Dungeon      = { Stage1={"Act1","Act2","Act3","OccultHunt"}, Stage2={"AntIsland"}, Stage3={"FrozenVolcano"}, Stage4=acts(9), Stage5={"Underworld"} },
+Raid         = { Stage1=acts(4), Stage2=acts(5), Stage3=acts(2) },
+Challenge    = { Stage1={"ChallengeAct"}, Stage2={"ChallengeAct"}, Stage3={"ChallengeAct"} },
+BossEvent    = { IgrosEvent={"Act1","Act1Elite"}, SukonoEvent={"Act1"} },
 }
-
 local selType, selStage, selAct = "Story","Stage1","Act1"
-
 local joinSec = section(joinerPage, "Stage Joiner", 1)
 label(joinSec, "Stage Type", 1)
 local typeScroll = hScroll(joinSec, 32, 2)
@@ -836,523 +676,437 @@ label(joinSec, "Stage", 3)
 local stageScroll = hScroll(joinSec, 32, 4)
 label(joinSec, "Act", 5)
 local actScroll = hScroll(joinSec, 32, 6)
-
 local function refreshActs()
-    for _,c in ipairs(actScroll:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
-    local list = STAGES[selType] and STAGES[selType][selStage] or {}
-    selAct = list[1] or selAct
-    for _,a in ipairs(list) do
-        chip(actScroll, a, a==selAct, function()
-            selAct=a
-            for _,ch in ipairs(actScroll:GetChildren()) do
-                if ch:IsA("TextButton") then
-                    tween(ch,{BackgroundColor3 = ch.Text==selAct and C.ACCENT or C.PANEL})
-                    ch.TextColor3 = ch.Text==selAct and C.TEXT or C.SUBTEXT
-                end
-            end
-        end)
-    end
+for _,c in ipairs(actScroll:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+local list = STAGES[selType] and STAGES[selType][selStage] or {}
+selAct = list[1] or selAct
+for _,a in ipairs(list) do
+chip(actScroll, a, a==selAct, function()
+selAct=a
+for _,ch in ipairs(actScroll:GetChildren()) do
+if ch:IsA("TextButton") then
+tween(ch,{BackgroundColor3 = ch.Text==selAct and C.ACCENT or C.PANEL})
+ch.TextColor3 = ch.Text==selAct and C.TEXT or C.SUBTEXT
 end
-
+end
+end)
+end
+end
 local function refreshStages()
-    for _,c in ipairs(stageScroll:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
-    local stages = STAGES[selType] or {}
-    local keys = {}
-    for k in pairs(stages) do table.insert(keys,k) end
-    table.sort(keys)
-    selStage = keys[1] or selStage
-    for _,sName in ipairs(keys) do
-        chip(stageScroll, sName, sName==selStage, function()
-            selStage = sName
-            for _,ch in ipairs(stageScroll:GetChildren()) do
-                if ch:IsA("TextButton") then
-                    tween(ch,{BackgroundColor3 = ch.Text==selStage and C.ACCENT or C.PANEL})
-                    ch.TextColor3 = ch.Text==selStage and C.TEXT or C.SUBTEXT
-                end
-            end
-            refreshActs()
-        end)
-    end
-    refreshActs()
+for _,c in ipairs(stageScroll:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+local stages = STAGES[selType] or {}
+local keys = {}
+for k in pairs(stages) do table.insert(keys,k) end
+table.sort(keys)
+selStage = keys[1] or selStage
+for _,sName in ipairs(keys) do
+chip(stageScroll, sName, sName==selStage, function()
+selStage = sName
+for _,ch in ipairs(stageScroll:GetChildren()) do
+if ch:IsA("TextButton") then
+tween(ch,{BackgroundColor3 = ch.Text==selStage and C.ACCENT or C.PANEL})
+ch.TextColor3 = ch.Text==selStage and C.TEXT or C.SUBTEXT
 end
-
+end
+refreshActs()
+end)
+end
+refreshActs()
+end
 local typeKeys = {}
 for k in pairs(STAGES) do table.insert(typeKeys,k) end
 table.sort(typeKeys)
 for _,tName in ipairs(typeKeys) do
-    chip(typeScroll, tName, tName==selType, function()
-        selType=tName
-        for _,ch in ipairs(typeScroll:GetChildren()) do
-            if ch:IsA("TextButton") then
-                tween(ch,{BackgroundColor3 = ch.Text==selType and C.ACCENT or C.PANEL})
-                ch.TextColor3 = ch.Text==selType and C.TEXT or C.SUBTEXT
-            end
-        end
-        refreshStages()
-    end)
+chip(typeScroll, tName, tName==selType, function()
+selType=tName
+for _,ch in ipairs(typeScroll:GetChildren()) do
+if ch:IsA("TextButton") then
+tween(ch,{BackgroundColor3 = ch.Text==selType and C.ACCENT or C.PANEL})
+ch.TextColor3 = ch.Text==selType and C.TEXT or C.SUBTEXT
+end
 end
 refreshStages()
-
+end)
+end
+refreshStages()
 local optSec = section(joinerPage, "Options", 2)
 local _, getNightmare  = toggle(optSec, "Nightmare Mode", 1)
 local _, getFriendsOnly= toggle(optSec, "Friends Only", 2)
 local _, getAutoStart  = toggle(optSec, "Auto-Start Match (actually enter)", 3, true)
-
 local joinBtnSec = section(joinerPage, "", 3)
 local joinBtn = btn(joinBtnSec, "Join Match", C.GREEN, 1)
 joinBtn.MouseButton1Click:Connect(function()
-    safeCall(function()
-        local friendsOnly = getFriendsOnly()
-        local payload = {
-            Difficulty  = getNightmare() and "Nightmare" or "Normal",
-            Act         = selAct,
-            StageType   = selType,
-            Stage       = selStage,
-            FriendsOnly = friendsOnly,
-        }
-
-        -- Search direct children of Networking only — no recursive search.
-        -- Recursive FindFirstChild can match unrelated remotes deeper in the tree.
-        -- AddMatch/CreateMatch excluded — those strings crash SummonButtonsHandler.
-        local joinRemoteNames = {"JoinMatch", "MatchEvent", "LobbyMatchEvent"}
-        local fired = false
-        for _, name in ipairs(joinRemoteNames) do
-            local r = Net:FindFirstChild(name)  -- direct children only
-            if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
-                local ok = pcall(function()
-                    if r:IsA("RemoteFunction") then
-                        r:InvokeServer(friendsOnly, payload)
-                    else
-                        r:FireServer(friendsOnly, payload)
-                    end
-                end)
-                if ok then fired = true; break end
-            end
-        end
-        if not fired then error("No join remote found") end
-
-        if getAutoStart() then
-            _tw(0.5)
-            local sm = Net:FindFirstChild("StartMatch", true) or Net:FindFirstChild("PlayMatch", true)
-            if sm and (sm:IsA("RemoteEvent") or sm:IsA("RemoteFunction")) then
-                pcall(function()
-                    if sm:IsA("RemoteFunction") then sm:InvokeServer(friendsOnly)
-                    else sm:FireServer(friendsOnly) end
-                end)
-            end
-        end
-    end, "Joining "..selType.." "..selStage.." "..selAct, "Join failed")
+safeCall(function()
+local friendsOnly = getFriendsOnly()
+local payload = {
+Difficulty  = getNightmare() and "Nightmare" or "Normal",
+Act         = selAct,
+StageType   = selType,
+Stage       = selStage,
+FriendsOnly = friendsOnly,
+}
+local joinRemoteNames = {"JoinMatch", "MatchEvent", "LobbyMatchEvent"}
+local fired = false
+for _, name in ipairs(joinRemoteNames) do
+local r = Net:FindFirstChild(name)
+if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
+local ok = pcall(function()
+if r:IsA("RemoteFunction") then
+r:InvokeServer(friendsOnly, payload)
+else
+r:FireServer(friendsOnly, payload)
+end
+end)
+if ok then fired = true; break end
+end
+end
+if not fired then error("No join remote found") end
+if getAutoStart() then
+_tw(0.5)
+local sm = Net:FindFirstChild("StartMatch", true) or Net:FindFirstChild("PlayMatch", true)
+if sm and (sm:IsA("RemoteEvent") or sm:IsA("RemoteFunction")) then
+pcall(function()
+if sm:IsA("RemoteFunction") then sm:InvokeServer(friendsOnly)
+else sm:FireServer(friendsOnly) end
 end)
 end
-
--- ======================
--- GAME TAB
--- ======================
+end
+end, "Joining "..selType.." "..selStage.." "..selAct, "Join failed")
+end)
+end
 do
 local gamePage = tabPages["Game"]
-
--- Track current wave — tries WavesAmount label AND WaveInfoEvent as backup
 local currentWave = 0
 do
-    local waveConn = nil
-
-    local function parseWave(txt)
-        if type(txt) ~= "string" then return nil end
-        return tonumber(txt:match("(%d+)"))
-    end
-
-    local function readTextFrom(obj)
-        -- obj might be a TextLabel directly, or a Frame containing one
-        if not obj then return nil end
-        local ok, txt = pcall(function() return obj.Text end)
-        if ok and txt then return parseWave(txt) end
-        -- Try first TextLabel child
-        for _, c in ipairs(obj:GetChildren()) do
-            local ok2, t2 = pcall(function() return c.Text end)
-            if ok2 and t2 then
-                local n = parseWave(t2)
-                if n then return n end
-            end
-        end
-        return nil
-    end
-
-    local function connectWaveLabel()
-        local hud      = realGui:FindFirstChild("HUD")
-        local map      = hud and hud:FindFirstChild("Map")
-        -- Confirmed path from Dex: Map.WaveInfo (Frame) > Wave (TextLabel)
-        -- Text format is "1/∞" — parseWave extracts the leading number.
-        local waveInfo = map and map:FindFirstChild("WaveInfo")
-        local obj      = waveInfo and waveInfo:FindFirstChild("Wave")
-        if not obj then return false end
-        local n = readTextFrom(obj)
-        if n then currentWave = n end
-        if waveConn then waveConn:Disconnect() end
-        -- Watch text changes — works for both TextLabel and Frame > TextLabel
-        local target = obj
-        pcall(function()
-            obj.Text  -- test if it has Text directly
-        end)
-        local ok = pcall(function() local _ = obj.Text end)
-        if not ok then
-            -- It's a Frame; watch the first TextLabel child
-            for _, c in ipairs(obj:GetChildren()) do
-                local hasText = pcall(function() local _ = c.Text end)
-                if hasText then target = c; break end
-            end
-        end
-        -- Connect signal — wrapped in pcall in case target has no Text property
-        pcall(function()
-            waveConn = target:GetPropertyChangedSignal("Text"):Connect(function()
-                local v = readTextFrom(obj)
-                if v then currentWave = v end
-            end)
-        end)
-        return true
-    end
-
-    -- Backup: WaveInfoEvent fires whenever wave changes
-    local waveEv = Net:FindFirstChild("WaveInfoEvent")
-    if waveEv then
-        waveEv.OnClientEvent:Connect(function(...)
-            for _, v in ipairs({...}) do
-                if type(v) == "number" and v > 0 then
-                    currentWave = v; return
-                elseif type(v) == "table" then
-                    local n = tonumber(v.Wave or v.Current or v.WaveNumber or v[1])
-                    if n and n > 0 then currentWave = n; return end
-                end
-            end
-        end)
-    end
-
-    local connected = false
-    RunSvc.Heartbeat:Connect(function()
-        if not inGameMode() then
-            currentWave = 0; connected = false; return
-        end
-        if not connected then
-            connected = connectWaveLabel()
-        end
-    end)
+local waveConn = nil
+local function parseWave(txt)
+if type(txt) ~= "string" then return nil end
+return tonumber(txt:match("(%d+)"))
 end
-
+local function readTextFrom(obj)
+if not obj then return nil end
+local ok, txt = pcall(function() return obj.Text end)
+if ok and txt then return parseWave(txt) end
+for _, c in ipairs(obj:GetChildren()) do
+local ok2, t2 = pcall(function() return c.Text end)
+if ok2 and t2 then
+local n = parseWave(t2)
+if n then return n end
+end
+end
+return nil
+end
+local function connectWaveLabel()
+local hud      = realGui:FindFirstChild("HUD")
+local map      = hud and hud:FindFirstChild("Map")
+local waveInfo = map and map:FindFirstChild("WaveInfo")
+local obj      = waveInfo and waveInfo:FindFirstChild("Wave")
+if not obj then return false end
+local n = readTextFrom(obj)
+if n then currentWave = n end
+if waveConn then waveConn:Disconnect() end
+local target = obj
+pcall(function()
+obj.Text
+end)
+local ok = pcall(function() local _ = obj.Text end)
+if not ok then
+for _, c in ipairs(obj:GetChildren()) do
+local hasText = pcall(function() local _ = c.Text end)
+if hasText then target = c; break end
+end
+end
+pcall(function()
+waveConn = target:GetPropertyChangedSignal("Text"):Connect(function()
+local v = readTextFrom(obj)
+if v then currentWave = v end
+end)
+end)
+return true
+end
+local waveEv = Net:FindFirstChild("WaveInfoEvent")
+if waveEv then
+waveEv.OnClientEvent:Connect(function(...)
+for _, v in ipairs({...}) do
+if type(v) == "number" and v > 0 then
+currentWave = v; return
+elseif type(v) == "table" then
+local n = tonumber(v.Wave or v.Current or v.WaveNumber or v[1])
+if n and n > 0 then currentWave = n; return end
+end
+end
+end)
+end
+local connected = false
+RunSvc.Heartbeat:Connect(function()
+if not inGameMode() then
+currentWave = 0; connected = false; return
+end
+if not connected then
+connected = connectWaveLabel()
+end
+end)
+end
 local matchSec = section(gamePage, "Match Controls", 1)
-
--- Restart on Wave: votes to restart when the current wave reaches the target
 local _, getRestartOnWave, onRestartOnWave = toggle(matchSec, "Restart on Wave", 1, false, "game.restartonwave")
-label(matchSec, "Votes to restart when the wave number is reached", 2)
-
--- Wave number stepper (default 15, live-updating)
+label(matchSec,"Votes to restart when ...", 2)
 do
-    local WAVE_SAVE = "OzWare_settings.json"
-    local settings  = {}
-    pcall(function()
-        if isfile and isfile(WAVE_SAVE) then
-            local t = HttpService:JSONDecode(readfile(WAVE_SAVE))
-            if type(t) == "table" then settings = t end
-        end
-    end)
-    local function saveSettings()
-        pcall(function()
-            writefile(WAVE_SAVE, HttpService:JSONEncode(settings))
-        end)
-    end
-
-    local targetWave = tonumber(settings.restartWave) or 15
-    local ROW_ORDER  = 3
-
-    local row = Instance.new("Frame")
-    row.Size=UDim2.new(1,0,0,34); row.BackgroundColor3=C.CARD
-    row.BorderSizePixel=0; row.LayoutOrder=ROW_ORDER; row.ZIndex=3
-    row.Parent=matchSec
-    corner(row,7); stroke(row,C.BORDER,1)
-
-    local waveLbl = Instance.new("TextLabel", row)
-    waveLbl.Size=UDim2.new(0.5,0,1,0); waveLbl.BackgroundTransparency=1
-    waveLbl.Text="On Wave:"; waveLbl.TextColor3=C.TEXT
-    waveLbl.TextSize=13; waveLbl.Font=FONT_REG
-    waveLbl.TextXAlignment=Enum.TextXAlignment.Left
-    waveLbl.Position=UDim2.new(0,10,0,0); waveLbl.ZIndex=4
-
-    -- Minus button
-    local btnM=Instance.new("TextButton", row)
-    btnM.Size=UDim2.new(0,28,0,24); btnM.AnchorPoint=Vector2.new(1,0.5)
-    btnM.Position=UDim2.new(1,-64,0.5,0)
-    btnM.BackgroundColor3=C.PANEL; btnM.BorderSizePixel=0
-    btnM.Text="−"; btnM.TextColor3=C.TEXT; btnM.TextSize=16
-    btnM.Font=FONT_BOLD; btnM.AutoButtonColor=false; btnM.ZIndex=4
-    corner(btnM,5)
-
-    -- Wave number display
-    local numLbl=Instance.new("TextLabel", row)
-    numLbl.Size=UDim2.new(0,32,1,0); numLbl.AnchorPoint=Vector2.new(1,0)
-    numLbl.Position=UDim2.new(1,-34,0,0)
-    numLbl.BackgroundTransparency=1; numLbl.Text=tostring(targetWave)
-    numLbl.TextColor3=C.ACCENT2; numLbl.TextSize=14
-    numLbl.Font=FONT_BOLD; numLbl.ZIndex=4
-
-    -- Plus button
-    local btnP=Instance.new("TextButton", row)
-    btnP.Size=UDim2.new(0,28,0,24); btnP.AnchorPoint=Vector2.new(1,0.5)
-    btnP.Position=UDim2.new(1,-4,0.5,0)
-    btnP.BackgroundColor3=C.PANEL; btnP.BorderSizePixel=0
-    btnP.Text="+"; btnP.TextColor3=C.TEXT; btnP.TextSize=16
-    btnP.Font=FONT_BOLD; btnP.AutoButtonColor=false; btnP.ZIndex=4
-    corner(btnP,5)
-
-    local restartFired = false
-
-    local function setWave(n)
-        targetWave        = math.clamp(n, 1, 999)
-        numLbl.Text       = tostring(targetWave)
-        restartFired      = false
-        settings.restartWave = targetWave
-        saveSettings()
-    end
-
-    btnM.MouseButton1Click:Connect(function() setWave(targetWave - 1) end)
-    btnP.MouseButton1Click:Connect(function() setWave(targetWave + 1) end)
-
-    -- Heartbeat: watch wave label in HUD for the target wave
-    RunSvc.Heartbeat:Connect(function()
-        if not getRestartOnWave() then restartFired = false; return end
-        if not inGameMode() then restartFired = false; return end
-
-        local cur = currentWave
-        if cur == 0 then return end
-
-        if cur >= targetWave and not restartFired then
-            restartFired = true
-            local ev = Net:FindFirstChild("MatchRestartSettingEvent")
-            if ev then pcall(function() ev:FireServer("Vote") end) end
-        end
-        if cur < targetWave then restartFired = false end
-    end)
+local WAVE_SAVE = "OzWare_settings.json"
+local settings  = {}
+pcall(function()
+if isfile and isfile(WAVE_SAVE) then
+local t = HttpService:JSONDecode(readfile(WAVE_SAVE))
+if type(t) == "table" then settings = t end
 end
-
--- Skip Wave: toggle, fires every 3s while on and in-match
+end)
+local function saveSettings()
+pcall(function()
+writefile(WAVE_SAVE, HttpService:JSONEncode(settings))
+end)
+end
+local targetWave = tonumber(settings.restartWave) or 15
+local ROW_ORDER  = 3
+local row = Instance.new("Frame")
+row.Size=UDim2.new(1,0,0,34); row.BackgroundColor3=C.CARD
+row.BorderSizePixel=0; row.LayoutOrder=ROW_ORDER; row.ZIndex=3
+row.Parent=matchSec
+corner(row,7); stroke(row,C.BORDER,1)
+local waveLbl = Instance.new("TextLabel", row)
+waveLbl.Size=UDim2.new(0.5,0,1,0); waveLbl.BackgroundTransparency=1
+waveLbl.Text="On Wave:"; waveLbl.TextColor3=C.TEXT
+waveLbl.TextSize=13; waveLbl.Font=FONT_REG
+waveLbl.TextXAlignment=Enum.TextXAlignment.Left
+waveLbl.Position=UDim2.new(0,10,0,0); waveLbl.ZIndex=4
+local btnM=Instance.new("TextButton", row)
+btnM.Size=UDim2.new(0,28,0,24); btnM.AnchorPoint=Vector2.new(1,0.5)
+btnM.Position=UDim2.new(1,-64,0.5,0)
+btnM.BackgroundColor3=C.PANEL; btnM.BorderSizePixel=0
+btnM.Text="−"; btnM.TextColor3=C.TEXT; btnM.TextSize=16
+btnM.Font=FONT_BOLD; btnM.AutoButtonColor=false; btnM.ZIndex=4
+corner(btnM,5)
+local numLbl=Instance.new("TextLabel", row)
+numLbl.Size=UDim2.new(0,32,1,0); numLbl.AnchorPoint=Vector2.new(1,0)
+numLbl.Position=UDim2.new(1,-34,0,0)
+numLbl.BackgroundTransparency=1; numLbl.Text=tostring(targetWave)
+numLbl.TextColor3=C.ACCENT2; numLbl.TextSize=14
+numLbl.Font=FONT_BOLD; numLbl.ZIndex=4
+local btnP=Instance.new("TextButton", row)
+btnP.Size=UDim2.new(0,28,0,24); btnP.AnchorPoint=Vector2.new(1,0.5)
+btnP.Position=UDim2.new(1,-4,0.5,0)
+btnP.BackgroundColor3=C.PANEL; btnP.BorderSizePixel=0
+btnP.Text="+"; btnP.TextColor3=C.TEXT; btnP.TextSize=16
+btnP.Font=FONT_BOLD; btnP.AutoButtonColor=false; btnP.ZIndex=4
+corner(btnP,5)
+local restartFired = false
+local function setWave(n)
+targetWave        = math.clamp(n, 1, 999)
+numLbl.Text       = tostring(targetWave)
+restartFired      = false
+settings.restartWave = targetWave
+saveSettings()
+end
+btnM.MouseButton1Click:Connect(function() setWave(targetWave - 1) end)
+btnP.MouseButton1Click:Connect(function() setWave(targetWave + 1) end)
+RunSvc.Heartbeat:Connect(function()
+if not getRestartOnWave() then restartFired = false; return end
+if not inGameMode() then restartFired = false; return end
+local cur = currentWave
+if cur == 0 then return end
+if cur >= targetWave and not restartFired then
+restartFired = true
+local ev = Net:FindFirstChild("MatchRestartSettingEvent")
+if ev then pcall(function() ev:FireServer("Vote") end) end
+end
+if cur < targetWave then restartFired = false end
+end)
+end
 local _, getSkipWave, onSkipWave = toggle(matchSec, "Skip Wave", 1, false, "game.skipwave")
--- Correct path: Networking.Settings.SettingsEvent (NOT directly under Networking)
 local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
 onSkipWave(function()
-    local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
-    if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end) end
+local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end) end
 end)
-
--- ======================
--- UTILITY
--- ======================
 local utilSec = section(gamePage, "Utility", 2)
-
 local BASE_KEYWORDS = {"base","spawn","path","road","floor","ground","terrain","plate"}
 local function isBasePart(name)
-    local n = name:lower()
-    for _, kw in ipairs(BASE_KEYWORDS) do
-        if n:find(kw, 1, true) then return true end
-    end
-    return false
+local n = name:lower()
+for _, kw in ipairs(BASE_KEYWORDS) do
+if n:find(kw, 1, true) then return true end
 end
-
-
--- ── Delete Map Structures ─────────────────────────────────────────
+return false
+end
 local mapDeleted = false
 local _, getDeleteMap, onDeleteMap = toggle(utilSec, "Delete Map Structures", 2, false, "util.deletemap")
 onDeleteMap(function(on)
-    if not on then mapDeleted = false; return end
-    if mapDeleted then return end
-    -- Wait for game to be ready (handles both click and saved-state load)
-    local waited = 0
-    while not inGameMode() and waited < 60 do _tw(0.5); waited = waited + 0.5 end
-    if not inGameMode() then notify("Must be in a match", false); return end
-    mapDeleted = true
-
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    local pY  = hrp and hrp.Position.Y or 0
-    local count = 0
-
-    -- Platform = large flat BasePart within 8 studs of player Y — keep visible + collidable
-    local function isPlatform(p)
-        return (p.Size.X > 50 or p.Size.Z > 50) and math.abs(p.Position.Y - pY) <= 8
-    end
-
-    local charSet = {}
-    for _, pl in ipairs(Players:GetPlayers()) do
-        if pl.Character then charSet[pl.Character] = true end
-    end
-
-    local SKIP = {Entities=true, Ignore=true, Camera=true}
-    for _, child in ipairs(workspace:GetChildren()) do
-        if not (SKIP[child.Name] or child.ClassName == "Terrain" or charSet[child]) then
-        for _, p in ipairs(child:GetDescendants()) do
-            if p:IsA("BasePart") then
-                pcall(function()
-                    if not isPlatform(p) then
-                        p.Transparency = 1
-                        p.CanCollide   = false
-                        p.CastShadow   = false
-                    end
-                end)
-                count = count + 1
-            elseif p:IsA("Decal") or p:IsA("Texture") then
-                pcall(function() p.Transparency = 1 end)
-            end
-        end
-        if child:IsA("BasePart") then
-            pcall(function()
-                if not isPlatform(child) then
-                    child.Transparency = 1
-                    child.CanCollide   = false
-                end
-            end)
-        end
-        end -- not SKIP
-    end
-    notify(("Map: hid %d parts"):format(count), true)
+if not on then mapDeleted = false; return end
+if mapDeleted then return end
+local waited = 0
+while not inGameMode() and waited < 60 do _tw(0.5); waited = waited + 0.5 end
+if not inGameMode() then notify("Must be in a match", false); return end
+mapDeleted = true
+local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+local pY  = hrp and hrp.Position.Y or 0
+local count = 0
+local function isPlatform(p)
+return (p.Size.X > 50 or p.Size.Z > 50) and math.abs(p.Position.Y - pY) <= 8
+end
+local charSet = {}
+for _, pl in ipairs(Players:GetPlayers()) do
+if pl.Character then charSet[pl.Character] = true end
+end
+local SKIP = {Entities=true, Ignore=true, Camera=true}
+for _, child in ipairs(workspace:GetChildren()) do
+if not (SKIP[child.Name] or child.ClassName == "Terrain" or charSet[child]) then
+for _, p in ipairs(child:GetDescendants()) do
+if p:IsA("BasePart") then
+pcall(function()
+if not isPlatform(p) then
+p.Transparency = 1
+p.CanCollide   = false
+p.CastShadow   = false
+end
 end)
-
-
--- ── Delete Enemies ────────────────────────────────────────────────
--- CONFIRMED: enemies live in workspace.Entities folder as numbered Models (1,2,3...)
+count = count + 1
+elseif p:IsA("Decal") or p:IsA("Texture") then
+pcall(function() p.Transparency = 1 end)
+end
+end
+if child:IsA("BasePart") then
+pcall(function()
+if not isPlatform(child) then
+child.Transparency = 1
+child.CanCollide   = false
+end
+end)
+end
+end
+end
+notify(("Map: hid %d parts"):format(count), true)
+end)
 local _, getDeleteEnemies, onDeleteEnemies = toggle(utilSec, "Delete Enemies", 3, false, "util.deletenemies")
 local destroyedEnemies = {}
 onDeleteEnemies(function(on)
-    if not on then destroyedEnemies = {} end
+if not on then destroyedEnemies = {} end
 end)
 _ts(function()
-    while true do
-        _tw(0.2)
-        if getDeleteEnemies() and inGameMode() then
-        local entities = workspace:FindFirstChild("Entities")
-        if entities then
-        for _, model in ipairs(entities:GetChildren()) do
-            if not destroyedEnemies[model] then
-            if model:IsA("Model") or model:IsA("BasePart") then
-                destroyedEnemies[model] = true
-                pcall(function() model:Destroy() end)
-            end
-            end -- not destroyedEnemies
-        end
-        end -- entities
-        end -- getDeleteEnemies and inGameMode
-    end
+while true do
+_tw(0.2)
+if getDeleteEnemies() and inGameMode() then
+local entities = workspace:FindFirstChild("Entities")
+if entities then
+for _, model in ipairs(entities:GetChildren()) do
+if not destroyedEnemies[model] then
+if model:IsA("Model") or model:IsA("BasePart") then
+destroyedEnemies[model] = true
+pcall(function() model:Destroy() end)
+end
+end
+end
+end
+end
+end
 end)
--- Also watch for new enemies spawning
 workspace.ChildAdded:Connect(function(child)
-    if child.Name ~= "Entities" then return end
-    child.ChildAdded:Connect(function(model)
-        if not getDeleteEnemies() then return end
-        _tw(0.05)
-        pcall(function() model:Destroy() end)
-    end)
+if child.Name ~= "Entities" then return end
+child.ChildAdded:Connect(function(model)
+if not getDeleteEnemies() then return end
+_tw(0.05)
+pcall(function() model:Destroy() end)
+end)
 end)
 do
-    local entities = workspace:FindFirstChild("Entities")
-    if entities then
-        entities.ChildAdded:Connect(function(model)
-            if not getDeleteEnemies() then return end
-            _tw(0.05)
-            pcall(function() model:Destroy() end)
-        end)
-    end
+local entities = workspace:FindFirstChild("Entities")
+if entities then
+entities.ChildAdded:Connect(function(model)
+if not getDeleteEnemies() then return end
+_tw(0.05)
+pcall(function() model:Destroy() end)
+end)
 end
-
--- ── FPS Boost ─────────────────────────────────────────────────────
+end
 local fpsApplied = false
 local function applyFPSBoost()
-    if fpsApplied then return end
-    fpsApplied = true
-    local Lighting = game.Lighting
-    -- settings() is nil in some executor environments — guard it
-    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
-    for _, c in ipairs(Lighting:GetChildren()) do pcall(function() c:Destroy() end) end
-    Lighting.GlobalShadows=false; Lighting.FogEnd=9e9; Lighting.FogStart=9e9
-    Lighting.Brightness=0; Lighting.Ambient=Color3.fromRGB(200,200,200)
-    Lighting.OutdoorAmbient=Color3.fromRGB(200,200,200); Lighting.ClockTime=14
-    Lighting.ExposureCompensation=0
-    Lighting.ColorShift_Bottom=Color3.new(0,0,0); Lighting.ColorShift_Top=Color3.new(0,0,0)
-    local Terrain = workspace.Terrain
-    Terrain.WaterWaveSize=0; Terrain.WaterWaveSpeed=0
-    Terrain.WaterReflectance=0; Terrain.WaterTransparency=1
-    pcall(function() Terrain.Decoration=false end)
-    for _, c in ipairs(Terrain:GetChildren()) do
-        if c:IsA("Clouds") then pcall(function() c:Destroy() end) end
-    end
-    local function simplify(inst)
-        if inst:IsA("BasePart") then
-            pcall(function()
-                inst.Material=Enum.Material.SmoothPlastic
-                inst.CastShadow=false; inst.Reflectance=0
-                inst.BrickColor=BrickColor.new("Medium stone grey")
-            end)
-        end
-        local cls=inst.ClassName
-        if cls=="ParticleEmitter" or cls=="Trail" or cls=="Beam"
-        or cls=="Smoke" or cls=="Fire" or cls=="Sparkles"
-        or cls=="SelectionBox" or cls=="Atmosphere" or cls=="Sky"
-        or cls=="Clouds" or cls=="PointLight" or cls=="SpotLight"
-        or cls=="SurfaceLight" then
-            pcall(function() inst:Destroy() end)
-        elseif inst:IsA("Decal") or inst:IsA("Texture") then
-            pcall(function() inst.Transparency=1 end)
-        elseif inst:IsA("SpecialMesh") then
-            pcall(function() inst.MeshType=Enum.MeshType.Block end)
-        end
-    end
-    for _, inst in ipairs(workspace:GetDescendants()) do simplify(inst) end
-    notify("FPS Boost ON", true)
+if fpsApplied then return end
+fpsApplied = true
+local Lighting = game.Lighting
+pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+for _, c in ipairs(Lighting:GetChildren()) do pcall(function() c:Destroy() end) end
+Lighting.GlobalShadows=false; Lighting.FogEnd=9e9; Lighting.FogStart=9e9
+Lighting.Brightness=0; Lighting.Ambient=Color3.fromRGB(200,200,200)
+Lighting.OutdoorAmbient=Color3.fromRGB(200,200,200); Lighting.ClockTime=14
+Lighting.ExposureCompensation=0
+Lighting.ColorShift_Bottom=Color3.new(0,0,0); Lighting.ColorShift_Top=Color3.new(0,0,0)
+local Terrain = workspace.Terrain
+Terrain.WaterWaveSize=0; Terrain.WaterWaveSpeed=0
+Terrain.WaterReflectance=0; Terrain.WaterTransparency=1
+pcall(function() Terrain.Decoration=false end)
+for _, c in ipairs(Terrain:GetChildren()) do
+if c:IsA("Clouds") then pcall(function() c:Destroy() end) end
 end
-
+local function simplify(inst)
+if inst:IsA("BasePart") then
+pcall(function()
+inst.Material=Enum.Material.SmoothPlastic
+inst.CastShadow=false; inst.Reflectance=0
+inst.BrickColor=BrickColor.new("Medium stone grey")
+end)
+end
+local cls=inst.ClassName
+if cls=="ParticleEmitter" or cls=="Trail" or cls=="Beam"
+or cls=="Smoke" or cls=="Fire" or cls=="Sparkles"
+or cls=="SelectionBox" or cls=="Atmosphere" or cls=="Sky"
+or cls=="Clouds" or cls=="PointLight" or cls=="SpotLight"
+or cls=="SurfaceLight" then
+pcall(function() inst:Destroy() end)
+elseif inst:IsA("Decal") or inst:IsA("Texture") then
+pcall(function() inst.Transparency=1 end)
+elseif inst:IsA("SpecialMesh") then
+pcall(function() inst.MeshType=Enum.MeshType.Block end)
+end
+end
+for _, inst in ipairs(workspace:GetDescendants()) do simplify(inst) end
+notify("FPS Boost ON", true)
+end
 local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.fpsbst")
 onBoostFPS(function(on)
-    if on then
-        -- Only apply during a match, not in lobby
-        if inGameMode() then
-            applyFPSBoost()
-        else
-            _ts(function()
-                local w = 0
-                while not inGameMode() and w < 120 do _tw(1); w=w+1 end
-                if inGameMode() and getBoostFPS() then applyFPSBoost() end
-            end)
-        end
-    elseif not on and fpsApplied then
-        fpsApplied = false
-        notify("FPS Boost OFF — rejoin to fully restore", true)
-    end
+if on then
+if inGameMode() then
+applyFPSBoost()
+else
+_ts(function()
+local w = 0
+while not inGameMode() and w < 120 do _tw(1); w=w+1 end
+if inGameMode() and getBoostFPS() then applyFPSBoost() end
 end)
-
--- ── Modifier Selector ─────────────────────────────────────────────
+end
+elseif not on and fpsApplied then
+fpsApplied = false
+notify("FPS Boost OFF — rejoin to fully restore", true)
+end
+end)
 do
 local HttpSvc      = HttpService
 local AUTO_SAVE    = "OzWare_mod_auto.json"
 local RESTART_SAVE = "OzWare_mod_restart.json"
-
--- Two separate priority tables
-local autoPri    = {}  -- for Auto Pick (all modifiers)
-local restartPri = {}  -- for Restart Modifier (starting only)
+local autoPri    = {}
+local restartPri = {}
 pcall(function()
-    if isfile and isfile(AUTO_SAVE) then
-        local t = HttpSvc:JSONDecode(readfile(AUTO_SAVE))
-        if type(t) == "table" then autoPri = t end
-    end
+if isfile and isfile(AUTO_SAVE) then
+local t = HttpSvc:JSONDecode(readfile(AUTO_SAVE))
+if type(t) == "table" then autoPri = t end
+end
 end)
 pcall(function()
-    if isfile and isfile(RESTART_SAVE) then
-        local t = HttpSvc:JSONDecode(readfile(RESTART_SAVE))
-        if type(t) == "table" then restartPri = t end
-    end
+if isfile and isfile(RESTART_SAVE) then
+local t = HttpSvc:JSONDecode(readfile(RESTART_SAVE))
+if type(t) == "table" then restartPri = t end
+end
 end)
 local function saveAuto()    pcall(function() writefile(AUTO_SAVE,    HttpSvc:JSONEncode(autoPri))    end) end
 local function saveRestart() pcall(function() writefile(RESTART_SAVE, HttpSvc:JSONEncode(restartPri)) end) end
-
 local modSec = section(gamePage, "Modifier Selector", 3)
-
--- ── AUTO PICK MODIFIER ────────────────────────────────────────────
 local _, getAutoMod = toggle(modSec, "Auto Pick Modifier", 1, false, "game.auto_modifier")
-label(modSec, "Picks highest-priority modifier when offered", 2)
-
--- Collapsible: ALL modifiers (Additive + Starting)
+label(modSec,"Picks highest-priority...", 2)
 local allColBtn = Instance.new("TextButton", modSec)
 allColBtn.Size=UDim2.new(1,0,0,30); allColBtn.BackgroundColor3=C.PANEL
 allColBtn.BorderSizePixel=0; allColBtn.LayoutOrder=3
@@ -1360,26 +1114,20 @@ allColBtn.Text="▶  All Modifier Priorities"
 allColBtn.TextColor3=C.ACCENT2; allColBtn.TextSize=12; allColBtn.Font=FONT_SEMI
 allColBtn.AutoButtonColor=false; allColBtn.ZIndex=3
 corner(allColBtn,8); stroke(allColBtn,C.ACCENT,1)
-
 local allListFrame = Instance.new("Frame", modSec)
 allListFrame.Size=UDim2.new(1,0,0,0); allListFrame.AutomaticSize=Enum.AutomaticSize.Y
 allListFrame.BackgroundTransparency=1; allListFrame.BorderSizePixel=0
 allListFrame.LayoutOrder=4; allListFrame.Visible=false
 listLayout(allListFrame, nil, 4)
-
 local allOpen = false
 allColBtn.Text = "▶  All Modifier Priorities"
 allColBtn.MouseButton1Click:Connect(function()
-    allOpen = not allOpen
-    allListFrame.Visible = allOpen
-    allColBtn.Text = (allOpen and "▼" or "▶") .. "  All Modifier Priorities"
+allOpen = not allOpen
+allListFrame.Visible = allOpen
+allColBtn.Text = (allOpen and "▼" or "▶") .. "  All Modifier Priorities"
 end)
-
--- ── RESTART MODIFIER ──────────────────────────────────────────────
 local _, getRestartMod = toggle(modSec, "Restart Modifier", 5, false, "game.restart_modifier")
-label(modSec, "Restarts match until a priority starting modifier appears", 6)
-
--- Collapsible: Starting modifiers only
+label(modSec,"Restarts match until a...", 6)
 local rstColBtn = Instance.new("TextButton", modSec)
 rstColBtn.Size=UDim2.new(1,0,0,30); rstColBtn.BackgroundColor3=C.PANEL
 rstColBtn.BorderSizePixel=0; rstColBtn.LayoutOrder=7
@@ -1387,150 +1135,122 @@ rstColBtn.Text="▶  Starting Modifier Priorities"
 rstColBtn.TextColor3=C.ACCENT2; rstColBtn.TextSize=12; rstColBtn.Font=FONT_SEMI
 rstColBtn.AutoButtonColor=false; rstColBtn.ZIndex=3
 corner(rstColBtn,8); stroke(rstColBtn,C.ACCENT,1)
-
 local rstListFrame = Instance.new("Frame", modSec)
 rstListFrame.Size=UDim2.new(1,0,0,0); rstListFrame.AutomaticSize=Enum.AutomaticSize.Y
 rstListFrame.BackgroundTransparency=1; rstListFrame.BorderSizePixel=0
 rstListFrame.LayoutOrder=8; rstListFrame.Visible=false
 listLayout(rstListFrame, nil, 4)
-
 local rstOpen = false
 rstColBtn.Text = "▶  Starting Modifier Priorities"
 rstColBtn.MouseButton1Click:Connect(function()
-    rstOpen = not rstOpen
-    rstListFrame.Visible = rstOpen
-    rstColBtn.Text = (rstOpen and "▼" or "▶") .. "  Starting Modifier Priorities"
+rstOpen = not rstOpen
+rstListFrame.Visible = rstOpen
+rstColBtn.Text = (rstOpen and "▼" or "▶") .. "  Starting Modifier Priorities"
 end)
-
--- Row builder
 local function makeModRow(parent, name, priTable, saveFn, order)
-    local row = Instance.new("Frame", parent)
-    row.Size=UDim2.new(1,0,0,32); row.BackgroundColor3=C.CARD
-    row.BorderSizePixel=0; row.LayoutOrder=order or 999; row.ZIndex=3
-    corner(row,6); stroke(row,C.BORDER,1)
-    local lbl = Instance.new("TextLabel", row)
-    lbl.Size=UDim2.new(1,-66,1,0); lbl.Position=UDim2.new(0,8,0,0)
-    lbl.BackgroundTransparency=1; lbl.Text=name
-    lbl.TextColor3=C.TEXT; lbl.TextSize=12; lbl.Font=FONT_REG
-    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4
-    lbl.TextTruncate=Enum.TextTruncate.AtEnd
-    local box = Instance.new("TextBox", row)
-    box.Size=UDim2.new(0,52,0,24); box.AnchorPoint=Vector2.new(1,0.5)
-    box.Position=UDim2.new(1,-4,0.5,0)
-    box.BackgroundColor3=C.BG; box.BorderSizePixel=0
-    box.Text=tostring(priTable[name] or 0)
-    box.PlaceholderText="0"; box.PlaceholderColor3=C.DIM
-    box.TextColor3=C.ACCENT2; box.TextSize=13; box.Font=FONT_BOLD
-    box.TextXAlignment=Enum.TextXAlignment.Center; box.ZIndex=4
-    corner(box,5); stroke(box,C.BORDER,1)
-    box.FocusLost:Connect(function()
-        local n = tonumber(box.Text) or 0
-        priTable[name] = n; box.Text = tostring(n); saveFn()
-    end)
+local row = Instance.new("Frame", parent)
+row.Size=UDim2.new(1,0,0,32); row.BackgroundColor3=C.CARD
+row.BorderSizePixel=0; row.LayoutOrder=order or 999; row.ZIndex=3
+corner(row,6); stroke(row,C.BORDER,1)
+local lbl = Instance.new("TextLabel", row)
+lbl.Size=UDim2.new(1,-66,1,0); lbl.Position=UDim2.new(0,8,0,0)
+lbl.BackgroundTransparency=1; lbl.Text=name
+lbl.TextColor3=C.TEXT; lbl.TextSize=12; lbl.Font=FONT_REG
+lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4
+lbl.TextTruncate=Enum.TextTruncate.AtEnd
+local box = Instance.new("TextBox", row)
+box.Size=UDim2.new(0,52,0,24); box.AnchorPoint=Vector2.new(1,0.5)
+box.Position=UDim2.new(1,-4,0.5,0)
+box.BackgroundColor3=C.BG; box.BorderSizePixel=0
+box.Text=tostring(priTable[name] or 0)
+box.PlaceholderText="0"; box.PlaceholderColor3=C.DIM
+box.TextColor3=C.ACCENT2; box.TextSize=13; box.Font=FONT_BOLD
+box.TextXAlignment=Enum.TextXAlignment.Center; box.ZIndex=4
+corner(box,5); stroke(box,C.BORDER,1)
+box.FocusLost:Connect(function()
+local n = tonumber(box.Text) or 0
+priTable[name] = n; box.Text = tostring(n); saveFn()
+end)
 end
-
--- Group header helper
 local function groupHdr(parent, text, order)
-    local h = Instance.new("TextLabel", parent)
-    h.Size=UDim2.new(1,0,0,20); h.BackgroundColor3=C.PANEL
-    h.BorderSizePixel=0; h.Text="── "..text.." ──"
-    h.TextColor3=C.ACCENT2; h.TextSize=11; h.Font=FONT_BOLD
-    h.ZIndex=3; h.LayoutOrder=order; corner(h,5)
+local h = Instance.new("TextLabel", parent)
+h.Size=UDim2.new(1,0,0,20); h.BackgroundColor3=C.PANEL
+h.BorderSizePixel=0; h.Text="── "..text.." ──"
+h.TextColor3=C.ACCENT2; h.TextSize=11; h.Font=FONT_BOLD
+h.ZIndex=3; h.LayoutOrder=order; corner(h,5)
 end
-
--- Populate ALL list (Additive + Starting)
 local ADDITIVE = {"Strong","Fast","Dodge","Damage","Cooldown","Range","Slayer",
-    "Press It","Common Loot","Uncommon Loot","Champions","Precise Attack",
-    "Planning Ahead","Harvest"}
+"Press It","Common Loot","Uncommon Loot","Champions","Precise Attack",
+"Planning Ahead","Harvest"}
 local STARTING = {"Immunity","Exploding","Revitalize","Thrice","Quake","Regen",
-    "Shielded","Drowsy","No Trait No Problem","Money Surge","King's Burden",
-    "Lifeline","Exterminator","Warding off Evil","Fisticuffs","Limit Break",
-    "Tyrant Destroyer","Sphere Finder","High Class","Tyrant Arrives"}
-
+"Shielded","Drowsy","No Trait No Problem","Money Surge","King's Burden",
+"Lifeline","Exterminator","Warding off Evil","Fisticuffs","Limit Break",
+"Tyrant Destroyer","Sphere Finder","High Class","Tyrant Arrives"}
 local o = 1
 groupHdr(allListFrame, "Additive", o); o=o+1
 for _, n in ipairs(ADDITIVE) do makeModRow(allListFrame, n, autoPri, saveAuto, o); o=o+1 end
 groupHdr(allListFrame, "Starting", o); o=o+1
 for _, n in ipairs(STARTING) do makeModRow(allListFrame, n, autoPri, saveAuto, o); o=o+1 end
-
--- Populate RESTART list (Starting only)
 local r = 1
 groupHdr(rstListFrame, "Starting", r); r=r+1
 for _, n in ipairs(STARTING) do makeModRow(rstListFrame, n, restartPri, saveRestart, r); r=r+1 end
-
--- ── Event logic ──────────────────────────────────────────────────
 local modPickFired = false
-
 local function connectModifierEvent(modEv)
-    modEv.OnClientEvent:Connect(function(action, mods)
-        if action == "End" then modPickFired = false; return end
-        if action ~= "Start" then return end
-        modPickFired = false
-
-        if not getAutoMod() and not getRestartMod() then return end
-        if modPickFired then return end
-
-        local offered = {}
-        if type(mods) == "table" then
-            for _, mod in ipairs(mods) do
-                local n = type(mod) == "table" and mod.Name or tostring(mod)
-                if n and n ~= "" then offered[n] = true end
-            end
-        end
-
-        if getAutoMod() then
-            local bestName, bestPri = nil, 0
-            for n in pairs(offered) do
-                local pri = autoPri[n] or 0
-                if pri > bestPri then bestName=n; bestPri=pri end
-            end
-            if bestName and bestPri > 0 then
-                modPickFired = true
-                _td(function()
-                    pcall(function() modEv:FireServer("Choose", bestName) end)
-                end)
-                return
-            end
-        end
-
-        if getRestartMod() and not modPickFired then
-            local found = false
-            for n in pairs(offered) do
-                if (restartPri[n] or 0) > 0 then found = true; break end
-            end
-            if not found then
-                modPickFired = true
-                local rev = Net:FindFirstChild("MatchRestartSettingEvent")
-                if rev then pcall(function() rev:FireServer("Vote") end) end
-            end
-        end
-    end)
+modEv.OnClientEvent:Connect(function(action, mods)
+if action == "End" then modPickFired = false; return end
+if action ~= "Start" then return end
+modPickFired = false
+if not getAutoMod() and not getRestartMod() then return end
+if modPickFired then return end
+local offered = {}
+if type(mods) == "table" then
+for _, mod in ipairs(mods) do
+local n = type(mod) == "table" and mod.Name or tostring(mod)
+if n and n ~= "" then offered[n] = true end
 end
-
--- ModifierEvent is directly under Networking, present in all game modes.
--- If injected in lobby it won't exist yet — watch for it to appear.
+end
+if getAutoMod() then
+local bestName, bestPri = nil, 0
+for n in pairs(offered) do
+local pri = autoPri[n] or 0
+if pri > bestPri then bestName=n; bestPri=pri end
+end
+if bestName and bestPri > 0 then
+modPickFired = true
+_td(function()
+pcall(function() modEv:FireServer("Choose", bestName) end)
+end)
+return
+end
+end
+if getRestartMod() and not modPickFired then
+local found = false
+for n in pairs(offered) do
+if (restartPri[n] or 0) > 0 then found = true; break end
+end
+if not found then
+modPickFired = true
+local rev = Net:FindFirstChild("MatchRestartSettingEvent")
+if rev then pcall(function() rev:FireServer("Vote") end) end
+end
+end
+end)
+end
 local modEv = Net:FindFirstChild("ModifierEvent")
 if modEv then
-    connectModifierEvent(modEv)
+connectModifierEvent(modEv)
 else
-    Net.ChildAdded:Connect(function(child)
-        if child.Name == "ModifierEvent" then
-            connectModifierEvent(child)
-        end
-    end)
+Net.ChildAdded:Connect(function(child)
+if child.Name == "ModifierEvent" then
+connectModifierEvent(child)
 end
-end -- close modifier do block
-
-end -- close Game Tab do block
-
--- ======================
--- ODYSSEY TAB  (dynamic, no UUIDs)
--- ======================
+end)
+end
+end
+end
 do
 local odysseyPage = tabPages["Odyssey"]
 local autoSec = section(odysseyPage, "Adventure", 1)
-
--- Collapsible adventure toggles
 local advColBtn = Instance.new("TextButton", autoSec)
 advColBtn.Size=UDim2.new(1,0,0,30); advColBtn.BackgroundColor3=C.PANEL
 advColBtn.BorderSizePixel=0; advColBtn.LayoutOrder=1
@@ -1538,692 +1258,534 @@ advColBtn.Text="▶  Adventure Settings"; advColBtn.TextColor3=C.ACCENT2
 advColBtn.TextSize=12; advColBtn.Font=FONT_SEMI
 advColBtn.AutoButtonColor=false; advColBtn.ZIndex=3
 corner(advColBtn,8); stroke(advColBtn,C.ACCENT,1)
-
 local advListFrame = Instance.new("Frame", autoSec)
 advListFrame.Size=UDim2.new(1,0,0,0); advListFrame.AutomaticSize=Enum.AutomaticSize.Y
 advListFrame.BackgroundTransparency=1; advListFrame.BorderSizePixel=0
 advListFrame.LayoutOrder=2; advListFrame.Visible=false
 listLayout(advListFrame, nil, 4)
-
 local advOpen = false
 advColBtn.MouseButton1Click:Connect(function()
-    advOpen = not advOpen
-    advListFrame.Visible = advOpen
-    advColBtn.Text = (advOpen and "▼" or "▶") .. "  Adventure Settings"
+advOpen = not advOpen
+advListFrame.Visible = advOpen
+advColBtn.Text = (advOpen and "▼" or "▶") .. "  Adventure Settings"
 end)
-
 local _, getAutoNextRoom      = toggle(advListFrame, "Auto Next Room",                    1, false, "odyssey.auto_next_room")
-label(advListFrame, "Continues to the next room automatically", 2)
+label(advListFrame,"Continues to the next ...", 2)
 local _, getAutoPick          = toggle(advListFrame, "Auto Select Cards",                 3, true,  "odyssey.auto_select_cards")
-label(advListFrame, "Picks highest rarity card when card screen appears", 4)
+label(advListFrame,"Picks highest rarity c...", 4)
 local _, getAutoRagnawCards   = toggle(advListFrame, "Auto Select Unit Cards (Ragnaw)",   5, false, "odyssey.auto_ragnaw_unit_cards")
-label(advListFrame, "Prioritises Ragnaw unit cards when picking", 6)
+label(advListFrame,"Prioritises Ragnaw uni...", 6)
 local _, getAutoSkipShop      = toggle(advListFrame, "Auto Skip Shop",                    7, false, "odyssey.auto_skip_shop.v3")
-label(advListFrame, "Closes Stiches' Shop automatically", 8)
+label(advListFrame,"Closes Stiches' Shop a...", 8)
 local _, getAutoCollectChests = toggle(advListFrame, "Auto Collect Chests",               9, false, "odyssey.auto_collect_chest.v3")
-label(advListFrame, "Opens all chests in Treasure Room", 10)
+label(advListFrame,"Opens all chests in Tr...", 10)
 local _, getSkipUnitReward    = toggle(advListFrame, "Skip Unit Reward",                 11, false, "odyssey.skip_unit_reward")
-label(advListFrame, "Skips unit reward panel after elite rooms", 12)
-
+label(advListFrame,"Skips unit reward pane...", 12)
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
-
--- ======================
--- Confirmed remote locations (UPD 12.5):
---   Networking.Units.SummonEvent                          — summoning
---   Networking.Odyssey.Adventure.CardPickEvent            — card pick/skip
---   Networking.Odyssey.Adventure.ShopEvent                — shop close
---   Networking.Odyssey.Adventure.TreasureEvent            — chest open
---   Networking.Odyssey.Adventure.BossRewardEvent          — elite unit reward
---   Networking.Odyssey.Adventure.VoteEvent                — floor vote
---   Networking.Odyssey.Adventure.MapEvent                 — map snapshot
---   Networking.StageMechanics.OdysseyChest                — chest (backup)
--- ======================
 local _odyFolder  = Net:FindFirstChild("Odyssey")
 local _advFolder  = _odyFolder and _odyFolder:FindFirstChild("Adventure")
 local _stageMech  = Net:FindFirstChild("StageMechanics")
-
 local REMOTES = {}
 local function refreshRemotes()
-    _odyFolder = Net:FindFirstChild("Odyssey")
-    _advFolder = _odyFolder and _odyFolder:FindFirstChild("Adventure")
-    _stageMech = Net:FindFirstChild("StageMechanics")
-    if _advFolder then
-        -- All confirmed from Dex screenshot of Networking.Odyssey.Adventure:
-        REMOTES.CardPickEvent    = _advFolder:FindFirstChild("CardPickEvent")
-        REMOTES.ShopEvent        = _advFolder:FindFirstChild("ShopEvent")
-            or (_odyFolder and _odyFolder:FindFirstChild("OdysseyShopEvent"))
-        REMOTES.TreasureEvent    = _advFolder:FindFirstChild("TreasureEvent")
-        REMOTES.UnitRewardEvent  = _advFolder:FindFirstChild("UnitRewardEvent")
-        REMOTES.BossRewardEvent  = _advFolder:FindFirstChild("BossRewardEvent")
-        REMOTES.VoteEvent        = _advFolder:FindFirstChild("VoteEvent")
-        REMOTES.MapEvent         = _advFolder:FindFirstChild("MapEvent")
-            or Net:FindFirstChild("MapEvent")
-    end
-    if _stageMech then
-        REMOTES.OdysseyChest = _stageMech:FindFirstChild("OdysseyChest")
-    end
-    REMOTES.ModifierEvent = Net:FindFirstChild("ModifierEvent")
+_odyFolder = Net:FindFirstChild("Odyssey")
+_advFolder = _odyFolder and _odyFolder:FindFirstChild("Adventure")
+_stageMech = Net:FindFirstChild("StageMechanics")
+if _advFolder then
+REMOTES.CardPickEvent    = _advFolder:FindFirstChild("CardPickEvent")
+REMOTES.ShopEvent        = _advFolder:FindFirstChild("ShopEvent")
+or (_odyFolder and _odyFolder:FindFirstChild("OdysseyShopEvent"))
+REMOTES.TreasureEvent    = _advFolder:FindFirstChild("TreasureEvent")
+REMOTES.UnitRewardEvent  = _advFolder:FindFirstChild("UnitRewardEvent")
+REMOTES.BossRewardEvent  = _advFolder:FindFirstChild("BossRewardEvent")
+REMOTES.VoteEvent        = _advFolder:FindFirstChild("VoteEvent")
+REMOTES.MapEvent         = _advFolder:FindFirstChild("MapEvent")
+or Net:FindFirstChild("MapEvent")
+end
+if _stageMech then
+REMOTES.OdysseyChest = _stageMech:FindFirstChild("OdysseyChest")
+end
+REMOTES.ModifierEvent = Net:FindFirstChild("ModifierEvent")
 end
 refreshRemotes()
-
--- Clear REMOTES cache on respawn/teleport so they re-resolve for the next run
 player.CharacterAdded:Connect(function()
-    -- Reset all one-shot flags so toggles work immediately in the new match
-    for k in pairs(REMOTES) do REMOTES[k] = nil end
-    mapDeleted       = false
-    destroyedEnemies = {}
-    fpsApplied       = false
-    _tw(3); refreshRemotes()
+for k in pairs(REMOTES) do REMOTES[k] = nil end
+mapDeleted       = false
+destroyedEnemies = {}
+fpsApplied       = false
+_tw(3); refreshRemotes()
 end)
-
 local function getONet(name)
-    if REMOTES[name] then return REMOTES[name] end
-    refreshRemotes()
-    return REMOTES[name]
+if REMOTES[name] then return REMOTES[name] end
+refreshRemotes()
+return REMOTES[name]
 end
-
--- Watch for Adventure folder appearing (happens when entering a run)
 Net.ChildAdded:Connect(function(c)
-    if c.Name == "Odyssey" then
-        _tw(0.5); refreshRemotes()
-        c.ChildAdded:Connect(function() _tw(0.2); refreshRemotes() end)
-    end
-    _tw(0.2); refreshRemotes()
+if c.Name == "Odyssey" then
+_tw(0.5); refreshRemotes()
+c.ChildAdded:Connect(function() _tw(0.2); refreshRemotes() end)
+end
+_tw(0.2); refreshRemotes()
 end)
 do
-    local odyF = Net:FindFirstChild("Odyssey")
-    if odyF then
-        odyF.ChildAdded:Connect(function() _tw(0.2); refreshRemotes() end)
-        local advF = odyF:FindFirstChild("Adventure")
-        if advF then
-            advF.ChildAdded:Connect(function() _tw(0.1); refreshRemotes() end)
-        end
-    end
+local odyF = Net:FindFirstChild("Odyssey")
+if odyF then
+odyF.ChildAdded:Connect(function() _tw(0.2); refreshRemotes() end)
+local advF = odyF:FindFirstChild("Adventure")
+if advF then
+advF.ChildAdded:Connect(function() _tw(0.1); refreshRemotes() end)
 end
-
--- Rarity scoring from card text blob
+end
+end
 local RARITY_SCORES = {secret=7, divine=7, celestial=6, mythic=5, legendary=4, epic=3, rare=2, uncommon=1, common=0}
 local function rarityScore(text)
-    if not text then return 0 end
-    local t = text:lower()
-    local best = 0
-    for word, score in pairs(RARITY_SCORES) do
-        if t:find(word, 1, true) and score > best then best = score end
-    end
-    return best
+if not text then return 0 end
+local t = text:lower()
+local best = 0
+for word, score in pairs(RARITY_SCORES) do
+if t:find(word, 1, true) and score > best then best = score end
 end
-
--- chooseCardIndex: picks the highest rarity card from text blobs
+return best
+end
 local function chooseCardIndex(opts)
-    if not opts or #opts == 0 then return 1, "basic" end
-    local bestIdx, bestScore = 1, -1
-    for i, text in ipairs(opts) do
-        local score = rarityScore(text)
-        if score > bestScore then bestIdx = i; bestScore = score end
-    end
-    return bestIdx, "basic"
+if not opts or #opts == 0 then return 1, "basic" end
+local bestIdx, bestScore = 1, -1
+for i, text in ipairs(opts) do
+local score = rarityScore(text)
+if score > bestScore then bestIdx = i; bestScore = score end
 end
-
-
--- ── AdventureHUD helper ──────────────────────────────────────────
--- CONFIRMED: all panels live inside PlayerGui.AdventureHUD
--- AdventureHUD children:
---   ChooseCard              — card pick panel
---   Stiches' Shop_Export    — shop panel (note: Stiches, one t)
---   TreasurePanel           — treasure room panel
---   RunRewardsPanelRoot     — unit reward after elite room ("CLAIM YOUR REWARDS")
---   AdventureMapRoot        — map/vote UI
-
--- ── AdventureHUD helper ──────────────────────────────────────────
+return bestIdx, "basic"
+end
 local function getAdventureHUD()
-    return realGui:FindFirstChild("AdventureHUD")
+return realGui:FindFirstChild("AdventureHUD")
 end
-
--- All panels are direct children of AdventureHUD at runtime
--- (MatchPanels only exists in StarterPlayer source, not in PlayerGui)
 local function findPanel(name)
-    local hud = getAdventureHUD()
-    if not hud then return nil end
-    return hud:FindFirstChild(name)
+local hud = getAdventureHUD()
+if not hud then return nil end
+return hud:FindFirstChild(name)
 end
-
--- A panel is "open" when Visible=true
--- CONFIRMED from debugger: game toggles Visible property, AbsoluteSize stays constant
 local function isPanelOpen(panel)
-    if not panel then return false end
-    return panel.Visible == true
+if not panel then return false end
+return panel.Visible == true
 end
-
 local function findAdventurePanel(name)
-    local hud = getAdventureHUD()
-    if not hud then return nil end
-    local direct = hud:FindFirstChild(name)
-    if direct then return direct end
-    local matchPanels = hud:FindFirstChild("MatchPanels")
-    if matchPanels then
-        return matchPanels:FindFirstChild(name)
-    end
-    return nil
+local hud = getAdventureHUD()
+if not hud then return nil end
+local direct = hud:FindFirstChild(name)
+if direct then return direct end
+local matchPanels = hud:FindFirstChild("MatchPanels")
+if matchPanels then
+return matchPanels:FindFirstChild(name)
 end
-
--- Click a close button using its exact confirmed path
+return nil
+end
 local function clickClose(panel)
-    if not panel then return end
-    -- Confirmed path: panel.Content.TopFrame.RightFrame.RightFrame.Close
-    local btn = panel:FindFirstChild("Content")
-    if btn then
-        btn = btn:FindFirstChild("TopFrame")
-        if btn then
-            btn = btn:FindFirstChild("RightFrame")
-            if btn then
-                btn = btn:FindFirstChild("RightFrame")
-                if btn then
-                    btn = btn:FindFirstChild("Close")
-                end
-            end
-        end
-    end
-    if btn then
-        pcall(function() btn.Activated:Fire() end)
-        pcall(function() btn.MouseButton1Click:Fire() end)
-    end
+if not panel then return end
+local btn = panel:FindFirstChild("Content")
+if btn then
+btn = btn:FindFirstChild("TopFrame")
+if btn then
+btn = btn:FindFirstChild("RightFrame")
+if btn then
+btn = btn:FindFirstChild("RightFrame")
+if btn then
+btn = btn:FindFirstChild("Close")
 end
-
--- ── Card pick ────────────────────────────────────────────────────
--- CONFIRMED structure:
---   ChooseCard.Content.ListContainer
---     ImageButton (Frame) ← card 1 (leftmost)
---     ImageButton (Frame) ← card 2
---     ImageButton (Frame) ← card 3 (rightmost, usually highest rarity)
--- Card name/rarity: TextLabel (Description) inside each ImageButton
--- Pick by simulating MouseButton1Click on the ImageButton
-
+end
+end
+end
+if btn then
+pcall(function() btn.Activated:Fire() end)
+pcall(function() btn.MouseButton1Click:Fire() end)
+end
+end
 local function getCardButtons()
-    -- CONFIRMED: CardPickPanel under AdventureHUD.MatchPanels.Panels
-    local cc = findPanel("CardPickPanel") or findPanel("ChooseCard")
-    if not cc or not cc.Visible then return nil end
-
-    -- Search for card buttons - try known path first, then search all descendants
-    local sif = cc:FindFirstChild("Content")
-    sif = sif and sif:FindFirstChild("ListContainer")
-    sif = sif and sif:FindFirstChild("ScrollIndicatorFrame")
-
-    -- If path not found, search entire panel for ImageButtons
-    local searchRoot = sif or cc
-    local cards = {}
-    for _, child in ipairs(searchRoot:GetChildren()) do
-        if child:IsA("ImageButton") then
-            local text = ""
-            for _, d in ipairs(child:GetDescendants()) do
-                if d:IsA("TextLabel") and d.Text and #d.Text > 1 then
-                    text = text .. " " .. d.Text:lower()
-                end
-            end
-            table.insert(cards, {
-                btn  = child,
-                text = text,
-                x    = child.AbsolutePosition.X,
-            })
-        end
-    end
-    if #cards == 0 then return nil end
-    table.sort(cards, function(a, b) return a.x < b.x end)
-    return cards
+local cc = findPanel("CardPickPanel") or findPanel("ChooseCard")
+if not cc or not cc.Visible then return nil end
+local sif = cc:FindFirstChild("Content")
+sif = sif and sif:FindFirstChild("ListContainer")
+sif = sif and sif:FindFirstChild("ScrollIndicatorFrame")
+local searchRoot = sif or cc
+local cards = {}
+for _, child in ipairs(searchRoot:GetChildren()) do
+if child:IsA("ImageButton") then
+local text = ""
+for _, d in ipairs(child:GetDescendants()) do
+if d:IsA("TextLabel") and d.Text and #d.Text > 1 then
+text = text .. " " .. d.Text:lower()
 end
-
+end
+table.insert(cards, {
+btn  = child,
+text = text,
+x    = child.AbsolutePosition.X,
+})
+end
+end
+if #cards == 0 then return nil end
+table.sort(cards, function(a, b) return a.x < b.x end)
+return cards
+end
 local function clickButton(btn)
-    -- Delta executor blocks :Fire() on signals
-    -- We use the remote directly instead (see doCardPick and pickIndex)
-    _ = btn -- unused but kept for API compatibility
+_ = btn
 end
-
--- Direct remote pick — works when called while ChooseCard is visible
--- The server accepts CardPickEvent only during an active card pick phase
 local function pickIndex(opts, indexHint)
-    local ev = getONet("CardPickEvent")
-    if not ev then return false end
-    local idx = indexHint or 1
-    -- For character cards: first pick selects, second pick confirms
-    pcall(function() ev:FireServer("Pick", idx) end)
-    _tw(0.3)
-    pcall(function() ev:FireServer("Pick", idx) end)
-    return true
+local ev = getONet("CardPickEvent")
+if not ev then return false end
+local idx = indexHint or 1
+pcall(function() ev:FireServer("Pick", idx) end)
+_tw(0.3)
+pcall(function() ev:FireServer("Pick", idx) end)
+return true
 end
-
 local function skipCards()
-    local ev = getONet("CardPickEvent")
-    if ev then pcall(function() ev:FireServer("Skip", 0) end) end
+local ev = getONet("CardPickEvent")
+if ev then pcall(function() ev:FireServer("Skip", 0) end) end
 end
-
 local function readOpenCardOptions()
-    local cards = getCardButtons()
-    if not cards then return nil end
-    -- Return text blobs for rarity scoring
-    local opts = {}
-    for _, c in ipairs(cards) do table.insert(opts, c.text) end
-    return opts
+local cards = getCardButtons()
+if not cards then return nil end
+local opts = {}
+for _, c in ipairs(cards) do table.insert(opts, c.text) end
+return opts
 end
-
--- ── Shop ─────────────────────────────────────────────────────────
--- CONFIRMED: Stiches' Shop_Export  341, 376 when open
 local function isShopOpen()
-    local hud = getAdventureHUD()
-    if not hud then return false end
-    local p = hud:FindFirstChild("Stiches' Shop_Export")
-    return isPanelOpen(p)
+local hud = getAdventureHUD()
+if not hud then return false end
+local p = hud:FindFirstChild("Stiches' Shop_Export")
+return isPanelOpen(p)
 end
-
 local function closeShopGui()
-    refreshRemotes()
-    local shopEv = getONet("ShopEvent")
-    if shopEv then pcall(function() shopEv:FireServer("Close") end) end
+refreshRemotes()
+local shopEv = getONet("ShopEvent")
+if shopEv then pcall(function() shopEv:FireServer("Close") end) end
 end
-
--- ── Treasure ─────────────────────────────────────────────────────
--- CONFIRMED: TreasurePanel  307, 239 when open
 local function isTreasureOpen()
-    local hud = getAdventureHUD()
-    if not hud then return false end
-    local p = hud:FindFirstChild("TreasurePanel")
-    return isPanelOpen(p)
+local hud = getAdventureHUD()
+if not hud then return false end
+local p = hud:FindFirstChild("TreasurePanel")
+return isPanelOpen(p)
 end
-
 local openedChests = {}
 local function collectAndCloseTreasure()
-    refreshRemotes()
-    local chestRemote = getONet("OdysseyChest")
-    if not chestRemote then
-        -- OdysseyChest is under StageMechanics
-        local sm = Net:FindFirstChild("StageMechanics")
-        chestRemote = sm and sm:FindFirstChild("OdysseyChest")
-    end
-
-    if chestRemote then
-        -- CONFIRMED: chests are in workspace.Ignore named "OdysseyChest_<uuid>"
-        local ignoreFolder = workspace:FindFirstChild("Ignore")
-        if ignoreFolder then
-            for _, model in ipairs(ignoreFolder:GetChildren()) do
-                local name = model.Name
-                -- Match OdysseyChest_<uuid> but NOT OdysseyChestPing_<uuid>
-                if name:sub(1, 13) == "OdysseyChest_" and name:sub(1, 17) ~= "OdysseyChestPing_" then
-                    local uuid = name:sub(14) -- strip "OdysseyChest_" prefix
-                    if not openedChests[uuid] then
-                        openedChests[uuid] = true
-                        pcall(function() chestRemote:FireServer("OpenChest", uuid) end)
-                        _tw(0.08)
-                    end
-                end
-            end
-        end
-    end
-
-    -- Chest collection done; panel closes when server processes all chests
-    local hud = realGui:FindFirstChild("AdventureHUD")
-    if hud then
-        local panel = hud:FindFirstChild("TreasurePanel")
-        if panel then
-            -- Fire close via remote if available
-            local ev = getONet("TreasureEvent")
-            if ev then pcall(function() ev:FireServer("Close") end) end
-        end
-    end
+refreshRemotes()
+local chestRemote = getONet("OdysseyChest")
+if not chestRemote then
+local sm = Net:FindFirstChild("StageMechanics")
+chestRemote = sm and sm:FindFirstChild("OdysseyChest")
 end
-
--- ── Unit Reward ───────────────────────────────────────────────────
--- Module name confirmed: BossRewardPickPanel
+if chestRemote then
+local ignoreFolder = workspace:FindFirstChild("Ignore")
+if ignoreFolder then
+for _, model in ipairs(ignoreFolder:GetChildren()) do
+local name = model.Name
+if name:sub(1, 13) == "OdysseyChest_" and name:sub(1, 17) ~= "OdysseyChestPing_" then
+local uuid = name:sub(14)
+if not openedChests[uuid] then
+openedChests[uuid] = true
+pcall(function() chestRemote:FireServer("OpenChest", uuid) end)
+_tw(0.08)
+end
+end
+end
+end
+end
+local hud = realGui:FindFirstChild("AdventureHUD")
+if hud then
+local panel = hud:FindFirstChild("TreasurePanel")
+if panel then
+local ev = getONet("TreasureEvent")
+if ev then pcall(function() ev:FireServer("Close") end) end
+end
+end
+end
 local function isUnitRewardOpen()
-    local p = findAdventurePanel("BossRewardPickPanel")
-           or findAdventurePanel("RunRewardsPanelRoot")
-    return isPanelOpen(p)
+local p = findAdventurePanel("BossRewardPickPanel")
+or findAdventurePanel("RunRewardsPanelRoot")
+return isPanelOpen(p)
 end
-
 local function skipUnitRewardPanel()
-    refreshRemotes()
-    local ev = getONet("UnitRewardEvent")
-    if ev then pcall(function() ev:FireServer("Skip") end) end
+refreshRemotes()
+local ev = getONet("UnitRewardEvent")
+if ev then pcall(function() ev:FireServer("Skip") end) end
 end
-
--- ── requestNextRoom ───────────────────────────────────────────────
 local function requestNextRoom()
-    refreshRemotes()
-    local mapEv = getONet("MapEvent")
-    if mapEv then pcall(function() mapEv:FireServer("RequestSnapshot") end) end
-    _tw(0.2)
-    local voteEv = getONet("VoteEvent")
-    if not voteEv then return end
-    for _, idx in ipairs({1, 2, 3, 4, 5}) do
-        pcall(function() voteEv:FireServer("Vote", idx) end)
-        _tw(0.05)
-    end
-    local modEv = getONet("ModifierEvent")
-    if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
+refreshRemotes()
+local mapEv = getONet("MapEvent")
+if mapEv then pcall(function() mapEv:FireServer("RequestSnapshot") end) end
+_tw(0.2)
+local voteEv = getONet("VoteEvent")
+if not voteEv then return end
+for _, idx in ipairs({1, 2, 3, 4, 5}) do
+pcall(function() voteEv:FireServer("Vote", idx) end)
+_tw(0.05)
 end
-
--- ── Odyssey automation: event-driven ────────────────────────────
--- All connections use WaitForChild so lobby injection works too.
+local modEv = getONet("ModifierEvent")
+if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
+end
 do
-    local currentOffer = nil  -- stored card offer data
-    local openedChestIds = {}
-
-    local function hookIgnore(folder)
-        folder.ChildAdded:Connect(function(model)
-            if not getAutoCollectChests() then return end
-            local n = model.Name
-            if n:sub(1,13) ~= "OdysseyChest_" then return end
-            if n:sub(1,17) == "OdysseyChestPing_" then return end
-            if openedChestIds[n] then return end
-            openedChestIds[n] = true
-            _tw(0.1)
-            local sm = Net:FindFirstChild("StageMechanics")
-            local cr = sm and sm:FindFirstChild("OdysseyChest")
-            if cr then pcall(function() cr:FireServer("OpenChest", n:sub(14)) end) end
-        end)
-    end
-    local ignoreFolder = workspace:FindFirstChild("Ignore")
-    if ignoreFolder then hookIgnore(ignoreFolder) end
-    workspace.ChildAdded:Connect(function(c)
-        if c.Name == "Ignore" then openedChestIds = {}; hookIgnore(c) end
-    end)
-
-    _ts(function()
-        local ody = Net:WaitForChild("Odyssey", 120)
-        if not ody then return end
-        local adv = ody:WaitForChild("Adventure", 120)
-        if not adv then return end
-
-        -- Vote: fire requestNextRoom when vote starts, one retry after 2s
-        local voteEvC = adv:WaitForChild("VoteEvent", 30)
-        if voteEvC then
-            local voteActive = false
-            voteEvC.OnClientEvent:Connect(function(action)
-                if action == "VoteStarted" then
-                    voteActive = true
-                    if not getAutoNextRoom() then return end
-                    _ts(requestNextRoom)
-                    _tD(2, function()
-                        if voteActive and getAutoNextRoom() then
-                            _ts(requestNextRoom)
-                        end
-                    end)
-                elseif action == "VoteEnded" or action == "VoteCancelled" then
-                    voteActive = false
-                end
-            end)
-        end
-
-        -- Shop: fire Close(nil) once when server opens shop
-        local shopEvC = adv:FindFirstChild("ShopEvent")
-        if shopEvC then
-            shopEvC.OnClientEvent:Connect(function(action)
-                if action ~= "Open" then return end
-                if not getAutoSkipShop() then return end
-                _td(function()
-                    pcall(function() shopEvC:FireServer("Close", nil) end)
-                end)
-            end)
-        end
-
-        -- Unit reward: fire Skip(nil) once when offer received
-        local unitEvC = adv:FindFirstChild("UnitRewardEvent")
-        if unitEvC then
-            unitEvC.OnClientEvent:Connect(function(action)
-                if action ~= "Offer" then return end
-                if not getSkipUnitReward() then return end
-                _td(function()
-                    pcall(function() unitEvC:FireServer("Skip", nil) end)
-                end)
-            end)
-        end
-
-        -- Treasure: collect when floor begins
-        local treasureEvC = adv:FindFirstChild("TreasureEvent")
-        if treasureEvC then
-            treasureEvC.OnClientEvent:Connect(function(action)
-                if action ~= "Begin" then return end
-                if not getAutoCollectChests() then return end
-                _ts(function()
-                    _tw(0.3)
-                    collectAndCloseTreasure()
-                end)
-            end)
-        end
-
-        -- Card pick: hookmetamethod + synchronous piggyback through old()
-        -- Button1Down doesn't work on mobile. Instead: when Offer arrives,
-        -- set pendingCardPick=true and fire MapEvent to trigger the hook.
-        -- Inside the hook, we call old(cardEvC,"Pick",bestIdx) synchronously
-        -- from within a legitimate FireServer context.
-        local cardEvC = adv:FindFirstChild("CardPickEvent")
-        if cardEvC and typeof(hookmetamethod) == "function" then
-            local pendingPick  = false
-            local pendingIdx   = 1
-
-            cardEvC.OnClientEvent:Connect(function(action, data)
-                if action == "Offer" then
-                    currentOffer = data
-                    if not (getAutoPick() or getAutoRagnawCards()) then return end
-                    -- Calculate best card now so hook can use it immediately
-                    local opts = type(data) == "table" and data.Options
-                    local bestIdx, bestScore = 1, -1
-                    if type(opts) == "table" then
-                        for i, card in ipairs(opts) do
-                            if type(card) == "table" then
-                                local s = rarityScore(tostring(card.Rarity or ""):lower())
-                                if s > bestScore then bestIdx=i; bestScore=s end
-                            end
-                        end
-                    end
-                    pendingIdx  = bestIdx
-                    pendingPick = true
-                    -- Trigger hook via a benign remote so piggyback fires ASAP
-                    _ts(function()
-                        _tw(0.1)
-                        local mapEv = adv:FindFirstChild("MapEvent")
-                        if mapEv then
-                            pcall(function() mapEv:FireServer("RequestSnapshot") end)
-                        end
-                    end)
-                elseif action == "BasicCardGranted" or action == "CharacterCardGranted"
-                    or action == "Skipped" then
-                    currentOffer  = nil
-                    pendingPick   = false
-                end
-            end)
-
-            local old; old = hookmetamethod(game, "__namecall", function(self, ...)
-                local m = getnamecallmethod()
-                if m == "FireServer" or m == "InvokeServer" then
-                    -- Piggyback: inject card pick synchronously inside this hook frame
-                    if pendingPick and self ~= cardEvC then
-                        pendingPick = false
-                        -- old() with cardEvC uses the current namecall method ("FireServer")
-                        -- This is equivalent to cardEvC:FireServer("Pick", pendingIdx)
-                        -- but goes through the original __namecall instead of our hook
-                        pcall(old, cardEvC, "Pick", pendingIdx)
-                    end
-                    -- Redirect if player manually taps a card
-                    if self == cardEvC then
-                        local args = {...}
-                        if args[1] == "Pick" and (getAutoPick() or getAutoRagnawCards())
-                        and currentOffer then
-                            local opts = type(currentOffer) == "table"
-                                and currentOffer.Options
-                            if type(opts) == "table" and #opts > 0 then
-                                local bestIdx, bestScore = args[2] or 1, -1
-                                for i, card in ipairs(opts) do
-                                    if type(card) == "table" then
-                                        local s = rarityScore(tostring(card.Rarity or ""):lower())
-                                        if s > bestScore then bestIdx=i; bestScore=s end
-                                    end
-                                end
-                                args[2] = bestIdx
-                            end
-                            return old(self, table.unpack(args))
-                        end
-                    end
-                end
-                return old(self, ...)
-            end)
-        end
-    end)
+local currentOffer = nil
+local openedChestIds = {}
+local function hookIgnore(folder)
+folder.ChildAdded:Connect(function(model)
+if not getAutoCollectChests() then return end
+local n = model.Name
+if n:sub(1,13) ~= "OdysseyChest_" then return end
+if n:sub(1,17) == "OdysseyChestPing_" then return end
+if openedChestIds[n] then return end
+openedChestIds[n] = true
+_tw(0.1)
+local sm = Net:FindFirstChild("StageMechanics")
+local cr = sm and sm:FindFirstChild("OdysseyChest")
+if cr then pcall(function() cr:FireServer("OpenChest", n:sub(14)) end) end
+end)
 end
-
-end -- close Odyssey do block
-
--- ======================
--- SPRING LTM TAB
--- ======================
+local ignoreFolder = workspace:FindFirstChild("Ignore")
+if ignoreFolder then hookIgnore(ignoreFolder) end
+workspace.ChildAdded:Connect(function(c)
+if c.Name == "Ignore" then openedChestIds = {}; hookIgnore(c) end
+end)
+_ts(function()
+local ody = Net:WaitForChild("Odyssey", 120)
+if not ody then return end
+local adv = ody:WaitForChild("Adventure", 120)
+if not adv then return end
+local voteEvC = adv:WaitForChild("VoteEvent", 30)
+if voteEvC then
+local voteActive = false
+voteEvC.OnClientEvent:Connect(function(action)
+if action == "VoteStarted" then
+voteActive = true
+if not getAutoNextRoom() then return end
+_ts(requestNextRoom)
+_tD(2, function()
+if voteActive and getAutoNextRoom() then
+_ts(requestNextRoom)
+end
+end)
+elseif action == "VoteEnded" or action == "VoteCancelled" then
+voteActive = false
+end
+end)
+end
+local shopEvC = adv:FindFirstChild("ShopEvent")
+if shopEvC then
+shopEvC.OnClientEvent:Connect(function(action)
+if action ~= "Open" then return end
+if not getAutoSkipShop() then return end
+_td(function()
+pcall(function() shopEvC:FireServer("Close", nil) end)
+end)
+end)
+end
+local unitEvC = adv:FindFirstChild("UnitRewardEvent")
+if unitEvC then
+unitEvC.OnClientEvent:Connect(function(action)
+if action ~= "Offer" then return end
+if not getSkipUnitReward() then return end
+_td(function()
+pcall(function() unitEvC:FireServer("Skip", nil) end)
+end)
+end)
+end
+local treasureEvC = adv:FindFirstChild("TreasureEvent")
+if treasureEvC then
+treasureEvC.OnClientEvent:Connect(function(action)
+if action ~= "Begin" then return end
+if not getAutoCollectChests() then return end
+_ts(function()
+_tw(0.3)
+collectAndCloseTreasure()
+end)
+end)
+end
+local cardEvC = adv:FindFirstChild("CardPickEvent")
+if cardEvC and typeof(hookmetamethod) == "function" then
+local pendingPick  = false
+local pendingIdx   = 1
+cardEvC.OnClientEvent:Connect(function(action, data)
+if action == "Offer" then
+currentOffer = data
+if not (getAutoPick() or getAutoRagnawCards()) then return end
+local opts = type(data) == "table" and data.Options
+local bestIdx, bestScore = 1, -1
+if type(opts) == "table" then
+for i, card in ipairs(opts) do
+if type(card) == "table" then
+local s = rarityScore(tostring(card.Rarity or ""):lower())
+if s > bestScore then bestIdx=i; bestScore=s end
+end
+end
+end
+pendingIdx  = bestIdx
+pendingPick = true
+_ts(function()
+_tw(0.1)
+local mapEv = adv:FindFirstChild("MapEvent")
+if mapEv then
+pcall(function() mapEv:FireServer("RequestSnapshot") end)
+end
+end)
+elseif action == "BasicCardGranted" or action == "CharacterCardGranted"
+or action == "Skipped" then
+currentOffer  = nil
+pendingPick   = false
+end
+end)
+local old; old = hookmetamethod(game, "__namecall", function(self, ...)
+local m = getnamecallmethod()
+if m == "FireServer" or m == "InvokeServer" then
+if pendingPick and self ~= cardEvC then
+pendingPick = false
+pcall(old, cardEvC, "Pick", pendingIdx)
+end
+if self == cardEvC then
+local args = {...}
+if args[1] == "Pick" and (getAutoPick() or getAutoRagnawCards())
+and currentOffer then
+local opts = type(currentOffer) == "table"
+and currentOffer.Options
+if type(opts) == "table" and #opts > 0 then
+local bestIdx, bestScore = args[2] or 1, -1
+for i, card in ipairs(opts) do
+if type(card) == "table" then
+local s = rarityScore(tostring(card.Rarity or ""):lower())
+if s > bestScore then bestIdx=i; bestScore=s end
+end
+end
+args[2] = bestIdx
+end
+return old(self, table.unpack(args))
+end
+end
+end
+return old(self, ...)
+end)
+end
+end)
+end
+end
 do
 local springPage = tabPages["SpringLTM"]
 local springSec = section(springPage, "Spring LTM", 1)
-
--- ── Confirm Placement ─────────────────────────────────────────────
--- UI path: PlayerGui.HUD.SpringEventHUD.WallPlacementHUD (watches whole panel)
--- Remote:  Networking.SpringEvent.ConfirmPlacement
 local _, getConfirmPlacement = toggle(springSec, "Confirm Placement", 1, false, "spring.confirmplacement")
-label(springSec, "Auto-confirms wall placement when the placement phase begins", 2)
+label(springSec,"Auto-confirms wall pla...", 2)
 do
-    local confirmFired = false
-    local wpHUD        = nil
-    local wpConn       = nil
-
-    local function getWallPlacementHUD()
-        local hud  = realGui:FindFirstChild("HUD")
-        local sHUD = hud  and hud:FindFirstChild("SpringEventHUD")
-        return sHUD and sHUD:FindFirstChild("WallPlacementHUD")
-    end
-
-    local function fireConfirm()
-        if confirmFired then return end
-        confirmFired = true
-        local ev = Net:FindFirstChild("SpringEvent")
-        ev = ev and ev:FindFirstChild("ConfirmPlacement")
-        if ev then pcall(function() ev:FireServer() end) end
-    end
-
-    local function hookWPHUD(panel)
-        wpHUD = panel
-        if wpConn then wpConn:Disconnect() end
-        wpConn = panel:GetPropertyChangedSignal("Visible"):Connect(function()
-            if panel.Visible and getConfirmPlacement() then
-                fireConfirm()
-            else
-                confirmFired = false
-            end
-        end)
-        -- Fire immediately if already visible when we connect
-        if panel.Visible and getConfirmPlacement() then fireConfirm() end
-    end
-
-    -- Heartbeat: find WallPlacementHUD once, then rely on signal
-    RunSvc.Heartbeat:Connect(function()
-        if not getConfirmPlacement() then confirmFired = false; return end
-        if not inGameMode()          then confirmFired = false; return end
-        if wpHUD and wpHUD.Parent   then return end  -- already hooked
-        local panel = getWallPlacementHUD()
-        if panel then hookWPHUD(panel) end
-    end)
+local confirmFired = false
+local wpHUD        = nil
+local wpConn       = nil
+local function getWallPlacementHUD()
+local hud  = realGui:FindFirstChild("HUD")
+local sHUD = hud  and hud:FindFirstChild("SpringEventHUD")
+return sHUD and sHUD:FindFirstChild("WallPlacementHUD")
 end
-
--- ── Wave Purchase (Skip 5 at waves 5, 10, 15, 20) ────────────────
+local function fireConfirm()
+if confirmFired then return end
+confirmFired = true
+local ev = Net:FindFirstChild("SpringEvent")
+ev = ev and ev:FindFirstChild("ConfirmPlacement")
+if ev then pcall(function() ev:FireServer() end) end
+end
+local function hookWPHUD(panel)
+wpHUD = panel
+if wpConn then wpConn:Disconnect() end
+wpConn = panel:GetPropertyChangedSignal("Visible"):Connect(function()
+if panel.Visible and getConfirmPlacement() then
+fireConfirm()
+else
+confirmFired = false
+end
+end)
+if panel.Visible and getConfirmPlacement() then fireConfirm() end
+end
+RunSvc.Heartbeat:Connect(function()
+if not getConfirmPlacement() then confirmFired = false; return end
+if not inGameMode()          then confirmFired = false; return end
+if wpHUD and wpHUD.Parent   then return end
+local panel = getWallPlacementHUD()
+if panel then hookWPHUD(panel) end
+end)
+end
 local _, getWavePurchase = toggle(springSec, "Wave Purchase (Skip 5)", 3, false, "spring.wavepurchase")
-label(springSec, "Purchases Skip Waves x5 at waves 5 → 10 → 15 → 20", 4)
+label(springSec,"Purchases Skip Waves x...", 4)
 do
-    local MILESTONES = {5, 10, 15, 20}
-    local fired = {}
-    RunSvc.Heartbeat:Connect(function()
-        if not getWavePurchase() then fired = {}; return end
-        if not inGameMode() then fired = {}; return end
-        local cur = currentWave
-        if cur == 0 then return end
-        if cur < 5 then fired = {}; return end
-        for _, w in ipairs(MILESTONES) do
-            if cur >= w and not fired[w] then
-                fired[w] = true
-                local springEv = Net:FindFirstChild("SpringEvent")
-                local ev = springEv and springEv:FindFirstChild("ShopEvent")
-                if ev then pcall(function() ev:FireServer("Purchase", "SkipWaves5") end) end
-            end
-        end
-    end)
+local MILESTONES = {5, 10, 15, 20}
+local fired = {}
+RunSvc.Heartbeat:Connect(function()
+if not getWavePurchase() then fired = {}; return end
+if not inGameMode() then fired = {}; return end
+local cur = currentWave
+if cur == 0 then return end
+if cur < 5 then fired = {}; return end
+for _, w in ipairs(MILESTONES) do
+if cur >= w and not fired[w] then
+fired[w] = true
+local springEv = Net:FindFirstChild("SpringEvent")
+local ev = springEv and springEv:FindFirstChild("ShopEvent")
+if ev then pcall(function() ev:FireServer("Purchase", "SkipWaves5") end) end
 end
 end
-
--- ======================
--- MACRO TAB
--- ======================
+end)
+end
+end
 do
 local macroPage = tabPages["Macro"]
 local Net        = RS:FindFirstChild("Networking")
 local unitEv     = Net and Net:FindFirstChild("UnitEvent")
 local abilityEv  = Net and Net:FindFirstChild("AbilityEvent")
-
--- Macro storage: saved to writefile so they persist between sessions
 local MACRO_FILE = "OzWare_macros.json"
-local macros = {}  -- { [name] = { events = [{t,remote,args}], duration } }
-
+local macros = {}
 local function saveMacros()
-    -- Serialize only primitive args (strings, numbers, bools, tables of those)
-    local function serArgs(args)
-        local out = {}
-        for i, v in ipairs(args) do
-            local t = typeof(v)
-            if t == "string" or t == "number" or t == "boolean" then
-                out[i] = {type=t, value=tostring(v)}
-            elseif t == "table" then
-                local tbl = {}
-                for k, val in pairs(v) do
-                    tbl[tostring(k)] = tostring(val)
-                end
-                out[i] = {type="table", value=tbl}
-            end
-        end
-        return out
-    end
-    local data = {}
-    for name, mac in pairs(macros) do
-        local evts = {}
-        for _, e in ipairs(mac.events) do
-            table.insert(evts, {t=e.t, remote=e.remote, args=serArgs(e.args)})
-        end
-        data[name] = {events=evts, duration=mac.duration}
-    end
-    pcall(function()
-        writefile(MACRO_FILE, HttpService:JSONEncode(data))
-    end)
+local function serArgs(args)
+local out = {}
+for i, v in ipairs(args) do
+local t = typeof(v)
+if t == "string" or t == "number" or t == "boolean" then
+out[i] = {type=t, value=tostring(v)}
+elseif t == "table" then
+local tbl = {}
+for k, val in pairs(v) do
+tbl[tostring(k)] = tostring(val)
 end
-
+out[i] = {type="table", value=tbl}
+end
+end
+return out
+end
+local data = {}
+for name, mac in pairs(macros) do
+local evts = {}
+for _, e in ipairs(mac.events) do
+table.insert(evts, {t=e.t, remote=e.remote, args=serArgs(e.args)})
+end
+data[name] = {events=evts, duration=mac.duration}
+end
+pcall(function()
+writefile(MACRO_FILE, HttpService:JSONEncode(data))
+end)
+end
 local function loadMacros()
-    pcall(function()
-        if not isfile(MACRO_FILE) then return end
-        local raw = readfile(MACRO_FILE)
-        local data = HttpService:JSONDecode(raw)
-        for name, mac in pairs(data) do
-            macros[name] = mac
-        end
-    end)
+pcall(function()
+if not isfile(MACRO_FILE) then return end
+local raw = readfile(MACRO_FILE)
+local data = HttpService:JSONDecode(raw)
+for name, mac in pairs(data) do
+macros[name] = mac
+end
+end)
 end
 loadMacros()
-
--- ── State ────────────────────────────────────────────────────────
 local selectedMacro = nil
 local recording     = false
 local playing       = false
 local recStart      = 0
-local hookConn      = nil  -- active __namecall hook during recording
-
--- ── UI helpers ───────────────────────────────────────────────────
+local hookConn      = nil
 local headerSec  = section(macroPage, "Macros", 1)
 local nameSec    = section(macroPage, "Macro Name", 2)
 local listSec    = section(macroPage, "Saved Macros", 3)
 local controlSec = section(macroPage, "Controls", 4)
-
--- Name input
 local nameBox = input(nameSec, "Enter macro name...", 1)
 local createBtn = btn(nameSec, "Create Macro", C.ACCENT, 2)
-
--- Selection label
 local selLabel = Instance.new("TextLabel")
 selLabel.Size = UDim2.new(1,0,0,22)
 selLabel.BackgroundTransparency = 1
@@ -2234,8 +1796,6 @@ selLabel.Font = FONT_SEMI
 selLabel.TextXAlignment = Enum.TextXAlignment.Left
 selLabel.LayoutOrder = 3
 selLabel.Parent = nameSec
-
--- Macro list scroll
 local listScroll = Instance.new("ScrollingFrame")
 listScroll.Size = UDim2.new(1,0,0,160)
 listScroll.BackgroundColor3 = C.BG
@@ -2248,8 +1808,6 @@ listScroll.LayoutOrder = 1
 listScroll.Parent = listSec
 corner(listScroll, 7); stroke(listScroll, C.BORDER, 1)
 listLayout(listScroll, nil, 4); padding(listScroll, nil, 6, 6, 6, 6)
-
--- Status label
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(1,0,0,22)
 statusLabel.BackgroundTransparency = 1
@@ -2260,291 +1818,238 @@ statusLabel.Font = FONT_SEMI
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 statusLabel.LayoutOrder = 1
 statusLabel.Parent = controlSec
-
--- Control buttons
 local recBtn  = btn(controlSec, "Record",   Color3.fromRGB(220,80,80),   2)
 local playBtn = btn(controlSec, "Play",     C.GREEN,                       3)
 local stopBtn = btn(controlSec, "Stop",     Color3.fromRGB(120,120,140),  4)
 local delBtn  = btn(controlSec, "Delete",   C.RED,                         5)
-
--- ── List rebuild ─────────────────────────────────────────────────
 local function setStatus(txt, col)
-    statusLabel.Text = txt
-    statusLabel.TextColor3 = col or C.SUBTEXT
+statusLabel.Text = txt
+statusLabel.TextColor3 = col or C.SUBTEXT
 end
-
 local function rebuildList()
-    for _, c in ipairs(listScroll:GetChildren()) do
-        if c:IsA("TextButton") then c:Destroy() end
-    end
-    local names = {}
-    for k in pairs(macros) do table.insert(names, k) end
-    table.sort(names)
-
-    if #names == 0 then
-        local empty = Instance.new("TextLabel")
-        empty.Size = UDim2.new(1,0,0,28)
-        empty.BackgroundTransparency = 1
-        empty.Text = "No macros yet — create one above"
-        empty.TextColor3 = C.SUBTEXT
-        empty.TextSize = 12
-        empty.Font = FONT_REG
-        empty.LayoutOrder = 1
-        empty.Parent = listScroll
-        return
-    end
-
-    for i, name in ipairs(names) do
-        local mac = macros[name]
-        local row = Instance.new("TextButton")
-        row.Size = UDim2.new(1,0,0,32)
-        row.BackgroundColor3 = (selectedMacro == name) and C.ACCENT or C.PANEL
-        row.AutoButtonColor = false
-        row.Text = ""
-        row.BorderSizePixel = 0
-        row.LayoutOrder = i
-        row.Parent = listScroll
-        corner(row, 6)
-
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(1,-60,1,0)
-        lbl.Position = UDim2.new(0,10,0,0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = ("%s  (%d events)"):format(name, #(mac.events or {}))
-        lbl.TextColor3 = (selectedMacro == name) and Color3.fromRGB(20,24,40) or C.TEXT
-        lbl.TextSize = 12
-        lbl.Font = FONT_SEMI
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = row
-
-        row.MouseButton1Click:Connect(function()
-            selectedMacro = (selectedMacro == name) and nil or name
-            selLabel.Text = selectedMacro and ("Selected: "..selectedMacro) or "Selected: none"
-            selLabel.TextColor3 = selectedMacro and C.ACCENT or C.SUBTEXT
-            rebuildList()
-        end)
-    end
+for _, c in ipairs(listScroll:GetChildren()) do
+if c:IsA("TextButton") then c:Destroy() end
+end
+local names = {}
+for k in pairs(macros) do table.insert(names, k) end
+table.sort(names)
+if #names == 0 then
+local empty = Instance.new("TextLabel")
+empty.Size = UDim2.new(1,0,0,28)
+empty.BackgroundTransparency = 1
+empty.Text = "No macros yet — create one above"
+empty.TextColor3 = C.SUBTEXT
+empty.TextSize = 12
+empty.Font = FONT_REG
+empty.LayoutOrder = 1
+empty.Parent = listScroll
+return
+end
+for i, name in ipairs(names) do
+local mac = macros[name]
+local row = Instance.new("TextButton")
+row.Size = UDim2.new(1,0,0,32)
+row.BackgroundColor3 = (selectedMacro == name) and C.ACCENT or C.PANEL
+row.AutoButtonColor = false
+row.Text = ""
+row.BorderSizePixel = 0
+row.LayoutOrder = i
+row.Parent = listScroll
+corner(row, 6)
+local lbl = Instance.new("TextLabel")
+lbl.Size = UDim2.new(1,-60,1,0)
+lbl.Position = UDim2.new(0,10,0,0)
+lbl.BackgroundTransparency = 1
+lbl.Text = ("%s  (%d events)"):format(name, #(mac.events or {}))
+lbl.TextColor3 = (selectedMacro == name) and Color3.fromRGB(20,24,40) or C.TEXT
+lbl.TextSize = 12
+lbl.Font = FONT_SEMI
+lbl.TextXAlignment = Enum.TextXAlignment.Left
+lbl.Parent = row
+row.MouseButton1Click:Connect(function()
+selectedMacro = (selectedMacro == name) and nil or name
+selLabel.Text = selectedMacro and ("Selected: "..selectedMacro) or "Selected: none"
+selLabel.TextColor3 = selectedMacro and C.ACCENT or C.SUBTEXT
+rebuildList()
+end)
+end
 end
 rebuildList()
-
--- ── Create macro ─────────────────────────────────────────────────
 createBtn.MouseButton1Click:Connect(function()
-    local name = nameBox.Text:match("^%s*(.-)%s*$")
-    if not name or name == "" then
-        return notify("Enter a macro name first", false)
-    end
-    if macros[name] then
-        return notify("Macro '"..name.."' already exists", false)
-    end
-    macros[name] = {events={}, duration=0}
-    selectedMacro = name
-    selLabel.Text = "Selected: "..name
-    selLabel.TextColor3 = C.ACCENT
-    nameBox.Text = ""
-    saveMacros()
-    rebuildList()
-    notify("Macro '"..name.."' created", true)
-end)
-
--- ── Arg serializer for replay ─────────────────────────────────────
-local function deserializeArgs(serialized)
-    local args = {}
-    for i, entry in ipairs(serialized) do
-        if entry.type == "string" then
-            args[i] = entry.value
-        elseif entry.type == "number" then
-            args[i] = tonumber(entry.value)
-        elseif entry.type == "boolean" then
-            args[i] = (entry.value == "true")
-        elseif entry.type == "table" then
-            local tbl = {}
-            for k, v in pairs(entry.value) do
-                local nk = tonumber(k) or k
-                local nv = tonumber(v)
-                tbl[nk] = nv ~= nil and nv or v
-            end
-            args[i] = tbl
-        end
-    end
-    return args
+local name = nameBox.Text:match("^%s*(.-)%s*$")
+if not name or name == "" then
+return notify("Enter a macro name first", false)
 end
-
--- ── Record ───────────────────────────────────────────────────────
+if macros[name] then
+return notify("Macro '"..name.."' already exists", false)
+end
+macros[name] = {events={}, duration=0}
+selectedMacro = name
+selLabel.Text = "Selected: "..name
+selLabel.TextColor3 = C.ACCENT
+nameBox.Text = ""
+saveMacros()
+rebuildList()
+notify("Macro '"..name.."' created", true)
+end)
+local function deserializeArgs(serialized)
+local args = {}
+for i, entry in ipairs(serialized) do
+if entry.type == "string" then
+args[i] = entry.value
+elseif entry.type == "number" then
+args[i] = tonumber(entry.value)
+elseif entry.type == "boolean" then
+args[i] = (entry.value == "true")
+elseif entry.type == "table" then
+local tbl = {}
+for k, v in pairs(entry.value) do
+local nk = tonumber(k) or k
+local nv = tonumber(v)
+tbl[nk] = nv ~= nil and nv or v
+end
+args[i] = tbl
+end
+end
+return args
+end
 recBtn.MouseButton1Click:Connect(function()
-    if not selectedMacro then
-        return notify("Select or create a macro first", false)
-    end
-    if playing then
-        return notify("Stop playback first", false)
-    end
-    if not inGameMode() then
-        return notify("Must be in a match to record", false)
-    end
-    if typeof(hookmetamethod) ~= "function" then
-        return notify("Executor lacks hookmetamethod", false)
-    end
-
-    if recording then
-        -- Stop recording
-        recording = false
-        local mac = macros[selectedMacro]
-        if mac then
-            mac.duration = os.clock() - recStart
-        end
-        -- Unhook by replacing with passthrough (can't unhook in most executors)
-        -- The hook checks `recording` so it silently passes through when false
-        recBtn.Text = "Record"
-        recBtn.BackgroundColor3 = Color3.fromRGB(220,80,80)
-        saveMacros()
-        local evCount = mac and #mac.events or 0
-        setStatus(("Recorded %d events"):format(evCount), C.GREEN)
-        notify(("Saved %d events"):format(evCount), true)
-        rebuildList()
-        return
-    end
-
-    -- Start recording — clear existing events
-    macros[selectedMacro].events = {}
-    recStart = os.clock()
-    recording = true
-    recBtn.Text = "Stop Recording"
-    recBtn.BackgroundColor3 = C.YELLOW
-    setStatus("Recording...", C.YELLOW)
-    notify("Recording: "..selectedMacro, true)
-
-    -- Hook __namecall to capture UnitEvent and AbilityEvent
-    -- Only captures "Render" (place) and "Activate" (ability) — skips UUID-based calls
-    if typeof(hookmetamethod) == "function" then
-        local watched = {}
-        if unitEv    then watched[unitEv]    = "Unit"    end
-        if abilityEv then watched[abilityEv] = "Ability" end
-
-        local old; old = hookmetamethod(game, "__namecall", function(self, ...)
-            local m = getnamecallmethod()
-            if (m == "FireServer" or m == "InvokeServer") and watched[self] and recording then
-                local args = {...}
-                local action = typeof(args[1]) == "string" and args[1] or ""
-                -- Only record placement and ability activations (not Upgrade/Sell/ChangePriority)
-                if action == "Render" or action == "Activate" then
-                    table.insert(macros[selectedMacro].events, {
-                        t      = os.clock() - recStart,
-                        remote = watched[self],
-                        args   = args,
-                    })
-                end
-            end
-            return old(self, ...)
-        end)
-    end
+if not selectedMacro then
+return notify("Select or create a macro first", false)
+end
+if playing then
+return notify("Stop playback first", false)
+end
+if not inGameMode() then
+return notify("Must be in a match to record", false)
+end
+if typeof(hookmetamethod) ~= "function" then
+return notify("Executor lacks hookmetamethod", false)
+end
+if recording then
+recording = false
+local mac = macros[selectedMacro]
+if mac then
+mac.duration = os.clock() - recStart
+end
+recBtn.Text = "Record"
+recBtn.BackgroundColor3 = Color3.fromRGB(220,80,80)
+saveMacros()
+local evCount = mac and #mac.events or 0
+setStatus(("Recorded %d events"):format(evCount), C.GREEN)
+notify(("Saved %d events"):format(evCount), true)
+rebuildList()
+return
+end
+macros[selectedMacro].events = {}
+recStart = os.clock()
+recording = true
+recBtn.Text = "Stop Recording"
+recBtn.BackgroundColor3 = C.YELLOW
+setStatus("Recording...", C.YELLOW)
+notify("Recording: "..selectedMacro, true)
+if typeof(hookmetamethod) == "function" then
+local watched = {}
+if unitEv    then watched[unitEv]    = "Unit"    end
+if abilityEv then watched[abilityEv] = "Ability" end
+local old; old = hookmetamethod(game, "__namecall", function(self, ...)
+local m = getnamecallmethod()
+if (m == "FireServer" or m == "InvokeServer") and watched[self] and recording then
+local args = {...}
+local action = typeof(args[1]) == "string" and args[1] or ""
+if action == "Render" or action == "Activate" then
+table.insert(macros[selectedMacro].events, {
+t      = os.clock() - recStart,
+remote = watched[self],
+args   = args,
+})
+end
+end
+return old(self, ...)
 end)
-
--- ── Play ─────────────────────────────────────────────────────────
+end
+end)
 playBtn.MouseButton1Click:Connect(function()
-    if not selectedMacro then
-        return notify("Select a macro first", false)
-    end
-    if recording then
-        return notify("Stop recording first", false)
-    end
-    if playing then
-        return notify("Already playing", false)
-    end
-    if not inGameMode() then
-        return notify("Must be in a match to play", false)
-    end
-
-    local mac = macros[selectedMacro]
-    if not mac or #mac.events == 0 then
-        return notify("Macro is empty — record something first", false)
-    end
-
-    playing = true
-    setStatus("Playing: "..selectedMacro, C.GREEN)
-    notify("Playing: "..selectedMacro, true)
-
-    _ts(function()
-        local t0 = os.clock()
-        local prevT = 0
-
-        for _, evt in ipairs(mac.events) do
-            if not playing then break end
-            local delay = evt.t - prevT
-            if delay > 0 then _tw(delay) end
-            if not playing then break end
-
-            -- Re-resolve remotes at play time in case of rejoin
-            local remote
-            if evt.remote == "Unit" then
-                remote = Net and Net:FindFirstChild("UnitEvent")
-            elseif evt.remote == "Ability" then
-                remote = Net and Net:FindFirstChild("AbilityEvent")
-            end
-
-            if remote then
-                -- Deserialize args from saved format
-                local args = deserializeArgs(evt.args)
-                pcall(function() remote:FireServer(table.unpack(args)) end)
-            end
-
-            prevT = evt.t
-        end
-
-        playing = false
-        setStatus("Playback complete", C.SUBTEXT)
-        notify("Macro done: "..selectedMacro, true)
-    end)
+if not selectedMacro then
+return notify("Select a macro first", false)
+end
+if recording then
+return notify("Stop recording first", false)
+end
+if playing then
+return notify("Already playing", false)
+end
+if not inGameMode() then
+return notify("Must be in a match to play", false)
+end
+local mac = macros[selectedMacro]
+if not mac or #mac.events == 0 then
+return notify("Macro is empty — record something first", false)
+end
+playing = true
+setStatus("Playing: "..selectedMacro, C.GREEN)
+notify("Playing: "..selectedMacro, true)
+_ts(function()
+local t0 = os.clock()
+local prevT = 0
+for _, evt in ipairs(mac.events) do
+if not playing then break end
+local delay = evt.t - prevT
+if delay > 0 then _tw(delay) end
+if not playing then break end
+local remote
+if evt.remote == "Unit" then
+remote = Net and Net:FindFirstChild("UnitEvent")
+elseif evt.remote == "Ability" then
+remote = Net and Net:FindFirstChild("AbilityEvent")
+end
+if remote then
+local args = deserializeArgs(evt.args)
+pcall(function() remote:FireServer(table.unpack(args)) end)
+end
+prevT = evt.t
+end
+playing = false
+setStatus("Playback complete", C.SUBTEXT)
+notify("Macro done: "..selectedMacro, true)
 end)
-
--- ── Stop ─────────────────────────────────────────────────────────
+end)
 stopBtn.MouseButton1Click:Connect(function()
-    if recording then
-        -- Simulate stop recording
-        recording = false
-        local mac = macros[selectedMacro]
-        if mac then mac.duration = os.clock() - recStart end
-        recBtn.Text = "Record"
-        recBtn.BackgroundColor3 = Color3.fromRGB(220,80,80)
-        saveMacros()
-        rebuildList()
-        setStatus("Recording stopped", C.SUBTEXT)
-    end
-    if playing then
-        playing = false
-        setStatus("Stopped", C.SUBTEXT)
-        notify("Playback stopped", true)
-    end
+if recording then
+recording = false
+local mac = macros[selectedMacro]
+if mac then mac.duration = os.clock() - recStart end
+recBtn.Text = "Record"
+recBtn.BackgroundColor3 = Color3.fromRGB(220,80,80)
+saveMacros()
+rebuildList()
+setStatus("Recording stopped", C.SUBTEXT)
+end
+if playing then
+playing = false
+setStatus("Stopped", C.SUBTEXT)
+notify("Playback stopped", true)
+end
 end)
-
--- ── Delete ───────────────────────────────────────────────────────
 delBtn.MouseButton1Click:Connect(function()
-    if not selectedMacro then
-        return notify("Select a macro to delete", false)
-    end
-    local name = selectedMacro
-    macros[name] = nil
-    selectedMacro = nil
-    selLabel.Text = "Selected: none"
-    selLabel.TextColor3 = C.SUBTEXT
-    saveMacros()
-    rebuildList()
-    setStatus("Deleted: "..name, C.SUBTEXT)
-    notify("Deleted: "..name, true)
+if not selectedMacro then
+return notify("Select a macro to delete", false)
+end
+local name = selectedMacro
+macros[name] = nil
+selectedMacro = nil
+selLabel.Text = "Selected: none"
+selLabel.TextColor3 = C.SUBTEXT
+saveMacros()
+rebuildList()
+setStatus("Deleted: "..name, C.SUBTEXT)
+notify("Deleted: "..name, true)
 end)
-
-end -- close Macro Tab do block
-
--- ======================
--- BOOT
--- ======================
+end
 switchTab("Lobby")
 notify("OzWare V3 loaded", true)
-_ts(openWindow) -- task.defer replaced with task.spawn for executor compat
-
--- ======================
--- FLOATING TOGGLE (bottom-left)  +  SUMMON UI SUPPRESSOR
--- ======================
+_ts(openWindow)
 do
--- ── Float button ───────────────────────────────────────────────────
 local floatBtn = Instance.new("ImageButton")
 floatBtn.Name="OzFloat"
 floatBtn.Size=UDim2.new(0,52,0,52)
@@ -2556,55 +2061,44 @@ floatBtn.BorderSizePixel=0; floatBtn.AutoButtonColor=false
 floatBtn.ZIndex=50; floatBtn.Image=""; floatBtn.Parent=gui
 Instance.new("UICorner",floatBtn).CornerRadius=UDim.new(0,26)
 stroke(floatBtn,C.ACCENT,2)
-
--- Glow bloom
 local fbGlow = Instance.new("ImageLabel",floatBtn)
 fbGlow.Size=UDim2.new(0,80,0,80); fbGlow.AnchorPoint=Vector2.new(0.5,0.5)
 fbGlow.Position=UDim2.new(0.5,0,0.5,0); fbGlow.BackgroundTransparency=1
 fbGlow.Image="rbxassetid://5028857084"; fbGlow.ImageColor3=C.ACCENT2
 fbGlow.ImageTransparency=0.55; fbGlow.ZIndex=49
-
--- Eye icon (matches OzWare logo aesthetic)
 local eyeLbl = Instance.new("TextLabel",floatBtn)
 eyeLbl.Size=UDim2.new(1,0,1,0); eyeLbl.BackgroundTransparency=1
 eyeLbl.Text="👁"; eyeLbl.TextSize=24; eyeLbl.Font=FONT_BOLD
 eyeLbl.TextColor3=C.ACCENT2; eyeLbl.ZIndex=51
-
-
--- Float button: drag vs tap
 local dragging2  = false
 local startPos2  = nil
 local startInput2 = nil
 local pressT     = nil
-
 floatBtn.InputBegan:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-        dragging2   = true
-        startPos2   = floatBtn.Position
-        startInput2 = i.Position
-        pressT      = tick()
-    end
+if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+dragging2   = true
+startPos2   = floatBtn.Position
+startInput2 = i.Position
+pressT      = tick()
+end
 end)
-
 floatBtn.InputEnded:Connect(function(i)
-    if i.UserInputType~=Enum.UserInputType.MouseButton1 and i.UserInputType~=Enum.UserInputType.Touch then return end
-    local moved = startInput2 and (Vector2.new(i.Position.X,i.Position.Y) - Vector2.new(startInput2.X,startInput2.Y)).Magnitude > 8
-    dragging2 = false
-    if not moved and pressT and (tick()-pressT) < 0.4 then
-        if isOpen then closeWindow() else openWindow() end
-    end
+if i.UserInputType~=Enum.UserInputType.MouseButton1 and i.UserInputType~=Enum.UserInputType.Touch then return end
+local moved = startInput2 and (Vector2.new(i.Position.X,i.Position.Y) - Vector2.new(startInput2.X,startInput2.Y)).Magnitude > 8
+dragging2 = false
+if not moved and pressT and (tick()-pressT) < 0.4 then
+if isOpen then closeWindow() else openWindow() end
+end
 end)
-
 UIS.InputChanged:Connect(function(i)
-    if not dragging2 then return end
-    if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
-        if not startInput2 then return end
-        local d = i.Position - startInput2
-        floatBtn.Position = UDim2.new(
-            startPos2.X.Scale, startPos2.X.Offset + d.X,
-            startPos2.Y.Scale, startPos2.Y.Offset + d.Y
-        )
-    end
+if not dragging2 then return end
+if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
+if not startInput2 then return end
+local d = i.Position - startInput2
+floatBtn.Position = UDim2.new(
+startPos2.X.Scale, startPos2.X.Offset + d.X,
+startPos2.Y.Scale, startPos2.Y.Offset + d.Y
+)
+end
 end)
-
-end -- close Float button do block
+end
