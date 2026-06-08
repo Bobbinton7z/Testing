@@ -22,9 +22,6 @@ local ok, _gui  = pcall(function() return gethui() end)
 local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
 local realGui   = player:WaitForChild("PlayerGui")
 
--- 2-second wait so game state fully loads before any function reads gamemode
-_tw(2)
-
 local Net = RS:WaitForChild("Networking")
 
 -- ======================
