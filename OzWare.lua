@@ -945,29 +945,73 @@ end
 do
 local gamePage = tabPages["Game"]
 
--- Track current wave via PlayerGui.HUD.Map.WavesAmount (confirmed path)
+-- Track current wave — tries WavesAmount label AND WaveInfoEvent as backup
 local currentWave = 0
 do
     local waveConn = nil
 
     local function parseWave(txt)
-        -- Handles: "5", "5/15", "5/∞", "Wave 5", "Wave 5/15"
+        if type(txt) ~= "string" then return nil end
         return tonumber(txt:match("(%d+)"))
+    end
+
+    local function readTextFrom(obj)
+        -- obj might be a TextLabel directly, or a Frame containing one
+        if not obj then return nil end
+        local ok, txt = pcall(function() return obj.Text end)
+        if ok and txt then return parseWave(txt) end
+        -- Try first TextLabel child
+        for _, c in ipairs(obj:GetChildren()) do
+            local ok2, t2 = pcall(function() return c.Text end)
+            if ok2 and t2 then
+                local n = parseWave(t2)
+                if n then return n end
+            end
+        end
+        return nil
     end
 
     local function connectWaveLabel()
         local hud = realGui:FindFirstChild("HUD")
         local map = hud and hud:FindFirstChild("Map")
-        local lbl = map and map:FindFirstChild("WavesAmount")
-        if not lbl then return false end
-        local n = parseWave(lbl.Text)
+        local obj = map and map:FindFirstChild("WavesAmount")
+        if not obj then return false end
+        local n = readTextFrom(obj)
         if n then currentWave = n end
         if waveConn then waveConn:Disconnect() end
-        waveConn = lbl:GetPropertyChangedSignal("Text"):Connect(function()
-            local v = parseWave(lbl.Text)
+        -- Watch text changes — works for both TextLabel and Frame > TextLabel
+        local target = obj
+        pcall(function()
+            obj.Text  -- test if it has Text directly
+        end)
+        local ok = pcall(function() local _ = obj.Text end)
+        if not ok then
+            -- It's a Frame; watch the first TextLabel child
+            for _, c in ipairs(obj:GetChildren()) do
+                local hasText = pcall(function() local _ = c.Text end)
+                if hasText then target = c; break end
+            end
+        end
+        waveConn = target:GetPropertyChangedSignal("Text"):Connect(function()
+            local v = readTextFrom(obj)
             if v then currentWave = v end
         end)
         return true
+    end
+
+    -- Backup: WaveInfoEvent fires whenever wave changes
+    local waveEv = Net:FindFirstChild("WaveInfoEvent")
+    if waveEv then
+        waveEv.OnClientEvent:Connect(function(...)
+            for _, v in ipairs({...}) do
+                if type(v) == "number" and v > 0 then
+                    currentWave = v; return
+                elseif type(v) == "table" then
+                    local n = tonumber(v.Wave or v.Current or v.WaveNumber or v[1])
+                    if n and n > 0 then currentWave = n; return end
+                end
+            end
+        end)
     end
 
     local connected = false
@@ -1401,8 +1445,8 @@ for _, n in ipairs(STARTING) do makeModRow(rstListFrame, n, restartPri, saveRest
 
 -- ── Event logic ──────────────────────────────────────────────────
 local modPickFired = false
-local modEv = Net:FindFirstChild("ModifierEvent")
-if modEv then
+
+local function connectModifierEvent(modEv)
     modEv.OnClientEvent:Connect(function(action, mods)
         if action == "End" then modPickFired = false; return end
         if action ~= "Start" then return end
@@ -1411,7 +1455,6 @@ if modEv then
         if not getAutoMod() and not getRestartMod() then return end
         if modPickFired then return end
 
-        -- Collect offered modifier names
         local offered = {}
         if type(mods) == "table" then
             for _, mod in ipairs(mods) do
@@ -1420,7 +1463,6 @@ if modEv then
             end
         end
 
-        -- Auto Pick: highest autoPri modifier from offered set
         if getAutoMod() then
             local bestName, bestPri = nil, 0
             for n in pairs(offered) do
@@ -1436,7 +1478,6 @@ if modEv then
             end
         end
 
-        -- Restart Modifier: restart if no priority starting mod offered
         if getRestartMod() and not modPickFired then
             local found = false
             for n in pairs(offered) do
@@ -1447,6 +1488,19 @@ if modEv then
                 local rev = Net:FindFirstChild("MatchRestartSettingEvent")
                 if rev then pcall(function() rev:FireServer("Vote") end) end
             end
+        end
+    end)
+end
+
+-- ModifierEvent is directly under Networking, present in all game modes.
+-- If injected in lobby it won't exist yet — watch for it to appear.
+local modEv = Net:FindFirstChild("ModifierEvent")
+if modEv then
+    connectModifierEvent(modEv)
+else
+    Net.ChildAdded:Connect(function(child)
+        if child.Name == "ModifierEvent" then
+            connectModifierEvent(child)
         end
     end)
 end
