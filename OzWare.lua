@@ -12,29 +12,32 @@ local HttpService  = game:GetService("HttpService")
 
 local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
-local playerGui = ok and _gui or player:WaitForChild("PlayerGui") -- exploit GUI container
-local realGui   = player:WaitForChild("PlayerGui")                -- actual game PlayerGui
+local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
+local realGui   = player:WaitForChild("PlayerGui")
 
-local Net       = RS:WaitForChild("Networking")
+-- 2-second wait so game state fully loads before any function reads gamemode
+task.wait(2)
+
+local Net = RS:WaitForChild("Networking")
 
 -- ======================
 -- THEME (dark purple / grunge)
 -- ======================
 local C = {
-    BG       = Color3.fromRGB(12, 10, 18),         -- near-black purple background
-    PANEL    = Color3.fromRGB(20, 16, 30),         -- sidebar / titlebar
-    CARD     = Color3.fromRGB(24, 20, 38),         -- section cards
-    BORDER   = Color3.fromRGB(90, 40, 120),        -- purple border
-    ACCENT   = Color3.fromRGB(180, 60, 255),       -- vivid purple
-    ACCENT2  = Color3.fromRGB(255, 40, 200),       -- hot pink/magenta
-    GREEN    = Color3.fromRGB(80, 220, 170),
-    RED      = Color3.fromRGB(255, 80, 120),
-    YELLOW   = Color3.fromRGB(245, 200, 90),
-    TEXT     = Color3.fromRGB(255, 255, 255),
-    SUBTEXT  = Color3.fromRGB(180, 160, 210),
-    DIM      = Color3.fromRGB(140, 120, 175),
-    DISABLED = Color3.fromRGB(45, 38, 65),
-    ACTIVE   = Color3.fromRGB(180, 60, 255),       -- active tab = purple pill
+    BG       = Color3.fromRGB(255, 220, 225),         -- light pink background
+    PANEL    = Color3.fromRGB(180, 130, 100),         -- light coffee sidebar/panels
+    CARD     = Color3.fromRGB(245, 210, 215),         -- soft pink cards
+    BORDER   = Color3.fromRGB(255, 255, 255),         -- white border
+    ACCENT   = Color3.fromRGB(180, 60, 255),          -- vivid purple (buttons)
+    ACCENT2  = Color3.fromRGB(200, 80, 255),          -- purple highlight text
+    GREEN    = Color3.fromRGB(80, 200, 140),
+    RED      = Color3.fromRGB(220, 70, 100),
+    YELLOW   = Color3.fromRGB(230, 180, 60),
+    TEXT     = Color3.fromRGB(40, 20, 30),            -- dark text on light bg
+    SUBTEXT  = Color3.fromRGB(100, 70, 80),
+    DIM      = Color3.fromRGB(150, 110, 120),
+    DISABLED = Color3.fromRGB(200, 170, 175),
+    ACTIVE   = Color3.fromRGB(180, 60, 255),          -- active tab pill
 }
 local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
@@ -246,57 +249,56 @@ win.Parent = gui
 -- Rounded corners
 Instance.new("UICorner", win).CornerRadius = UDim.new(0, 16)
 
--- Outer glowing border — 2px purple/magenta
+-- Outer border — 4px white, bulky
 local winStroke = Instance.new("UIStroke", win)
-winStroke.Color     = Color3.fromRGB(120, 40, 200)
-winStroke.Thickness = 2
+winStroke.Color     = Color3.fromRGB(255, 255, 255)
+winStroke.Thickness = 4
 winStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
--- Main background gradient — deep diagonal purple-to-black texture
+-- Main background gradient — light pink
 do
     local bg = Instance.new("Frame", win)
-    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(14,10,24)
+    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(255,220,225)
     bg.BorderSizePixel=0; bg.ZIndex=0
     Instance.new("UICorner", bg).CornerRadius=UDim.new(0,16)
     local g=Instance.new("UIGradient", bg)
     g.Color=ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(28, 14, 48)),
-        ColorSequenceKeypoint.new(0.35, Color3.fromRGB(16, 10, 28)),
-        ColorSequenceKeypoint.new(0.65, Color3.fromRGB(12,  8, 20)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(8,   6, 14)),
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 230, 235)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 215, 222)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(250, 200, 210)),
     })
     g.Rotation = 135
 end
 
--- Texture layer 1: subtle top-left highlight bleed
+-- Texture layer 1: soft highlight bleed top-left
 do
     local hi = Instance.new("Frame", win)
     hi.Size=UDim2.new(0.6,0,0.45,0); hi.Position=UDim2.new(0,0,0,0)
-    hi.BackgroundColor3=Color3.fromRGB(90,30,160); hi.BorderSizePixel=0
-    hi.BackgroundTransparency=0.92; hi.ZIndex=1
+    hi.BackgroundColor3=Color3.fromRGB(255,255,255); hi.BorderSizePixel=0
+    hi.BackgroundTransparency=0.88; hi.ZIndex=1
     Instance.new("UICorner",hi).CornerRadius=UDim.new(0,16)
 end
 
--- Texture layer 2: bottom-right dark vignette
+-- Texture layer 2: bottom-right soft shadow
 do
     local vg=Instance.new("Frame", win)
     vg.Size=UDim2.new(0.5,0,0.4,0); vg.AnchorPoint=Vector2.new(1,1)
     vg.Position=UDim2.new(1,0,1,0)
-    vg.BackgroundColor3=Color3.fromRGB(4,2,10); vg.BorderSizePixel=0
-    vg.BackgroundTransparency=0.85; vg.ZIndex=1
+    vg.BackgroundColor3=Color3.fromRGB(220,160,175); vg.BorderSizePixel=0
+    vg.BackgroundTransparency=0.82; vg.ZIndex=1
     Instance.new("UICorner",vg).CornerRadius=UDim.new(0,16)
 end
 
--- Inner border glow — softer inner stroke for depth
+-- Inner border glow — subtle white inset
 do
     local innerBorder=Instance.new("Frame", win)
-    innerBorder.Size=UDim2.new(1,-4,1,-4); innerBorder.Position=UDim2.new(0,2,0,2)
+    innerBorder.Size=UDim2.new(1,-6,1,-6); innerBorder.Position=UDim2.new(0,3,0,3)
     innerBorder.BackgroundTransparency=1; innerBorder.BorderSizePixel=0
     innerBorder.ZIndex=2
     local ib=Instance.new("UIStroke", innerBorder)
-    ib.Color=Color3.fromRGB(180,80,255); ib.Thickness=1
-    ib.Transparency=0.75; ib.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
-    Instance.new("UICorner",innerBorder).CornerRadius=UDim.new(0,15)
+    ib.Color=Color3.fromRGB(255,255,255); ib.Thickness=1
+    ib.Transparency=0.6; ib.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
+    Instance.new("UICorner",innerBorder).CornerRadius=UDim.new(0,14)
 end
 
 -- ── Header (logo banner) ─────────────────────────────────────────
@@ -379,13 +381,13 @@ end)
 local sidebar = Instance.new("Frame", win)
 sidebar.Size             = UDim2.new(0, SIDEBAR_W, 1, -96)
 sidebar.Position         = UDim2.new(0, 0, 0, 86)
-sidebar.BackgroundColor3 = Color3.fromRGB(18, 12, 30)
+sidebar.BackgroundColor3 = Color3.fromRGB(180, 130, 100)  -- light coffee
 sidebar.BorderSizePixel  = 0; sidebar.ZIndex = 11
 -- Right border only
 local sideStroke = Instance.new("Frame", sidebar)
-sideStroke.Size             = UDim2.new(0,1,1,0)
-sideStroke.Position         = UDim2.new(1,-1,0,0)
-sideStroke.BackgroundColor3 = Color3.fromRGB(50,25,75)
+sideStroke.Size             = UDim2.new(0,2,1,0)
+sideStroke.Position         = UDim2.new(1,-2,0,0)
+sideStroke.BackgroundColor3 = Color3.fromRGB(255,255,255)  -- white
 sideStroke.BorderSizePixel  = 0; sideStroke.ZIndex = 12
 
 local tabList = Instance.new("Frame", sidebar)
@@ -398,7 +400,7 @@ listLayout(tabList, nil, 2, Enum.HorizontalAlignment.Center)
 local footer = Instance.new("Frame", sidebar)
 footer.Size             = UDim2.new(1,-12,0,50)
 footer.Position         = UDim2.new(0,6,1,-56)
-footer.BackgroundColor3 = Color3.fromRGB(25,15,40)
+footer.BackgroundColor3 = Color3.fromRGB(160, 110, 80)  -- darker coffee
 footer.BorderSizePixel  = 0; footer.ZIndex = 12
 Instance.new("UICorner",footer).CornerRadius=UDim.new(0,8)
 local avImg = Instance.new("ImageLabel", footer)
@@ -434,7 +436,7 @@ local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","SpringLTM","Macro"}
 local function makePage()
     local p=Instance.new("ScrollingFrame")
     p.Size=UDim2.new(1,0,1,0); p.BackgroundTransparency=1; p.BorderSizePixel=0
-    p.ScrollBarThickness=3; p.ScrollBarImageColor3=Color3.fromRGB(140,40,200)
+    p.ScrollBarThickness=3; p.ScrollBarImageColor3=Color3.fromRGB(180,60,255)
     p.CanvasSize=UDim2.new(0,0,0,0); p.AutomaticCanvasSize=Enum.AutomaticSize.Y
     p.Visible=false; p.ZIndex=12; p.Parent=contentArea
     listLayout(p,nil,8); padding(p,nil,4,12,2,8)
@@ -972,9 +974,12 @@ do
     end
 
     local function connectWaveLabel()
-        local hud = realGui:FindFirstChild("HUD")
-        local map = hud and hud:FindFirstChild("Map")
-        local obj = map and map:FindFirstChild("WavesAmount")
+        local hud      = realGui:FindFirstChild("HUD")
+        local map      = hud and hud:FindFirstChild("Map")
+        -- Confirmed path from Dex: Map.WaveInfo (Frame) > Wave (TextLabel)
+        -- Text format is "1/∞" — parseWave extracts the leading number.
+        local waveInfo = map and map:FindFirstChild("WaveInfo")
+        local obj      = waveInfo and waveInfo:FindFirstChild("Wave")
         if not obj then return false end
         local n = readTextFrom(obj)
         if n then currentWave = n end
@@ -992,9 +997,12 @@ do
                 if hasText then target = c; break end
             end
         end
-        waveConn = target:GetPropertyChangedSignal("Text"):Connect(function()
-            local v = readTextFrom(obj)
-            if v then currentWave = v end
+        -- Connect signal — wrapped in pcall in case target has no Text property
+        pcall(function()
+            waveConn = target:GetPropertyChangedSignal("Text"):Connect(function()
+                local v = readTextFrom(obj)
+                if v then currentWave = v end
+            end)
         end)
         return true
     end
@@ -1242,14 +1250,13 @@ do
 end
 
 -- ── FPS Boost ─────────────────────────────────────────────────────
--- CONFIRMED paths: workspace.Terrain, game:GetService("Lighting")
--- Makes everything flat grey — no textures, no sky, no particles.
 local fpsApplied = false
 local function applyFPSBoost()
     if fpsApplied then return end
     fpsApplied = true
     local Lighting = game:GetService("Lighting")
-    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    -- settings() is nil in some executor environments — guard it
+    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
     for _, c in ipairs(Lighting:GetChildren()) do pcall(function() c:Destroy() end) end
     Lighting.GlobalShadows=false; Lighting.FogEnd=9e9; Lighting.FogStart=9e9
     Lighting.Brightness=0; Lighting.Ambient=Color3.fromRGB(200,200,200)
