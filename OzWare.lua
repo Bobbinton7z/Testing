@@ -1187,7 +1187,7 @@ onDeleteMap(function(on)
 
     local SKIP = {Entities=true, Ignore=true, Camera=true}
     for _, child in ipairs(workspace:GetChildren()) do
-        if SKIP[child.Name] or child.ClassName == "Terrain" or charSet[child] then continue end
+        if not (SKIP[child.Name] or child.ClassName == "Terrain" or charSet[child]) then
         for _, p in ipairs(child:GetDescendants()) do
             if p:IsA("BasePart") then
                 pcall(function()
@@ -1210,6 +1210,7 @@ onDeleteMap(function(on)
                 end
             end)
         end
+        end -- not SKIP
     end
     notify(("Map: hid %d parts"):format(count), true)
 end)
@@ -1225,16 +1226,19 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.2)
-        if not getDeleteEnemies() or not inGameMode() then continue end
+        if getDeleteEnemies() and inGameMode() then
         local entities = workspace:FindFirstChild("Entities")
-        if not entities then continue end
+        if entities then
         for _, model in ipairs(entities:GetChildren()) do
-            if destroyedEnemies[model] then continue end
+            if not destroyedEnemies[model] then
             if model:IsA("Model") or model:IsA("BasePart") then
                 destroyedEnemies[model] = true
                 pcall(function() model:Destroy() end)
             end
+            end -- not destroyedEnemies
         end
+        end -- entities
+        end -- getDeleteEnemies and inGameMode
     end
 end)
 -- Also watch for new enemies spawning
