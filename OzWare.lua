@@ -3,12 +3,12 @@
 -- |    V3 Dashboard     |
 -- ======================
 
-local Players      = game:GetService("Players")
-local RS           = game:GetService("ReplicatedStorage")
-local TweenSvc     = game:GetService("TweenService")
-local RunSvc       = game:GetService("RunService")
-local UIS          = game:GetService("UserInputService")
-local HttpService  = game:GetService("HttpService")
+local Players      = game.Players
+local RS           = game.ReplicatedStorage
+local TweenSvc     = game.TweenService
+local RunSvc       = game.RunService
+local UIS          = game.UserInputService
+local HttpService  = game.HttpService
 
 -- task.defer / task.delay may not exist in all Delta builds; polyfill both
 if task and not task.defer then
@@ -1053,13 +1053,13 @@ do
     local settings  = {}
     pcall(function()
         if isfile and isfile(WAVE_SAVE) then
-            local t = game:GetService("HttpService"):JSONDecode(readfile(WAVE_SAVE))
+            local t = HttpService:JSONDecode(readfile(WAVE_SAVE))
             if type(t) == "table" then settings = t end
         end
     end)
     local function saveSettings()
         pcall(function()
-            writefile(WAVE_SAVE, game:GetService("HttpService"):JSONEncode(settings))
+            writefile(WAVE_SAVE, HttpService:JSONEncode(settings))
         end)
     end
 
@@ -1262,7 +1262,7 @@ local fpsApplied = false
 local function applyFPSBoost()
     if fpsApplied then return end
     fpsApplied = true
-    local Lighting = game:GetService("Lighting")
+    local Lighting = game.Lighting
     -- settings() is nil in some executor environments — guard it
     pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
     for _, c in ipairs(Lighting:GetChildren()) do pcall(function() c:Destroy() end) end
@@ -1324,7 +1324,7 @@ end)
 
 -- ── Modifier Selector ─────────────────────────────────────────────
 do
-local HttpSvc      = game:GetService("HttpService")
+local HttpSvc      = HttpService
 local AUTO_SAVE    = "OzWare_mod_auto.json"
 local RESTART_SAVE = "OzWare_mod_restart.json"
 
@@ -1608,7 +1608,7 @@ end
 refreshRemotes()
 
 -- Clear REMOTES cache on respawn/teleport so they re-resolve for the next run
-game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
+player.CharacterAdded:Connect(function()
     -- Reset all one-shot flags so toggles work immediately in the new match
     for k in pairs(REMOTES) do REMOTES[k] = nil end
     mapDeleted       = false
