@@ -10,13 +10,12 @@ local RunSvc       = game.RunService
 local UIS          = game.UserInputService
 local HttpService  = game.HttpService
 
--- task.defer / task.delay may not exist in all Delta builds; polyfill both
-if task and not task.defer then
-    task.defer = task.spawn
-end
-if task and not task.delay then
-    task.delay = function(t, f) task.spawn(function() task.wait(t); f() end) end
-end
+-- Safe task-library aliases — fallback to deprecated globals if task.X is nil.
+-- Delta on Android may not expose the full task library.
+local _tw = (task and task.wait)  or wait
+local _ts = (task and task.spawn) or function(f,...) coroutine.resume(coroutine.create(f),...) end
+local _td = (task and task.defer) or _ts
+local _tD = (task and task.delay) or function(t,f) _ts(function() _tw(t);f() end) end
 
 local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
@@ -24,7 +23,7 @@ local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
 local realGui   = player:WaitForChild("PlayerGui")
 
 -- 2-second wait so game state fully loads before any function reads gamemode
-task.wait(2)
+_tw(2)
 
 local Net = RS:WaitForChild("Networking")
 
@@ -139,10 +138,10 @@ local function notify(msg, ok)
     local targetY = 1 - (0.06 * (#notifQueue + 1))
     table.insert(notifQueue, f)
     tween(f, {Position=UDim2.new(0.5,-150,targetY,-50)}, 0.3)
-    task.delay(3, function()
+    _tD(3, function()
         tween(f,{Position=UDim2.new(0.5,-150,1,20), BackgroundTransparency=1},0.25)
         tween(lbl,{TextTransparency=1},0.25)
-        task.wait(0.3)
+        _tw(0.3)
         local i=table.find(notifQueue,f); if i then table.remove(notifQueue,i) end
         f:Destroy()
     end)
@@ -416,7 +415,7 @@ avImg.Size=UDim2.new(0,32,0,32); avImg.Position=UDim2.new(0,8,0.5,-16)
 avImg.BackgroundColor3=C.CARD; avImg.BorderSizePixel=0; avImg.ZIndex=13
 Instance.new("UICorner",avImg).CornerRadius=UDim.new(0,16)
 stroke(avImg,C.ACCENT,1)
-task.spawn(function()
+_ts(function()
     local ok,url=pcall(function()
         return Players:GetUserThumbnailAsync(player.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size48x48)
     end)
@@ -631,12 +630,12 @@ local function toggle(parent, text, order, default, saveKey)
         enabled = not enabled
         setSavedToggle(saveKey, enabled)
         apply()
-        for _,cb in ipairs(callbacks) do task.spawn(cb, enabled) end
+        for _,cb in ipairs(callbacks) do _ts(cb, enabled) end
     end)
     return btnRow, function() return enabled end, function(cb)
         table.insert(callbacks, cb)
         -- Fire immediately if already ON when script loads (e.g. saved state)
-        if enabled then task.spawn(cb, true) end
+        if enabled then _ts(cb, true) end
     end
 end
 
@@ -734,12 +733,12 @@ local BANNERS = {
 
 for i, b in ipairs(BANNERS) do
     local _, getOn = toggle(sumListFrame, "Auto: "..b.name, i, false, "summon-v7:"..b.id)
-    task.spawn(function()
+    _ts(function()
         while true do
             if getOn() and not inGameMode() then
                 fireBanner(b.id)
             end
-            task.wait(1.25)
+            _tw(1.25)
         end
     end)
 end
@@ -772,11 +771,11 @@ local CLAIMERS = {
     { name="Claim All Quests",     key="claim.quests",     fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
     { name="Claim All Milestones", key="claim.milestones", fn=function()
         for _,m in ipairs({10,25,50,70,100,150,200,250,300,400,500,750,1000}) do
-            Net.Milestones.MilestonesEvent:FireServer("Claim", m); task.wait(0.08)
+            Net.Milestones.MilestonesEvent:FireServer("Claim", m); _tw(0.08)
         end
     end},
     { name="Claim Daily Reward",   key="claim.daily",      fn=function()
-        for day=1,7 do Net.DailyRewardEvent:FireServer("Claim",{[1]="Special",[2]=day}); task.wait(0.08) end
+        for day=1,7 do Net.DailyRewardEvent:FireServer("Claim",{[1]="Special",[2]=day}); _tw(0.08) end
     end},
     { name="Claim Battle Pass",    key="claim.battlepass", fn=function() Net.BattlepassEvent:FireServer("ClaimAll") end},
 }
@@ -794,7 +793,7 @@ do
         if inGameMode() then return end
         for i, c in ipairs(CLAIMERS) do
             if claimGetters[i] and claimGetters[i]() then
-                task.spawn(function() pcall(c.fn) end)
+                _ts(function() pcall(c.fn) end)
             end
         end
     end)
@@ -936,7 +935,7 @@ joinBtn.MouseButton1Click:Connect(function()
         if not fired then error("No join remote found") end
 
         if getAutoStart() then
-            task.wait(0.5)
+            _tw(0.5)
             local sm = Net:FindFirstChild("StartMatch", true) or Net:FindFirstChild("PlayMatch", true)
             if sm and (sm:IsA("RemoteEvent") or sm:IsA("RemoteFunction")) then
                 pcall(function()
@@ -1167,7 +1166,7 @@ onDeleteMap(function(on)
     if mapDeleted then return end
     -- Wait for game to be ready (handles both click and saved-state load)
     local waited = 0
-    while not inGameMode() and waited < 60 do task.wait(0.5); waited = waited + 0.5 end
+    while not inGameMode() and waited < 60 do _tw(0.5); waited = waited + 0.5 end
     if not inGameMode() then notify("Must be in a match", false); return end
     mapDeleted = true
 
@@ -1223,9 +1222,9 @@ local destroyedEnemies = {}
 onDeleteEnemies(function(on)
     if not on then destroyedEnemies = {} end
 end)
-task.spawn(function()
+_ts(function()
     while true do
-        task.wait(0.2)
+        _tw(0.2)
         if getDeleteEnemies() and inGameMode() then
         local entities = workspace:FindFirstChild("Entities")
         if entities then
@@ -1246,7 +1245,7 @@ workspace.ChildAdded:Connect(function(child)
     if child.Name ~= "Entities" then return end
     child.ChildAdded:Connect(function(model)
         if not getDeleteEnemies() then return end
-        task.wait(0.05)
+        _tw(0.05)
         pcall(function() model:Destroy() end)
     end)
 end)
@@ -1255,7 +1254,7 @@ do
     if entities then
         entities.ChildAdded:Connect(function(model)
             if not getDeleteEnemies() then return end
-            task.wait(0.05)
+            _tw(0.05)
             pcall(function() model:Destroy() end)
         end)
     end
@@ -1314,9 +1313,9 @@ onBoostFPS(function(on)
         if inGameMode() then
             applyFPSBoost()
         else
-            task.spawn(function()
+            _ts(function()
                 local w = 0
-                while not inGameMode() and w < 120 do task.wait(1); w=w+1 end
+                while not inGameMode() and w < 120 do _tw(1); w=w+1 end
                 if inGameMode() and getBoostFPS() then applyFPSBoost() end
             end)
         end
@@ -1490,7 +1489,7 @@ local function connectModifierEvent(modEv)
             end
             if bestName and bestPri > 0 then
                 modPickFired = true
-                task.defer(function()
+                _td(function()
                     pcall(function() modEv:FireServer("Choose", bestName) end)
                 end)
                 return
@@ -1618,7 +1617,7 @@ player.CharacterAdded:Connect(function()
     mapDeleted       = false
     destroyedEnemies = {}
     fpsApplied       = false
-    task.wait(3); refreshRemotes()
+    _tw(3); refreshRemotes()
 end)
 
 local function getONet(name)
@@ -1630,18 +1629,18 @@ end
 -- Watch for Adventure folder appearing (happens when entering a run)
 Net.ChildAdded:Connect(function(c)
     if c.Name == "Odyssey" then
-        task.wait(0.5); refreshRemotes()
-        c.ChildAdded:Connect(function() task.wait(0.2); refreshRemotes() end)
+        _tw(0.5); refreshRemotes()
+        c.ChildAdded:Connect(function() _tw(0.2); refreshRemotes() end)
     end
-    task.wait(0.2); refreshRemotes()
+    _tw(0.2); refreshRemotes()
 end)
 do
     local odyF = Net:FindFirstChild("Odyssey")
     if odyF then
-        odyF.ChildAdded:Connect(function() task.wait(0.2); refreshRemotes() end)
+        odyF.ChildAdded:Connect(function() _tw(0.2); refreshRemotes() end)
         local advF = odyF:FindFirstChild("Adventure")
         if advF then
-            advF.ChildAdded:Connect(function() task.wait(0.1); refreshRemotes() end)
+            advF.ChildAdded:Connect(function() _tw(0.1); refreshRemotes() end)
         end
     end
 end
@@ -1790,7 +1789,7 @@ local function pickIndex(opts, indexHint)
     local idx = indexHint or 1
     -- For character cards: first pick selects, second pick confirms
     pcall(function() ev:FireServer("Pick", idx) end)
-    task.wait(0.3)
+    _tw(0.3)
     pcall(function() ev:FireServer("Pick", idx) end)
     return true
 end
@@ -1855,7 +1854,7 @@ local function collectAndCloseTreasure()
                     if not openedChests[uuid] then
                         openedChests[uuid] = true
                         pcall(function() chestRemote:FireServer("OpenChest", uuid) end)
-                        task.wait(0.08)
+                        _tw(0.08)
                     end
                 end
             end
@@ -1893,12 +1892,12 @@ local function requestNextRoom()
     refreshRemotes()
     local mapEv = getONet("MapEvent")
     if mapEv then pcall(function() mapEv:FireServer("RequestSnapshot") end) end
-    task.wait(0.2)
+    _tw(0.2)
     local voteEv = getONet("VoteEvent")
     if not voteEv then return end
     for _, idx in ipairs({1, 2, 3, 4, 5}) do
         pcall(function() voteEv:FireServer("Vote", idx) end)
-        task.wait(0.05)
+        _tw(0.05)
     end
     local modEv = getONet("ModifierEvent")
     if modEv then pcall(function() modEv:FireServer("ClientReady") end) end
@@ -1918,7 +1917,7 @@ do
             if n:sub(1,17) == "OdysseyChestPing_" then return end
             if openedChestIds[n] then return end
             openedChestIds[n] = true
-            task.wait(0.1)
+            _tw(0.1)
             local sm = Net:FindFirstChild("StageMechanics")
             local cr = sm and sm:FindFirstChild("OdysseyChest")
             if cr then pcall(function() cr:FireServer("OpenChest", n:sub(14)) end) end
@@ -1930,7 +1929,7 @@ do
         if c.Name == "Ignore" then openedChestIds = {}; hookIgnore(c) end
     end)
 
-    task.spawn(function()
+    _ts(function()
         local ody = Net:WaitForChild("Odyssey", 120)
         if not ody then return end
         local adv = ody:WaitForChild("Adventure", 120)
@@ -1944,10 +1943,10 @@ do
                 if action == "VoteStarted" then
                     voteActive = true
                     if not getAutoNextRoom() then return end
-                    task.spawn(requestNextRoom)
-                    task.delay(2, function()
+                    _ts(requestNextRoom)
+                    _tD(2, function()
                         if voteActive and getAutoNextRoom() then
-                            task.spawn(requestNextRoom)
+                            _ts(requestNextRoom)
                         end
                     end)
                 elseif action == "VoteEnded" or action == "VoteCancelled" then
@@ -1962,7 +1961,7 @@ do
             shopEvC.OnClientEvent:Connect(function(action)
                 if action ~= "Open" then return end
                 if not getAutoSkipShop() then return end
-                task.defer(function()
+                _td(function()
                     pcall(function() shopEvC:FireServer("Close", nil) end)
                 end)
             end)
@@ -1974,7 +1973,7 @@ do
             unitEvC.OnClientEvent:Connect(function(action)
                 if action ~= "Offer" then return end
                 if not getSkipUnitReward() then return end
-                task.defer(function()
+                _td(function()
                     pcall(function() unitEvC:FireServer("Skip", nil) end)
                 end)
             end)
@@ -1986,8 +1985,8 @@ do
             treasureEvC.OnClientEvent:Connect(function(action)
                 if action ~= "Begin" then return end
                 if not getAutoCollectChests() then return end
-                task.spawn(function()
-                    task.wait(0.3)
+                _ts(function()
+                    _tw(0.3)
                     collectAndCloseTreasure()
                 end)
             end)
@@ -2021,8 +2020,8 @@ do
                     pendingIdx  = bestIdx
                     pendingPick = true
                     -- Trigger hook via a benign remote so piggyback fires ASAP
-                    task.spawn(function()
-                        task.wait(0.1)
+                    _ts(function()
+                        _tw(0.1)
                         local mapEv = adv:FindFirstChild("MapEvent")
                         if mapEv then
                             pcall(function() mapEv:FireServer("RequestSnapshot") end)
@@ -2466,14 +2465,14 @@ playBtn.MouseButton1Click:Connect(function()
     setStatus("Playing: "..selectedMacro, C.GREEN)
     notify("Playing: "..selectedMacro, true)
 
-    task.spawn(function()
+    _ts(function()
         local t0 = os.clock()
         local prevT = 0
 
         for _, evt in ipairs(mac.events) do
             if not playing then break end
             local delay = evt.t - prevT
-            if delay > 0 then task.wait(delay) end
+            if delay > 0 then _tw(delay) end
             if not playing then break end
 
             -- Re-resolve remotes at play time in case of rejoin
@@ -2542,7 +2541,7 @@ end -- close Macro Tab do block
 -- ======================
 switchTab("Lobby")
 notify("OzWare V3 loaded", true)
-task.spawn(openWindow) -- task.defer replaced with task.spawn for executor compat
+_ts(openWindow) -- task.defer replaced with task.spawn for executor compat
 
 -- ======================
 -- FLOATING TOGGLE (bottom-left)  +  SUMMON UI SUPPRESSOR
