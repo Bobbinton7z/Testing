@@ -985,9 +985,6 @@ do
         if waveConn then waveConn:Disconnect() end
         -- Watch text changes — works for both TextLabel and Frame > TextLabel
         local target = obj
-        pcall(function()
-            obj.Text  -- test if it has Text directly
-        end)
         local ok = pcall(function() local _ = obj.Text end)
         if not ok then
             -- It's a Frame; watch the first TextLabel child
