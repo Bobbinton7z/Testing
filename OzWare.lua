@@ -974,9 +974,11 @@ do
     end
 
     local function connectWaveLabel()
-        local hud = realGui:FindFirstChild("HUD")
-        local map = hud and hud:FindFirstChild("Map")
-        local obj = map and map:FindFirstChild("WavesAmount")
+        local hud      = realGui:FindFirstChild("HUD")
+        local map      = hud and hud:FindFirstChild("Map")
+        -- Confirmed path from Dex: Map.WaveInfo (Frame) > Wave (TextLabel)
+        local waveInfo = map and map:FindFirstChild("WaveInfo")
+        local obj      = waveInfo and waveInfo:FindFirstChild("Wave")
         if not obj then return false end
         local n = readTextFrom(obj)
         if n then currentWave = n end
