@@ -37,7 +37,7 @@ local C = {
     TEXT     = Color3.fromRGB(235, 235, 235),        -- near-white
     SUBTEXT  = Color3.fromRGB(130, 130, 140),        -- grey inactive
     DIM      = Color3.fromRGB(80,  80,  90),         -- very dim
-    DISABLED = Color3.fromRGB(58,  58,  65),         -- off-circle
+    DISABLED = Color3.fromRGB(75,  75,  82),         -- off-circle (visible on dark bg)
     ACTIVE   = Color3.fromRGB(220, 80,  150),
 }
 local FONT_BOLD = Enum.Font.GothamBold
@@ -215,7 +215,7 @@ win.Position         = UDim2.new(0.5, 0, 0.5, 0)
 win.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 win.BorderSizePixel  = 0
 win.ClipsDescendants = true
-win.Active           = true
+win.Active           = false  -- true would dim screen on mobile touch
 win.Visible          = false
 
 -- ── Open/close animation (top-level so accessible at boot) ────────
@@ -281,15 +281,15 @@ sideDiv.BackgroundColor3=Color3.fromRGB(48,48,52); sideDiv.BorderSizePixel=0; si
 -- ── Branding (top of sidebar) ─────────────────────────────────────
 local brandArea=Instance.new("Frame",sidebar)
 brandArea.Size=UDim2.new(1,0,0,60); brandArea.Position=UDim2.new(0,0,0,0)
-brandArea.BackgroundTransparency=1; brandArea.BorderSizePixel=0; brandArea.ZIndex=13
+brandArea.BackgroundTransparency=1; brandArea.BorderSizePixel=0; brandArea.ZIndex=13; brandArea.Active=true
 local brandDiv=Instance.new("Frame",brandArea)
 brandDiv.Size=UDim2.new(1,0,0,1); brandDiv.Position=UDim2.new(0,0,1,-1)
 brandDiv.BackgroundColor3=Color3.fromRGB(48,48,52); brandDiv.BorderSizePixel=0; brandDiv.ZIndex=14
 local logoImg=Instance.new("ImageLabel",brandArea)
-logoImg.Size=UDim2.new(0,34,0,34); logoImg.AnchorPoint=Vector2.new(0,0.5)
-logoImg.Position=UDim2.new(0,10,0.5,0); logoImg.BackgroundColor3=Color3.fromRGB(35,35,40)
+logoImg.Size=UDim2.new(0,38,0,38); logoImg.AnchorPoint=Vector2.new(0,0.5)
+logoImg.Position=UDim2.new(0,8,0.5,0); logoImg.BackgroundTransparency=1
 logoImg.BorderSizePixel=0; logoImg.Image=LOGO_ASSET; logoImg.ScaleType=Enum.ScaleType.Fit; logoImg.ZIndex=14
-Instance.new("UICorner",logoImg).CornerRadius=UDim.new(0,17)
+Instance.new("UICorner",logoImg).CornerRadius=UDim.new(0,19)
 local logoFallback=Instance.new("TextLabel",brandArea)
 logoFallback.Size=UDim2.new(0,88,0,18); logoFallback.Position=UDim2.new(0,52,0,10)
 logoFallback.BackgroundTransparency=1; logoFallback.Text="OzWare"
@@ -321,7 +321,7 @@ end)
 local tabList=Instance.new("Frame",sidebar)
 tabList.Size=UDim2.new(1,0,1,-60); tabList.Position=UDim2.new(0,0,0,60)
 tabList.BackgroundTransparency=1; tabList.ZIndex=12
-listLayout(tabList,nil,0)
+listLayout(tabList,nil,4,Enum.HorizontalAlignment.Center)
 
 -- ── Content area ──────────────────────────────────────────────────
 local contentArea=Instance.new("Frame",win)
@@ -358,9 +358,10 @@ end
 
 for i,name in ipairs(TAB_NAMES) do
     local b=Instance.new("TextButton",tabList)
-    b.Size=UDim2.new(1,0,0,36); b.BackgroundColor3=Color3.fromRGB(22,22,22)
+    b.Size=UDim2.new(1,-10,0,32); b.BackgroundColor3=Color3.fromRGB(22,22,22)
     b.BackgroundTransparency=0; b.Text=""; b.AutoButtonColor=false
     b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=13
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
     local lbl=Instance.new("TextLabel",b)
     lbl.Size=UDim2.new(1,-16,1,0); lbl.Position=UDim2.new(0,14,0,0)
     lbl.BackgroundTransparency=1; lbl.Text=name
@@ -458,9 +459,9 @@ local function toggle(parent, text, order, default, saveKey)
     lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4
     -- Circle indicator
     local circle=Instance.new("Frame",row)
-    circle.Size=UDim2.new(0,14,0,14); circle.Position=UDim2.new(1,-26,0.5,-7)
+    circle.Size=UDim2.new(0,16,0,16); circle.Position=UDim2.new(1,-28,0.5,-8)
     circle.BackgroundColor3=C.DISABLED; circle.BorderSizePixel=0; circle.ZIndex=5
-    corner(circle,7)
+    corner(circle,8)
 
     local enabled=getSavedToggle(saveKey,default)
     local function apply()
@@ -557,12 +558,12 @@ local sumSec = section(lobbyPage, "Auto Summoner", 1)
 
 -- Collapsible toggle list
 local sumColBtn = Instance.new("TextButton", sumSec)
-sumColBtn.Size=UDim2.new(1,0,0,30); sumColBtn.BackgroundColor3=C.PANEL
+sumColBtn.Size=UDim2.new(1,0,0,30); sumColBtn.BackgroundColor3=Color3.fromRGB(32,32,32)
 sumColBtn.BorderSizePixel=0; sumColBtn.LayoutOrder=1
-sumColBtn.Text="▶  Summoner"; sumColBtn.TextColor3=C.ACCENT2
+sumColBtn.Text="▶  Summoner"; sumColBtn.TextColor3=C.SUBTEXT
 sumColBtn.TextSize=12; sumColBtn.Font=FONT_SEMI
 sumColBtn.AutoButtonColor=false; sumColBtn.ZIndex=3
-corner(sumColBtn,8); stroke(sumColBtn,C.ACCENT,1)
+corner(sumColBtn,6)
 
 local sumListFrame = Instance.new("Frame", sumSec)
 sumListFrame.Size=UDim2.new(1,0,0,0); sumListFrame.AutomaticSize=Enum.AutomaticSize.Y
@@ -627,12 +628,12 @@ end
 local claimSec = section(lobbyPage, "Claimer", 2)
 
 local clmColBtn = Instance.new("TextButton", claimSec)
-clmColBtn.Size=UDim2.new(1,0,0,30); clmColBtn.BackgroundColor3=C.PANEL
+clmColBtn.Size=UDim2.new(1,0,0,30); clmColBtn.BackgroundColor3=Color3.fromRGB(32,32,32)
 clmColBtn.BorderSizePixel=0; clmColBtn.LayoutOrder=1
-clmColBtn.Text="▶  Claimers"; clmColBtn.TextColor3=C.ACCENT2
+clmColBtn.Text="▶  Claimers"; clmColBtn.TextColor3=C.SUBTEXT
 clmColBtn.TextSize=12; clmColBtn.Font=FONT_SEMI
 clmColBtn.AutoButtonColor=false; clmColBtn.ZIndex=3
-corner(clmColBtn,8); stroke(clmColBtn,C.ACCENT,1)
+corner(clmColBtn,6)
 
 local clmListFrame = Instance.new("Frame", claimSec)
 clmListFrame.Size=UDim2.new(1,0,0,0); clmListFrame.AutomaticSize=Enum.AutomaticSize.Y
@@ -1224,12 +1225,12 @@ label(modSec, "Picks highest-priority modifier when offered", 2)
 
 -- Collapsible: ALL modifiers (Additive + Starting)
 local allColBtn = Instance.new("TextButton", modSec)
-allColBtn.Size=UDim2.new(1,0,0,30); allColBtn.BackgroundColor3=C.PANEL
+allColBtn.Size=UDim2.new(1,0,0,30); allColBtn.BackgroundColor3=Color3.fromRGB(32,32,32)
 allColBtn.BorderSizePixel=0; allColBtn.LayoutOrder=3
 allColBtn.Text="▶  All Modifier Priorities"
-allColBtn.TextColor3=C.ACCENT2; allColBtn.TextSize=12; allColBtn.Font=FONT_SEMI
+allColBtn.TextColor3=C.SUBTEXT; allColBtn.TextSize=12; allColBtn.Font=FONT_SEMI
 allColBtn.AutoButtonColor=false; allColBtn.ZIndex=3
-corner(allColBtn,8); stroke(allColBtn,C.ACCENT,1)
+corner(allColBtn,6)
 
 local allListFrame = Instance.new("Frame", modSec)
 allListFrame.Size=UDim2.new(1,0,0,0); allListFrame.AutomaticSize=Enum.AutomaticSize.Y
@@ -1247,12 +1248,12 @@ label(modSec, "Restarts match until a priority starting modifier appears", 6)
 
 -- Collapsible: Starting modifiers only
 local rstColBtn = Instance.new("TextButton", modSec)
-rstColBtn.Size=UDim2.new(1,0,0,30); rstColBtn.BackgroundColor3=C.PANEL
+rstColBtn.Size=UDim2.new(1,0,0,30); rstColBtn.BackgroundColor3=Color3.fromRGB(32,32,32)
 rstColBtn.BorderSizePixel=0; rstColBtn.LayoutOrder=7
 rstColBtn.Text="▶  Starting Modifier Priorities"
-rstColBtn.TextColor3=C.ACCENT2; rstColBtn.TextSize=12; rstColBtn.Font=FONT_SEMI
+rstColBtn.TextColor3=C.SUBTEXT; rstColBtn.TextSize=12; rstColBtn.Font=FONT_SEMI
 rstColBtn.AutoButtonColor=false; rstColBtn.ZIndex=3
-corner(rstColBtn,8); stroke(rstColBtn,C.ACCENT,1)
+corner(rstColBtn,6)
 
 local rstListFrame = Instance.new("Frame", modSec)
 rstListFrame.Size=UDim2.new(1,0,0,0); rstListFrame.AutomaticSize=Enum.AutomaticSize.Y
