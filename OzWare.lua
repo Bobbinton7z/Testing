@@ -22,23 +22,23 @@ task.wait(2)
 local Net = RS:WaitForChild("Networking")
 
 -- ======================
--- THEME (professional dark — white text / light grey borders)
+-- THEME (EzP Gui style — flat dark, pink accent)
 -- ======================
 local C = {
-    BG       = Color3.fromRGB(38,  38,  45),         -- dark content area
-    PANEL    = Color3.fromRGB(55,  55,  65),         -- buttons / toggles / chips
-    CARD     = Color3.fromRGB(48,  48,  57),         -- section cards
-    BORDER   = Color3.fromRGB(95,  95, 110),         -- light grey borders
-    ACCENT   = Color3.fromRGB(130, 100, 230),        -- purple active accent
-    ACCENT2  = Color3.fromRGB(150, 120, 245),
+    BG       = Color3.fromRGB(25,  25,  25),         -- content background
+    PANEL    = Color3.fromRGB(35,  35,  35),         -- hover / input bg
+    CARD     = Color3.fromRGB(32,  32,  32),         -- subtle row alt
+    BORDER   = Color3.fromRGB(52,  52,  58),         -- subtle dividers
+    ACCENT   = Color3.fromRGB(220, 80,  150),        -- pink active/on
+    ACCENT2  = Color3.fromRGB(240, 110, 170),        -- lighter pink
     GREEN    = Color3.fromRGB(80,  200, 140),
     RED      = Color3.fromRGB(220, 70,  100),
     YELLOW   = Color3.fromRGB(230, 180, 60),
-    TEXT     = Color3.fromRGB(255, 255, 255),        -- white
-    SUBTEXT  = Color3.fromRGB(170, 170, 185),        -- dim grey
-    DIM      = Color3.fromRGB(120, 120, 135),
-    DISABLED = Color3.fromRGB(75,  75,  88),
-    ACTIVE   = Color3.fromRGB(130, 100, 230),
+    TEXT     = Color3.fromRGB(235, 235, 235),        -- near-white
+    SUBTEXT  = Color3.fromRGB(130, 130, 140),        -- grey inactive
+    DIM      = Color3.fromRGB(80,  80,  90),         -- very dim
+    DISABLED = Color3.fromRGB(58,  58,  65),         -- off-circle
+    ACTIVE   = Color3.fromRGB(220, 80,  150),
 }
 local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
@@ -202,9 +202,9 @@ loadOzSettings()
 -- WINDOW  (premium redesign)
 -- Logo image: upload OzWare logo to Roblox, replace LOGO_ASSET_ID below
 -- ======================
-local LOGO_ASSET = "rbxassetid://YOUR_LOGO_ID"  -- replace with your uploaded asset ID
-local WIN_W, WIN_H = 740, 475
-local SIDEBAR_W    = 144
+local LOGO_ASSET = "rbxassetid://134273399594278"
+local WIN_W, WIN_H = 720, 440
+local SIDEBAR_W    = 152
 
 -- ── Window frame ─────────────────────────────────────────────────
 local win = Instance.new("Frame")
@@ -212,7 +212,7 @@ win.Name             = "Window"
 win.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
 win.AnchorPoint      = Vector2.new(0.5, 0.5)
 win.Position         = UDim2.new(0.5, 0, 0.5, 0)
-win.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+win.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 win.BorderSizePixel  = 0
 win.ClipsDescendants = true
 win.Active           = true
@@ -248,118 +248,67 @@ win.ZIndex = 10
 win.Parent = gui
 
 -- Rounded corners
-Instance.new("UICorner", win).CornerRadius = UDim.new(0, 16)
+Instance.new("UICorner", win).CornerRadius = UDim.new(0, 8)
 
 -- Outer border — 4px white, bulky
 local winStroke = Instance.new("UIStroke", win)
-winStroke.Color     = Color3.fromRGB(95, 95, 110)
-winStroke.Thickness = 2
+winStroke.Color     = Color3.fromRGB(55, 55, 60)
+winStroke.Thickness = 1
 winStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
--- Main background gradient — dark grey content area
+-- Flat dark background
 do
-    local bg = Instance.new("Frame", win)
-    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(38,38,45)
-    bg.BorderSizePixel=0; bg.ZIndex=0
-    Instance.new("UICorner", bg).CornerRadius=UDim.new(0,16)
-    local g=Instance.new("UIGradient", bg)
-    g.Color=ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(42, 42, 50)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(38, 38, 45)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(33, 33, 40)),
-    })
-    g.Rotation = 135
+    local bg=Instance.new("Frame",win); bg.Size=UDim2.new(1,0,1,0)
+    bg.BackgroundColor3=Color3.fromRGB(25,25,25); bg.BorderSizePixel=0; bg.ZIndex=0
+    Instance.new("UICorner",bg).CornerRadius=UDim.new(0,8)
 end
 
--- Texture layer 1: soft highlight bleed top-left
-do
-    local hi = Instance.new("Frame", win)
-    hi.Size=UDim2.new(0.6,0,0.45,0); hi.Position=UDim2.new(0,0,0,0)
-    hi.BackgroundColor3=Color3.fromRGB(255,255,255); hi.BorderSizePixel=0
-    hi.BackgroundTransparency=0.88; hi.ZIndex=1
-    Instance.new("UICorner",hi).CornerRadius=UDim.new(0,16)
-end
+-- Texture layers removed for flat style
 
--- Texture layer 2: bottom-right soft shadow
-do
-    local vg=Instance.new("Frame", win)
-    vg.Size=UDim2.new(0.5,0,0.4,0); vg.AnchorPoint=Vector2.new(1,1)
-    vg.Position=UDim2.new(1,0,1,0)
-    vg.BackgroundColor3=Color3.fromRGB(220,160,175); vg.BorderSizePixel=0
-    vg.BackgroundTransparency=0.82; vg.ZIndex=1
-    Instance.new("UICorner",vg).CornerRadius=UDim.new(0,16)
-end
 
--- Inner border glow — subtle white inset
-do
-    local innerBorder=Instance.new("Frame", win)
-    innerBorder.Size=UDim2.new(1,-6,1,-6); innerBorder.Position=UDim2.new(0,3,0,3)
-    innerBorder.BackgroundTransparency=1; innerBorder.BorderSizePixel=0
-    innerBorder.ZIndex=2
-    local ib=Instance.new("UIStroke", innerBorder)
-    ib.Color=Color3.fromRGB(255,255,255); ib.Thickness=1
-    ib.Transparency=0.6; ib.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
-    Instance.new("UICorner",innerBorder).CornerRadius=UDim.new(0,14)
-end
 
--- ── Header (logo banner) ─────────────────────────────────────────
-local header = Instance.new("Frame", win)
-header.Size                  = UDim2.new(1, 0, 0, 78)
-header.BackgroundTransparency = 0
-header.BackgroundColor3       = Color3.fromRGB(22, 22, 28)
-header.BorderSizePixel        = 0
-header.ZIndex                 = 12
-Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
--- Bottom separator line
-local sep = Instance.new("Frame", win)
-sep.Size             = UDim2.new(1,0,0,1)
-sep.Position         = UDim2.new(0,0,0,78)
-sep.BackgroundColor3 = Color3.fromRGB(60, 60, 72)
-sep.BorderSizePixel  = 0; sep.ZIndex = 14
 
--- Logo image centered in header
-local logoImg = Instance.new("ImageLabel", header)
-logoImg.Size             = UDim2.new(0, 160, 0, 56)
-logoImg.AnchorPoint      = Vector2.new(0.5, 0.5)
-logoImg.Position         = UDim2.new(0.5, 0, 0.5, 0)
-logoImg.BackgroundTransparency = 1
-logoImg.Image            = LOGO_ASSET
-logoImg.ScaleType        = Enum.ScaleType.Fit
-logoImg.ZIndex           = 14
--- Fallback text if no asset ID yet
-local logoFallback = Instance.new("TextLabel", header)
-logoFallback.Size             = UDim2.new(0, 200, 1, 0)
-logoFallback.AnchorPoint      = Vector2.new(0.5, 0.5)
-logoFallback.Position         = UDim2.new(0.5, 0, 0.5, 0)
-logoFallback.BackgroundTransparency = 1
-logoFallback.Text             = "OzWare"
-logoFallback.TextColor3       = Color3.fromRGB(255, 255, 255)
-logoFallback.TextSize         = 28
-logoFallback.Font             = FONT_BOLD
-logoFallback.ZIndex           = 15
-logoFallback.Visible          = (LOGO_ASSET == "rbxassetid://YOUR_LOGO_ID")
-do
-    local g2 = Instance.new("UIGradient", logoFallback)
-    g2.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(200,80,255)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(255,60,200)),
-    })
-    g2.Rotation = 0
-end
--- Version badge
--- V3 badge removed
 
--- Drag via header
-local dragging, dragStart, winStart = false, nil, nil
-header.InputBegan:Connect(function(i)
+-- ── Sidebar (full height) ────────────────────────────────────────
+local sidebar=Instance.new("Frame",win)
+sidebar.Size=UDim2.new(0,SIDEBAR_W,1,0); sidebar.Position=UDim2.new(0,0,0,0)
+sidebar.BackgroundColor3=Color3.fromRGB(22,22,22); sidebar.BorderSizePixel=0; sidebar.ZIndex=11
+Instance.new("UICorner",sidebar).CornerRadius=UDim.new(0,8)
+local sideDiv=Instance.new("Frame",sidebar)
+sideDiv.Size=UDim2.new(0,1,1,0); sideDiv.Position=UDim2.new(1,-1,0,0)
+sideDiv.BackgroundColor3=Color3.fromRGB(48,48,52); sideDiv.BorderSizePixel=0; sideDiv.ZIndex=12
+
+-- ── Branding (top of sidebar) ─────────────────────────────────────
+local brandArea=Instance.new("Frame",sidebar)
+brandArea.Size=UDim2.new(1,0,0,60); brandArea.Position=UDim2.new(0,0,0,0)
+brandArea.BackgroundTransparency=1; brandArea.BorderSizePixel=0; brandArea.ZIndex=13
+local brandDiv=Instance.new("Frame",brandArea)
+brandDiv.Size=UDim2.new(1,0,0,1); brandDiv.Position=UDim2.new(0,0,1,-1)
+brandDiv.BackgroundColor3=Color3.fromRGB(48,48,52); brandDiv.BorderSizePixel=0; brandDiv.ZIndex=14
+local logoImg=Instance.new("ImageLabel",brandArea)
+logoImg.Size=UDim2.new(0,34,0,34); logoImg.AnchorPoint=Vector2.new(0,0.5)
+logoImg.Position=UDim2.new(0,10,0.5,0); logoImg.BackgroundColor3=Color3.fromRGB(35,35,40)
+logoImg.BorderSizePixel=0; logoImg.Image=LOGO_ASSET; logoImg.ScaleType=Enum.ScaleType.Fit; logoImg.ZIndex=14
+Instance.new("UICorner",logoImg).CornerRadius=UDim.new(0,17)
+local logoFallback=Instance.new("TextLabel",brandArea)
+logoFallback.Size=UDim2.new(0,88,0,18); logoFallback.Position=UDim2.new(0,52,0,10)
+logoFallback.BackgroundTransparency=1; logoFallback.Text="OzWare"
+logoFallback.TextColor3=C.TEXT; logoFallback.TextSize=14; logoFallback.Font=FONT_BOLD
+logoFallback.TextXAlignment=Enum.TextXAlignment.Left; logoFallback.ZIndex=15
+local gameLabel=Instance.new("TextLabel",brandArea)
+gameLabel.Size=UDim2.new(1,-14,0,13); gameLabel.Position=UDim2.new(0,52,0,32)
+gameLabel.BackgroundTransparency=1; gameLabel.Text="Anime Vanguards"
+gameLabel.TextColor3=C.DIM; gameLabel.TextSize=10; gameLabel.Font=FONT_REG
+gameLabel.TextXAlignment=Enum.TextXAlignment.Left; gameLabel.ZIndex=15
+
+local dragging,dragStart,winStart=false,nil,nil
+brandArea.InputBegan:Connect(function(i)
     if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
         dragging=true; dragStart=i.Position; winStart=win.Position
     end
 end)
-header.InputEnded:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-        dragging=false
-    end
+brandArea.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end
 end)
 UIS.InputChanged:Connect(function(i)
     if not dragging then return end
@@ -369,69 +318,27 @@ UIS.InputChanged:Connect(function(i)
     end
 end)
 
--- ── Sidebar ───────────────────────────────────────────────────────
-local sidebar = Instance.new("Frame", win)
-sidebar.Size             = UDim2.new(0, SIDEBAR_W, 1, -96)
-sidebar.Position         = UDim2.new(0, 0, 0, 86)
-sidebar.BackgroundColor3 = Color3.fromRGB(28, 28, 35)  -- dark grey
-sidebar.BorderSizePixel  = 0; sidebar.ZIndex = 11
--- Right border only
-local sideStroke = Instance.new("Frame", sidebar)
-sideStroke.Size             = UDim2.new(0,2,1,0)
-sideStroke.Position         = UDim2.new(1,-2,0,0)
-sideStroke.BackgroundColor3 = Color3.fromRGB(255,255,255)  -- white
-sideStroke.BorderSizePixel  = 0; sideStroke.ZIndex = 12
-
-local tabList = Instance.new("Frame", sidebar)
-tabList.Size                = UDim2.new(1,0,1,-60)
-tabList.Position            = UDim2.new(0,0,0,8)
-tabList.BackgroundTransparency = 1; tabList.ZIndex = 12
-listLayout(tabList, nil, 2, Enum.HorizontalAlignment.Center)
-
--- Avatar footer
-local footer = Instance.new("Frame", sidebar)
-footer.Size             = UDim2.new(1,-12,0,50)
-footer.Position         = UDim2.new(0,6,1,-56)
-footer.BackgroundColor3 = Color3.fromRGB(160, 110, 80)  -- darker coffee
-footer.BorderSizePixel  = 0; footer.ZIndex = 12
-Instance.new("UICorner",footer).CornerRadius=UDim.new(0,8)
-local avImg = Instance.new("ImageLabel", footer)
-avImg.Size=UDim2.new(0,32,0,32); avImg.Position=UDim2.new(0,8,0.5,-16)
-avImg.BackgroundColor3=C.CARD; avImg.BorderSizePixel=0; avImg.ZIndex=13
-Instance.new("UICorner",avImg).CornerRadius=UDim.new(0,16)
-stroke(avImg,C.ACCENT,1)
-task.spawn(function()
-    local ok,url=pcall(function()
-        return Players:GetUserThumbnailAsync(player.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size48x48)
-    end)
-    if ok then avImg.Image=url end
-end)
-local avName = Instance.new("TextLabel", footer)
-avName.Size=UDim2.new(1,-50,1,0); avName.Position=UDim2.new(0,46,0,0)
-avName.BackgroundTransparency=1; avName.Text=player.DisplayName or player.Name
-avName.TextColor3=Color3.fromRGB(220,220,235); avName.TextSize=11; avName.Font=FONT_SEMI
-avName.TextXAlignment=Enum.TextXAlignment.Left
-avName.TextTruncate=Enum.TextTruncate.AtEnd; avName.ZIndex=13
+local tabList=Instance.new("Frame",sidebar)
+tabList.Size=UDim2.new(1,0,1,-60); tabList.Position=UDim2.new(0,0,0,60)
+tabList.BackgroundTransparency=1; tabList.ZIndex=12
+listLayout(tabList,nil,0)
 
 -- ── Content area ──────────────────────────────────────────────────
-local contentArea = Instance.new("Frame", win)
-contentArea.Size             = UDim2.new(1, -(SIDEBAR_W+14), 1, -96)
-contentArea.Position         = UDim2.new(0, SIDEBAR_W+8, 0, 86)
-contentArea.BackgroundTransparency = 1
-contentArea.ClipsDescendants = true
-contentArea.ZIndex           = 11
+local contentArea=Instance.new("Frame",win)
+contentArea.Size=UDim2.new(1,-SIDEBAR_W,1,0); contentArea.Position=UDim2.new(0,SIDEBAR_W,0,0)
+contentArea.BackgroundTransparency=1; contentArea.ClipsDescendants=true; contentArea.ZIndex=11
 
 -- ── Tab system ────────────────────────────────────────────────────
-local tabButtons, tabLabels, tabIcons, tabPages, activeTab = {}, {}, {}, {}, nil
-local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","SpringLTM","Macro"}
+local tabButtons,tabLabels,tabIcons,tabPages,activeTab={},{},{},{},nil
+local TAB_NAMES={"Lobby","Joiner","Game","Odyssey","SpringLTM","Macro"}
 
 local function makePage()
     local p=Instance.new("ScrollingFrame")
     p.Size=UDim2.new(1,0,1,0); p.BackgroundTransparency=1; p.BorderSizePixel=0
-    p.ScrollBarThickness=3; p.ScrollBarImageColor3=C.ACCENT
+    p.ScrollBarThickness=2; p.ScrollBarImageColor3=C.ACCENT
     p.CanvasSize=UDim2.new(0,0,0,0); p.AutomaticCanvasSize=Enum.AutomaticSize.Y
     p.Visible=false; p.ZIndex=12; p.Parent=contentArea
-    listLayout(p,nil,8); padding(p,nil,4,12,2,8)
+    listLayout(p,nil,0); padding(p,nil,0,8,0,0)
     return p
 end
 
@@ -439,246 +346,183 @@ local function switchTab(name)
     for n,_ in pairs(tabPages) do
         tabPages[n].Visible=false
         if tabButtons[n] then
-            tween(tabButtons[n],{BackgroundColor3=C.PANEL},0.15)
+            tween(tabButtons[n],{BackgroundColor3=Color3.fromRGB(22,22,22)},0.1)
             if tabLabels[n] then tabLabels[n].TextColor3=C.SUBTEXT end
-            if tabIcons[n]  then tabIcons[n].TextColor3=C.SUBTEXT end
-            local ind = tabButtons[n]:FindFirstChild("ActiveBar")
-            if ind then tween(ind,{BackgroundTransparency=1},0.15) end
         end
     end
     tabPages[name].Visible=true
-    tween(tabButtons[name],{BackgroundColor3=C.BG},0.15)
-    tabLabels[name].TextColor3=C.TEXT
-    tabIcons[name].TextColor3=C.TEXT
-    local ind = tabButtons[name]:FindFirstChild("ActiveBar")
-    if ind then tween(ind,{BackgroundTransparency=0},0.2) end
+    tween(tabButtons[name],{BackgroundColor3=C.ACCENT},0.1)
+    tabLabels[name].TextColor3=Color3.fromRGB(255,255,255)
     activeTab=name
 end
 
 for i,name in ipairs(TAB_NAMES) do
-    local b = Instance.new("TextButton", tabList)
-    b.Size=UDim2.new(1,-8,0,36); b.BackgroundColor3=C.CARD
+    local b=Instance.new("TextButton",tabList)
+    b.Size=UDim2.new(1,0,0,36); b.BackgroundColor3=Color3.fromRGB(22,22,22)
     b.BackgroundTransparency=0; b.Text=""; b.AutoButtonColor=false
     b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=13
-    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
-    local bs=Instance.new("UIStroke",b)
-    bs.Color=Color3.fromRGB(95,95,110); bs.Thickness=1
-    bs.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
-
-    -- Left accent bar (visible when active)
-    local bar = Instance.new("Frame", b)
-    bar.Name="ActiveBar"; bar.Size=UDim2.new(0,3,0.6,0)
-    bar.AnchorPoint=Vector2.new(0,0.5); bar.Position=UDim2.new(0,0,0.5,0)
-    bar.BackgroundColor3=C.ACCENT; bar.BorderSizePixel=0; bar.ZIndex=15
-    bar.BackgroundTransparency=1
-    Instance.new("UICorner",bar).CornerRadius=UDim.new(0,2)
-
-    -- Label only — no icon
-    local lbl = Instance.new("TextLabel", b)
+    local lbl=Instance.new("TextLabel",b)
     lbl.Size=UDim2.new(1,-16,1,0); lbl.Position=UDim2.new(0,14,0,0)
     lbl.BackgroundTransparency=1; lbl.Text=name
-    lbl.TextColor3=C.SUBTEXT
-    lbl.TextSize=13; lbl.Font=FONT_SEMI
-    lbl.TextXAlignment=Enum.TextXAlignment.Left
-    lbl.ZIndex=14
-
-    -- dummy ico table entry so switchTab doesn't error
-    local ico = Instance.new("TextLabel", b)
-    ico.Size=UDim2.new(0,0,0,0); ico.BackgroundTransparency=1
-    ico.Text=""; ico.ZIndex=0
-
+    lbl.TextColor3=C.SUBTEXT; lbl.TextSize=13; lbl.Font=FONT_REG
+    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=14
+    local ico=Instance.new("TextLabel",b); ico.Size=UDim2.new(0,0,0,0)
+    ico.BackgroundTransparency=1; ico.Text=""; ico.ZIndex=0
     tabButtons[name]=b; tabLabels[name]=lbl; tabIcons[name]=ico
     tabPages[name]=makePage()
-
     b.MouseButton1Click:Connect(function() switchTab(name) end)
     b.MouseEnter:Connect(function()
-        if activeTab~=name then
-            tween(b,{BackgroundColor3=C.CARD},0.1)
-            lbl.TextColor3=C.TEXT
-        end
+        if activeTab~=name then tween(b,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08) end
     end)
     b.MouseLeave:Connect(function()
-        if activeTab~=name then
-            tween(b,{BackgroundColor3=C.PANEL},0.1)
-            lbl.TextColor3=C.SUBTEXT
-        end
+        if activeTab~=name then tween(b,{BackgroundColor3=Color3.fromRGB(22,22,22)},0.08) end
     end)
 end
+
 
 -- ======================
 -- COMPONENTS
 -- ======================
 local function section(page, title, order)
-    local card=Instance.new("Frame")
-    card.Size=UDim2.new(1,-4,0,0); card.AutomaticSize=Enum.AutomaticSize.Y
-    card.BackgroundColor3=C.CARD; card.BorderSizePixel=0
-    card.LayoutOrder=order or 1; card.ZIndex=2; card.Parent=page
-    corner(card,10); stroke(card,C.BORDER,1)
-    listLayout(card,nil,6); padding(card,nil,10,12,12,12)
+    -- Flat section: just a small centered text header, no card box
     if title and title ~= "" then
-        local hdr=Instance.new("Frame")
-        hdr.Size=UDim2.new(1,0,0,22); hdr.BackgroundTransparency=1
-        hdr.LayoutOrder=0; hdr.ZIndex=3; hdr.Parent=card
-        local bar=Instance.new("Frame")
-        bar.Size=UDim2.new(0,3,1,0); bar.BackgroundColor3=C.ACCENT
-        bar.BorderSizePixel=0; bar.ZIndex=3; bar.Parent=hdr
-        corner(bar,2); gradient(bar,C.ACCENT2,C.ACCENT,90)
-        local lbl=Instance.new("TextLabel")
-        lbl.Size=UDim2.new(1,-12,1,0); lbl.Position=UDim2.new(0,10,0,0)
-        lbl.BackgroundTransparency=1; lbl.Text=title; lbl.TextColor3=C.TEXT
-        lbl.TextSize=13; lbl.Font=FONT_BOLD
-        lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=3; lbl.Parent=hdr
+        local hdr=Instance.new("TextLabel",page)
+        hdr.Size=UDim2.new(1,0,0,26); hdr.BackgroundTransparency=1
+        hdr.Text=title; hdr.TextColor3=C.DIM
+        hdr.TextSize=10; hdr.Font=FONT_BOLD
+        hdr.TextXAlignment=Enum.TextXAlignment.Center
+        hdr.LayoutOrder=order or 1; hdr.ZIndex=3
     end
+    local card=Instance.new("Frame",page)
+    card.Size=UDim2.new(1,0,0,0); card.AutomaticSize=Enum.AutomaticSize.Y
+    card.BackgroundTransparency=1; card.BorderSizePixel=0
+    card.LayoutOrder=order or 1; card.ZIndex=2
+    listLayout(card,nil,0)
     return card
 end
 
 local function btn(parent, label, color, order)
     color = color or C.ACCENT
-    local b=Instance.new("TextButton")
-    b.Size=UDim2.new(1,0,0,32); b.BackgroundColor3=color
-    b.Text=label; b.TextColor3=C.TEXT; b.TextSize=14; b.Font=FONT_BOLD
-    b.BorderSizePixel=0; b.LayoutOrder=order or 99; b.ZIndex=3; b.Parent=parent
-    corner(b,7); gradient(b,color,color:Lerp(Color3.new(0,0,0),0.25),90)
-    b.MouseEnter:Connect(function() tween(b,{BackgroundTransparency=0.2}) end)
-    b.MouseLeave:Connect(function() tween(b,{BackgroundTransparency=0}) end)
+    local b=Instance.new("TextButton",parent)
+    b.Size=UDim2.new(1,-24,0,34); b.BackgroundColor3=color
+    b.Text=label; b.TextColor3=Color3.fromRGB(255,255,255); b.TextSize=13; b.Font=FONT_SEMI
+    b.BorderSizePixel=0; b.LayoutOrder=order or 99; b.ZIndex=3
+    corner(b,6)
+    b.MouseEnter:Connect(function() tween(b,{BackgroundColor3=color:Lerp(Color3.new(1,1,1),0.1)},0.08) end)
+    b.MouseLeave:Connect(function() tween(b,{BackgroundColor3=color},0.08) end)
     return b
 end
 
 local function label(parent, text, order)
-    local l=Instance.new("TextLabel")
-    l.Size=UDim2.new(1,0,0,18); l.BackgroundTransparency=1
-    l.Text=text; l.TextColor3=C.SUBTEXT; l.TextSize=11; l.Font=FONT_REG
+    local l=Instance.new("TextLabel",parent)
+    l.Size=UDim2.new(1,0,0,16); l.BackgroundTransparency=1
+    l.Text=text; l.TextColor3=C.DIM; l.TextSize=10; l.Font=FONT_REG
     l.TextXAlignment=Enum.TextXAlignment.Left
-    l.LayoutOrder=order or 99; l.ZIndex=3; l.Parent=parent
+    l.LayoutOrder=order or 99; l.ZIndex=3
+    padding(l,nil,0,0,14,0)
     return l
 end
 
 local function input(parent, placeholder, order)
-    local f=Instance.new("Frame")
-    f.Size=UDim2.new(1,0,0,32); f.BackgroundColor3=C.BG; f.BorderSizePixel=0
-    f.LayoutOrder=order or 99; f.ZIndex=3; f.Parent=parent
-    corner(f,7); stroke(f,C.BORDER,1)
-    local tb=Instance.new("TextBox")
+    local f=Instance.new("Frame",parent)
+    f.Size=UDim2.new(1,-24,0,30); f.BackgroundColor3=C.PANEL; f.BorderSizePixel=0
+    f.LayoutOrder=order or 99; f.ZIndex=3
+    corner(f,5); stroke(f,C.BORDER,1)
+    local tb=Instance.new("TextBox",f)
     tb.Size=UDim2.new(1,-16,1,0); tb.Position=UDim2.new(0,8,0,0)
     tb.BackgroundTransparency=1; tb.Text=""
     tb.PlaceholderText=placeholder; tb.PlaceholderColor3=C.DIM
-    tb.TextColor3=C.TEXT; tb.TextSize=13; tb.Font=FONT_REG
-    tb.TextXAlignment=Enum.TextXAlignment.Left; tb.ZIndex=4; tb.Parent=f
-    tb.Focused:Connect(function() tween(f,{BackgroundColor3=C.PANEL}) end)
-    tb.FocusLost:Connect(function() tween(f,{BackgroundColor3=C.BG}) end)
+    tb.TextColor3=C.TEXT; tb.TextSize=12; tb.Font=FONT_REG
+    tb.TextXAlignment=Enum.TextXAlignment.Left; tb.ZIndex=4
     return tb
 end
 
 local function toggle(parent, text, order, default, saveKey)
     saveKey = saveKey or ("toggle:"..text)
 
-    local btnRow=Instance.new("TextButton")
-    btnRow.Size=UDim2.new(1,0,0,34); btnRow.AutoButtonColor=false
-    btnRow.BackgroundColor3=C.PANEL; btnRow.BorderSizePixel=0
-    btnRow.Text=""; btnRow.LayoutOrder=order or 99; btnRow.ZIndex=3; btnRow.Parent=parent
-    corner(btnRow,7)
-    local rowStroke = stroke(btnRow,C.BORDER,1)
-
-    local lbl=Instance.new("TextLabel")
-    lbl.Size=UDim2.new(1,-40,1,0); lbl.Position=UDim2.new(0,12,0,0)
+    -- Flat row: label left, circle right
+    local row=Instance.new("TextButton",parent)
+    row.Size=UDim2.new(1,0,0,38); row.AutoButtonColor=false
+    row.BackgroundColor3=Color3.fromRGB(25,25,25); row.BackgroundTransparency=0
+    row.BorderSizePixel=0; row.Text=""
+    row.LayoutOrder=order or 99; row.ZIndex=3
+    -- Subtle bottom separator
+    local sep=Instance.new("Frame",row)
+    sep.Size=UDim2.new(1,-20,0,1); sep.Position=UDim2.new(0,10,1,-1)
+    sep.BackgroundColor3=Color3.fromRGB(40,40,45); sep.BorderSizePixel=0; sep.ZIndex=4
+    -- Label
+    local lbl=Instance.new("TextLabel",row)
+    lbl.Size=UDim2.new(1,-44,1,0); lbl.Position=UDim2.new(0,14,0,0)
     lbl.BackgroundTransparency=1
-    lbl.Text=text; lbl.TextColor3=C.TEXT; lbl.TextSize=13; lbl.Font=FONT_SEMI
-    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4; lbl.Parent=btnRow
+    lbl.Text=text; lbl.TextColor3=C.SUBTEXT; lbl.TextSize=13; lbl.Font=FONT_REG
+    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4
+    -- Circle indicator
+    local circle=Instance.new("Frame",row)
+    circle.Size=UDim2.new(0,14,0,14); circle.Position=UDim2.new(1,-26,0.5,-7)
+    circle.BackgroundColor3=C.DISABLED; circle.BorderSizePixel=0; circle.ZIndex=5
+    corner(circle,7)
 
-    local light=Instance.new("Frame")
-    light.Size=UDim2.new(0,12,0,12); light.Position=UDim2.new(1,-22,0.5,-6)
-    light.BackgroundColor3=C.DISABLED; light.BorderSizePixel=0; light.ZIndex=5; light.Parent=btnRow
-    corner(light,6)
-
-    local glow=Instance.new("Frame")
-    glow.Size=UDim2.new(0,22,0,22); glow.Position=UDim2.new(0.5,-11,0.5,-11)
-    glow.BackgroundColor3=C.ACCENT; glow.BackgroundTransparency=1
-    glow.BorderSizePixel=0; glow.ZIndex=4; glow.Parent=light
-    corner(glow,11)
-
-    local enabled = getSavedToggle(saveKey, default)
+    local enabled=getSavedToggle(saveKey,default)
     local function apply()
-        tween(btnRow,{BackgroundColor3=C.PANEL},0.15)
         if enabled then
-            tween(light,{BackgroundColor3=C.ACCENT,  Size=UDim2.new(0,13,0,13)},0.18)
-            tween(glow, {BackgroundTransparency=0.3}, 0.18)
-            tween(rowStroke,{Color=C.ACCENT},0.18)
-            lbl.TextColor3 = C.TEXT
+            tween(circle,{BackgroundColor3=C.ACCENT},0.15)
+            lbl.TextColor3=C.TEXT
         else
-            tween(light,{BackgroundColor3=C.DISABLED, Size=UDim2.new(0,12,0,12)},0.18)
-            tween(glow, {BackgroundTransparency=1},    0.18)
-            tween(rowStroke,{Color=C.BORDER},0.18)
-            lbl.TextColor3 = C.SUBTEXT
+            tween(circle,{BackgroundColor3=C.DISABLED},0.15)
+            lbl.TextColor3=C.SUBTEXT
         end
     end
     apply()
 
-    -- Hover glow
-    btnRow.MouseEnter:Connect(function()
-        tween(btnRow,{BackgroundColor3=C.CARD},0.1)
+    row.MouseEnter:Connect(function()
+        tween(row,{BackgroundColor3=Color3.fromRGB(35,35,35)},0.08)
     end)
-    btnRow.MouseLeave:Connect(function()
-        tween(btnRow,{BackgroundColor3=C.PANEL},0.1)
+    row.MouseLeave:Connect(function()
+        tween(row,{BackgroundColor3=Color3.fromRGB(25,25,25)},0.08)
     end)
 
-    local callbacks = {}
-    btnRow.MouseButton1Click:Connect(function()
-        enabled = not enabled
-        setSavedToggle(saveKey, enabled)
-        -- Brief click flash
-        tween(btnRow,{BackgroundColor3=C.PANEL:Lerp(C.ACCENT,0.15)},0.06)
-        apply()
-        for _,cb in ipairs(callbacks) do task.spawn(cb, enabled) end
+    local callbacks={}
+    row.MouseButton1Click:Connect(function()
+        enabled=not enabled; setSavedToggle(saveKey,enabled); apply()
+        for _,cb in ipairs(callbacks) do task.spawn(cb,enabled) end
     end)
-    return btnRow, function() return enabled end, function(cb)
-        table.insert(callbacks, cb)
-        if enabled then task.spawn(cb, true) end
+    return row, function() return enabled end, function(cb)
+        table.insert(callbacks,cb)
+        if enabled then task.spawn(cb,true) end
     end
 end
 
--- Smooth collapsible: wraps list in a clipping frame and tweens height.
--- All future collapsibles should use this instead of raw Visible toggling.
+-- Smooth collapsible
 local function makeCollapsible(btn, list, labelText)
-    local open = false
-    -- Clip wrapper — controls visible height via Size tween
-    local clip = Instance.new("Frame")
-    clip.BackgroundTransparency = 1; clip.BorderSizePixel = 0
-    clip.ClipsDescendants = true
-    clip.Size = UDim2.new(1,0,0,0)
-    clip.LayoutOrder = list.LayoutOrder; clip.ZIndex = list.ZIndex
-    clip.Parent = list.Parent
-    -- Move list inside clip
-    list.Parent = clip; list.LayoutOrder = 0; list.Visible = true
-    local ll = list:FindFirstChildOfClass("UIListLayout")
+    local open=false
+    local clip=Instance.new("Frame")
+    clip.BackgroundTransparency=1; clip.BorderSizePixel=0
+    clip.ClipsDescendants=true; clip.Size=UDim2.new(1,0,0,0)
+    clip.LayoutOrder=list.LayoutOrder; clip.ZIndex=list.ZIndex
+    clip.Parent=list.Parent
+    list.Parent=clip; list.LayoutOrder=0; list.Visible=true
+    local ll=list:FindFirstChildOfClass("UIListLayout")
     local function contentH()
         return ll and ll.AbsoluteContentSize.Y or list.AbsoluteSize.Y
     end
-    -- Keep height synced when items are added dynamically
     if ll then
         ll:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            if open then clip.Size = UDim2.new(1,0,0, contentH()) end
+            if open then clip.Size=UDim2.new(1,0,0,contentH()) end
         end)
     end
     local function doToggle()
-        open = not open
-        btn.Text = (open and "▼" or "▶") .. "  " .. labelText
-        tween(btn,{BackgroundColor3 = open and C.CARD or C.PANEL},0.15)
+        open=not open
+        btn.Text=(open and "▼" or "▶").."  "..labelText
         if open then
-            local h = contentH()
-            if h < 4 then
-                task.defer(function()
-                    tween(clip,{Size=UDim2.new(1,0,0,contentH())},0.25)
-                end)
-            else
-                tween(clip,{Size=UDim2.new(1,0,0,h)},0.25)
-            end
-        else
-            tween(clip,{Size=UDim2.new(1,0,0,0)},0.2)
-        end
+            local h=contentH()
+            if h<4 then task.defer(function() tween(clip,{Size=UDim2.new(1,0,0,contentH())},0.25) end)
+            else tween(clip,{Size=UDim2.new(1,0,0,h)},0.25) end
+        else tween(clip,{Size=UDim2.new(1,0,0,0)},0.2) end
     end
     btn.MouseButton1Click:Connect(doToggle)
     return doToggle, function() return open end
 end
+
 
 local function chip(parent, text, selected, onClick)
     local c=Instance.new("TextButton")
