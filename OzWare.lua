@@ -338,7 +338,7 @@ local function makePage()
     p.ScrollBarThickness=2; p.ScrollBarImageColor3=C.ACCENT
     p.CanvasSize=UDim2.new(0,0,0,0); p.AutomaticCanvasSize=Enum.AutomaticSize.Y
     p.Visible=false; p.ZIndex=12; p.Parent=contentArea
-    listLayout(p,nil,0); padding(p,nil,0,8,0,0)
+    listLayout(p,nil,8); padding(p,nil,8,8,8,8)
     return p
 end
 
@@ -392,13 +392,13 @@ local function section(page, title, order)
         hdr.Text=title; hdr.TextColor3=C.DIM
         hdr.TextSize=10; hdr.Font=FONT_BOLD
         hdr.TextXAlignment=Enum.TextXAlignment.Center
-        hdr.LayoutOrder=order or 1; hdr.ZIndex=3
+        hdr.LayoutOrder=(order or 1)*2-1; hdr.ZIndex=3
     end
     local card=Instance.new("Frame",page)
     card.Size=UDim2.new(1,0,0,0); card.AutomaticSize=Enum.AutomaticSize.Y
-    card.BackgroundTransparency=1; card.BorderSizePixel=0
-    card.LayoutOrder=order or 1; card.ZIndex=2
-    listLayout(card,nil,0)
+    card.BackgroundColor3=Color3.fromRGB(30,30,30); card.BackgroundTransparency=0; card.BorderSizePixel=0
+    card.LayoutOrder=(order or 1)*2; card.ClipsDescendants=true; card.ZIndex=2
+    corner(card,8); listLayout(card,nil,0)
     return card
 end
 
@@ -428,7 +428,7 @@ local function input(parent, placeholder, order)
     local f=Instance.new("Frame",parent)
     f.Size=UDim2.new(1,-24,0,30); f.BackgroundColor3=C.PANEL; f.BorderSizePixel=0
     f.LayoutOrder=order or 99; f.ZIndex=3
-    corner(f,5); stroke(f,C.BORDER,1)
+    corner(f,5)
     local tb=Instance.new("TextBox",f)
     tb.Size=UDim2.new(1,-16,1,0); tb.Position=UDim2.new(0,8,0,0)
     tb.BackgroundTransparency=1; tb.Text=""
@@ -444,7 +444,7 @@ local function toggle(parent, text, order, default, saveKey)
     -- Flat row: label left, circle right
     local row=Instance.new("TextButton",parent)
     row.Size=UDim2.new(1,0,0,38); row.AutoButtonColor=false
-    row.BackgroundColor3=Color3.fromRGB(25,25,25); row.BackgroundTransparency=0
+    row.BackgroundColor3=Color3.fromRGB(30,30,30); row.BackgroundTransparency=0
     row.BorderSizePixel=0; row.Text=""
     row.LayoutOrder=order or 99; row.ZIndex=3
     -- Subtle bottom separator
@@ -476,10 +476,10 @@ local function toggle(parent, text, order, default, saveKey)
     apply()
 
     row.MouseEnter:Connect(function()
-        tween(row,{BackgroundColor3=Color3.fromRGB(35,35,35)},0.08)
+        tween(row,{BackgroundColor3=Color3.fromRGB(40,40,40)},0.08)
     end)
     row.MouseLeave:Connect(function()
-        tween(row,{BackgroundColor3=Color3.fromRGB(25,25,25)},0.08)
+        tween(row,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08)
     end)
 
     local callbacks={}
@@ -558,7 +558,7 @@ local sumSec = section(lobbyPage, "Auto Summoner", 1)
 
 -- Collapsible toggle list
 local sumColBtn = Instance.new("TextButton", sumSec)
-sumColBtn.Size=UDim2.new(1,0,0,30); sumColBtn.BackgroundColor3=Color3.fromRGB(32,32,32)
+sumColBtn.Size=UDim2.new(1,0,0,30); sumColBtn.BackgroundColor3=Color3.fromRGB(30,30,30)
 sumColBtn.BorderSizePixel=0; sumColBtn.LayoutOrder=1
 sumColBtn.Text="▶  Summoner"; sumColBtn.TextColor3=C.SUBTEXT
 sumColBtn.TextSize=12; sumColBtn.Font=FONT_SEMI
@@ -628,7 +628,7 @@ end
 local claimSec = section(lobbyPage, "Claimer", 2)
 
 local clmColBtn = Instance.new("TextButton", claimSec)
-clmColBtn.Size=UDim2.new(1,0,0,30); clmColBtn.BackgroundColor3=Color3.fromRGB(32,32,32)
+clmColBtn.Size=UDim2.new(1,0,0,30); clmColBtn.BackgroundColor3=Color3.fromRGB(30,30,30)
 clmColBtn.BorderSizePixel=0; clmColBtn.LayoutOrder=1
 clmColBtn.Text="▶  Claimers"; clmColBtn.TextColor3=C.SUBTEXT
 clmColBtn.TextSize=12; clmColBtn.Font=FONT_SEMI
@@ -941,7 +941,7 @@ do
     row.Size=UDim2.new(1,0,0,34); row.BackgroundColor3=C.CARD
     row.BorderSizePixel=0; row.LayoutOrder=ROW_ORDER; row.ZIndex=3
     row.Parent=matchSec
-    corner(row,7); stroke(row,C.BORDER,1)
+    corner(row,0)
 
     local waveLbl = Instance.new("TextLabel", row)
     waveLbl.Size=UDim2.new(0.5,0,1,0); waveLbl.BackgroundTransparency=1
@@ -1225,7 +1225,7 @@ label(modSec, "Picks highest-priority modifier when offered", 2)
 
 -- Collapsible: ALL modifiers (Additive + Starting)
 local allColBtn = Instance.new("TextButton", modSec)
-allColBtn.Size=UDim2.new(1,0,0,30); allColBtn.BackgroundColor3=Color3.fromRGB(32,32,32)
+allColBtn.Size=UDim2.new(1,0,0,30); allColBtn.BackgroundColor3=Color3.fromRGB(30,30,30)
 allColBtn.BorderSizePixel=0; allColBtn.LayoutOrder=3
 allColBtn.Text="▶  All Modifier Priorities"
 allColBtn.TextColor3=C.SUBTEXT; allColBtn.TextSize=12; allColBtn.Font=FONT_SEMI
@@ -1248,7 +1248,7 @@ label(modSec, "Restarts match until a priority starting modifier appears", 6)
 
 -- Collapsible: Starting modifiers only
 local rstColBtn = Instance.new("TextButton", modSec)
-rstColBtn.Size=UDim2.new(1,0,0,30); rstColBtn.BackgroundColor3=Color3.fromRGB(32,32,32)
+rstColBtn.Size=UDim2.new(1,0,0,30); rstColBtn.BackgroundColor3=Color3.fromRGB(30,30,30)
 rstColBtn.BorderSizePixel=0; rstColBtn.LayoutOrder=7
 rstColBtn.Text="▶  Starting Modifier Priorities"
 rstColBtn.TextColor3=C.SUBTEXT; rstColBtn.TextSize=12; rstColBtn.Font=FONT_SEMI
@@ -1395,12 +1395,12 @@ local autoSec = section(odysseyPage, "Adventure", 1)
 
 -- Collapsible adventure toggles
 local advColBtn = Instance.new("TextButton", autoSec)
-advColBtn.Size=UDim2.new(1,0,0,30); advColBtn.BackgroundColor3=C.PANEL
+advColBtn.Size=UDim2.new(1,0,0,30); advColBtn.BackgroundColor3=Color3.fromRGB(30,30,30)
 advColBtn.BorderSizePixel=0; advColBtn.LayoutOrder=1
-advColBtn.Text="▶  Adventure Settings"; advColBtn.TextColor3=C.ACCENT2
+advColBtn.Text="▶  Adventure Settings"; advColBtn.TextColor3=C.SUBTEXT
 advColBtn.TextSize=12; advColBtn.Font=FONT_SEMI
 advColBtn.AutoButtonColor=false; advColBtn.ZIndex=3
-corner(advColBtn,8); stroke(advColBtn,C.ACCENT,1)
+corner(advColBtn,6)
 
 local advListFrame = Instance.new("Frame", autoSec)
 advListFrame.Size=UDim2.new(1,0,0,0); advListFrame.AutomaticSize=Enum.AutomaticSize.Y
