@@ -22,23 +22,23 @@ task.wait(2)
 local Net = RS:WaitForChild("Networking")
 
 -- ======================
--- THEME (dark grey header+sidebar / light grey content / light pink text)
+-- THEME (professional dark — white text / light grey borders)
 -- ======================
 local C = {
-    BG       = Color3.fromRGB(205, 205, 210),        -- light grey content area
-    PANEL    = Color3.fromRGB(178, 178, 185),        -- light grey buttons/toggles/chips
-    CARD     = Color3.fromRGB(192, 192, 198),        -- light grey cards/sections
-    BORDER   = Color3.fromRGB(255, 255, 255),        -- white border
-    ACCENT   = Color3.fromRGB(255, 155, 200),        -- light pink active/selected
-    ACCENT2  = Color3.fromRGB(255, 175, 215),        -- light pink accent text
+    BG       = Color3.fromRGB(38,  38,  45),         -- dark content area
+    PANEL    = Color3.fromRGB(55,  55,  65),         -- buttons / toggles / chips
+    CARD     = Color3.fromRGB(48,  48,  57),         -- section cards
+    BORDER   = Color3.fromRGB(95,  95, 110),         -- light grey borders
+    ACCENT   = Color3.fromRGB(130, 100, 230),        -- purple active accent
+    ACCENT2  = Color3.fromRGB(150, 120, 245),
     GREEN    = Color3.fromRGB(80,  200, 140),
     RED      = Color3.fromRGB(220, 70,  100),
     YELLOW   = Color3.fromRGB(230, 180, 60),
-    TEXT     = Color3.fromRGB(255, 175, 210),        -- light pink — all text
-    SUBTEXT  = Color3.fromRGB(220, 140, 170),        -- dimmer light pink
-    DIM      = Color3.fromRGB(185, 110, 145),
-    DISABLED = Color3.fromRGB(150, 120, 140),
-    ACTIVE   = Color3.fromRGB(255, 155, 200),        -- active tab/toggle highlight
+    TEXT     = Color3.fromRGB(255, 255, 255),        -- white
+    SUBTEXT  = Color3.fromRGB(170, 170, 185),        -- dim grey
+    DIM      = Color3.fromRGB(120, 120, 135),
+    DISABLED = Color3.fromRGB(75,  75,  88),
+    ACTIVE   = Color3.fromRGB(130, 100, 230),
 }
 local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
@@ -212,7 +212,7 @@ win.Name             = "Window"
 win.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
 win.AnchorPoint      = Vector2.new(0.5, 0.5)
 win.Position         = UDim2.new(0.5, 0, 0.5, 0)
-win.BackgroundColor3 = Color3.fromRGB(45, 45, 48)
+win.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
 win.BorderSizePixel  = 0
 win.ClipsDescendants = true
 win.Active           = true
@@ -252,21 +252,21 @@ Instance.new("UICorner", win).CornerRadius = UDim.new(0, 16)
 
 -- Outer border — 4px white, bulky
 local winStroke = Instance.new("UIStroke", win)
-winStroke.Color     = Color3.fromRGB(255, 255, 255)
-winStroke.Thickness = 4
+winStroke.Color     = Color3.fromRGB(95, 95, 110)
+winStroke.Thickness = 2
 winStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
--- Main background gradient — light grey content area
+-- Main background gradient — dark grey content area
 do
     local bg = Instance.new("Frame", win)
-    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(205,205,210)
+    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(38,38,45)
     bg.BorderSizePixel=0; bg.ZIndex=0
     Instance.new("UICorner", bg).CornerRadius=UDim.new(0,16)
     local g=Instance.new("UIGradient", bg)
     g.Color=ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(212, 212, 217)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(205, 205, 210)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(198, 198, 204)),
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(42, 42, 50)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(38, 38, 45)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(33, 33, 40)),
     })
     g.Rotation = 135
 end
@@ -306,7 +306,7 @@ end
 local header = Instance.new("Frame", win)
 header.Size                  = UDim2.new(1, 0, 0, 78)
 header.BackgroundTransparency = 0
-header.BackgroundColor3       = Color3.fromRGB(45, 45, 50)
+header.BackgroundColor3       = Color3.fromRGB(22, 22, 28)
 header.BorderSizePixel        = 0
 header.ZIndex                 = 12
 Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
@@ -314,7 +314,7 @@ Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
 local sep = Instance.new("Frame", win)
 sep.Size             = UDim2.new(1,0,0,1)
 sep.Position         = UDim2.new(0,0,0,78)
-sep.BackgroundColor3 = Color3.fromRGB(255,255,255)
+sep.BackgroundColor3 = Color3.fromRGB(60, 60, 72)
 sep.BorderSizePixel  = 0; sep.ZIndex = 14
 
 -- Logo image centered in header
@@ -333,7 +333,7 @@ logoFallback.AnchorPoint      = Vector2.new(0.5, 0.5)
 logoFallback.Position         = UDim2.new(0.5, 0, 0.5, 0)
 logoFallback.BackgroundTransparency = 1
 logoFallback.Text             = "OzWare"
-logoFallback.TextColor3       = Color3.fromRGB(255, 175, 210)
+logoFallback.TextColor3       = Color3.fromRGB(255, 255, 255)
 logoFallback.TextSize         = 28
 logoFallback.Font             = FONT_BOLD
 logoFallback.ZIndex           = 15
@@ -347,17 +347,7 @@ do
     g2.Rotation = 0
 end
 -- Version badge
-local verBadge = Instance.new("TextLabel", header)
-verBadge.Size             = UDim2.new(0,28,0,16)
-verBadge.AnchorPoint      = Vector2.new(1,0)
-verBadge.Position         = UDim2.new(1,-10,0,8)
-verBadge.BackgroundColor3 = Color3.fromRGB(140,40,200)
-verBadge.BorderSizePixel  = 0
-verBadge.Text             = "V3"
-verBadge.TextColor3       = Color3.fromRGB(255,255,255)
-verBadge.TextSize         = 10; verBadge.Font = FONT_BOLD
-verBadge.ZIndex           = 15
-Instance.new("UICorner",verBadge).CornerRadius = UDim.new(0,4)
+-- V3 badge removed
 
 -- Drag via header
 local dragging, dragStart, winStart = false, nil, nil
@@ -383,7 +373,7 @@ end)
 local sidebar = Instance.new("Frame", win)
 sidebar.Size             = UDim2.new(0, SIDEBAR_W, 1, -96)
 sidebar.Position         = UDim2.new(0, 0, 0, 86)
-sidebar.BackgroundColor3 = Color3.fromRGB(45, 45, 50)  -- dark grey
+sidebar.BackgroundColor3 = Color3.fromRGB(28, 28, 35)  -- dark grey
 sidebar.BorderSizePixel  = 0; sidebar.ZIndex = 11
 -- Right border only
 local sideStroke = Instance.new("Frame", sidebar)
@@ -467,12 +457,12 @@ end
 
 for i,name in ipairs(TAB_NAMES) do
     local b = Instance.new("TextButton", tabList)
-    b.Size=UDim2.new(1,-8,0,36); b.BackgroundColor3=C.PANEL
+    b.Size=UDim2.new(1,-8,0,36); b.BackgroundColor3=C.CARD
     b.BackgroundTransparency=0; b.Text=""; b.AutoButtonColor=false
     b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=13
     Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
     local bs=Instance.new("UIStroke",b)
-    bs.Color=Color3.fromRGB(255,255,255); bs.Thickness=1
+    bs.Color=Color3.fromRGB(95,95,110); bs.Thickness=1
     bs.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
 
     -- Left accent bar (visible when active)
@@ -580,15 +570,14 @@ local function input(parent, placeholder, order)
 end
 
 local function toggle(parent, text, order, default, saveKey)
-    -- Full-width row with a small indicator light. Only the circle lights up;
-    -- the row itself stays dark so enabled states do not flood the panel.
     saveKey = saveKey or ("toggle:"..text)
 
     local btnRow=Instance.new("TextButton")
     btnRow.Size=UDim2.new(1,0,0,34); btnRow.AutoButtonColor=false
     btnRow.BackgroundColor3=C.PANEL; btnRow.BorderSizePixel=0
     btnRow.Text=""; btnRow.LayoutOrder=order or 99; btnRow.ZIndex=3; btnRow.Parent=parent
-    corner(btnRow,7); stroke(btnRow,C.BORDER,1)
+    corner(btnRow,7)
+    local rowStroke = stroke(btnRow,C.BORDER,1)
 
     local lbl=Instance.new("TextLabel")
     lbl.Size=UDim2.new(1,-40,1,0); lbl.Position=UDim2.new(0,12,0,0)
@@ -609,31 +598,86 @@ local function toggle(parent, text, order, default, saveKey)
 
     local enabled = getSavedToggle(saveKey, default)
     local function apply()
-        tween(btnRow,{BackgroundColor3=C.PANEL})
+        tween(btnRow,{BackgroundColor3=C.PANEL},0.15)
         if enabled then
-            tween(light,{BackgroundColor3=C.ACCENT})
-            tween(glow,{BackgroundTransparency=0.35})
+            tween(light,{BackgroundColor3=C.ACCENT,  Size=UDim2.new(0,13,0,13)},0.18)
+            tween(glow, {BackgroundTransparency=0.3}, 0.18)
+            tween(rowStroke,{Color=C.ACCENT},0.18)
             lbl.TextColor3 = C.TEXT
         else
-            tween(light,{BackgroundColor3=C.DISABLED})
-            tween(glow,{BackgroundTransparency=1})
+            tween(light,{BackgroundColor3=C.DISABLED, Size=UDim2.new(0,12,0,12)},0.18)
+            tween(glow, {BackgroundTransparency=1},    0.18)
+            tween(rowStroke,{Color=C.BORDER},0.18)
             lbl.TextColor3 = C.SUBTEXT
         end
     end
     apply()
 
+    -- Hover glow
+    btnRow.MouseEnter:Connect(function()
+        tween(btnRow,{BackgroundColor3=C.CARD},0.1)
+    end)
+    btnRow.MouseLeave:Connect(function()
+        tween(btnRow,{BackgroundColor3=C.PANEL},0.1)
+    end)
+
     local callbacks = {}
     btnRow.MouseButton1Click:Connect(function()
         enabled = not enabled
         setSavedToggle(saveKey, enabled)
+        -- Brief click flash
+        tween(btnRow,{BackgroundColor3=C.PANEL:Lerp(C.ACCENT,0.15)},0.06)
         apply()
         for _,cb in ipairs(callbacks) do task.spawn(cb, enabled) end
     end)
     return btnRow, function() return enabled end, function(cb)
         table.insert(callbacks, cb)
-        -- Fire immediately if already ON when script loads (e.g. saved state)
         if enabled then task.spawn(cb, true) end
     end
+end
+
+-- Smooth collapsible: wraps list in a clipping frame and tweens height.
+-- All future collapsibles should use this instead of raw Visible toggling.
+local function makeCollapsible(btn, list, labelText)
+    local open = false
+    -- Clip wrapper — controls visible height via Size tween
+    local clip = Instance.new("Frame")
+    clip.BackgroundTransparency = 1; clip.BorderSizePixel = 0
+    clip.ClipsDescendants = true
+    clip.Size = UDim2.new(1,0,0,0)
+    clip.LayoutOrder = list.LayoutOrder; clip.ZIndex = list.ZIndex
+    clip.Parent = list.Parent
+    -- Move list inside clip
+    list.Parent = clip; list.LayoutOrder = 0; list.Visible = true
+    local ll = list:FindFirstChildOfClass("UIListLayout")
+    local function contentH()
+        return ll and ll.AbsoluteContentSize.Y or list.AbsoluteSize.Y
+    end
+    -- Keep height synced when items are added dynamically
+    if ll then
+        ll:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            if open then clip.Size = UDim2.new(1,0,0, contentH()) end
+        end)
+    end
+    local function doToggle()
+        open = not open
+        btn.Text = (open and "▼" or "▶") .. "  " .. labelText
+        tween(btn,{BackgroundColor3 = open and C.CARD or C.PANEL},0.15)
+        if open then
+            local h = contentH()
+            if h < 4 then
+                task.defer(function()
+                    tween(clip,{Size=UDim2.new(1,0,0,contentH())},0.25)
+                end)
+            else
+                tween(clip,{Size=UDim2.new(1,0,0,h)},0.25)
+            end
+        else
+            tween(clip,{Size=UDim2.new(1,0,0,0)},0.2)
+        end
+    end
+    btn.MouseButton1Click:Connect(doToggle)
+    return doToggle, function() return open end
 end
 
 local function chip(parent, text, selected, onClick)
@@ -682,12 +726,7 @@ sumListFrame.BackgroundTransparency=1; sumListFrame.BorderSizePixel=0
 sumListFrame.LayoutOrder=2; sumListFrame.Visible=false
 listLayout(sumListFrame, nil, 4)
 
-local sumOpen = false
-sumColBtn.MouseButton1Click:Connect(function()
-    sumOpen = not sumOpen
-    sumListFrame.Visible = sumOpen
-    sumColBtn.Text = (sumOpen and "▼" or "▶") .. "  Summoner"
-end)
+makeCollapsible(sumColBtn, sumListFrame, "Summoner")
 
 -- Logger-confirmed signature (UPD 12.5):
 --   ALL banners use ONE remote: Networking.Units.SummonEvent
@@ -757,12 +796,7 @@ clmListFrame.BackgroundTransparency=1; clmListFrame.BorderSizePixel=0
 clmListFrame.LayoutOrder=2; clmListFrame.Visible=false
 listLayout(clmListFrame, nil, 4)
 
-local clmOpen = false
-clmColBtn.MouseButton1Click:Connect(function()
-    clmOpen = not clmOpen
-    clmListFrame.Visible = clmOpen
-    clmColBtn.Text = (clmOpen and "▼" or "▶") .. "  Claimers"
-end)
+makeCollapsible(clmColBtn, clmListFrame, "Claimers")
 
 local CLAIMERS = {
     { name="Claim All Quests",     key="claim.quests",     fn=function() Net.Quests.ClaimQuest:FireServer("ClaimAll") end },
@@ -1361,11 +1395,7 @@ listLayout(allListFrame, nil, 4)
 
 local allOpen = false
 allColBtn.Text = "▶  All Modifier Priorities"
-allColBtn.MouseButton1Click:Connect(function()
-    allOpen = not allOpen
-    allListFrame.Visible = allOpen
-    allColBtn.Text = (allOpen and "▼" or "▶") .. "  All Modifier Priorities"
-end)
+makeCollapsible(allColBtn, allListFrame, "All Modifier Priorities")
 
 -- ── RESTART MODIFIER ──────────────────────────────────────────────
 local _, getRestartMod = toggle(modSec, "Restart Modifier", 5, false, "game.restart_modifier")
@@ -1388,11 +1418,7 @@ listLayout(rstListFrame, nil, 4)
 
 local rstOpen = false
 rstColBtn.Text = "▶  Starting Modifier Priorities"
-rstColBtn.MouseButton1Click:Connect(function()
-    rstOpen = not rstOpen
-    rstListFrame.Visible = rstOpen
-    rstColBtn.Text = (rstOpen and "▼" or "▶") .. "  Starting Modifier Priorities"
-end)
+makeCollapsible(rstColBtn, rstListFrame, "Starting Modifier Priorities")
 
 -- Row builder
 local function makeModRow(parent, name, priTable, saveFn, order)
