@@ -2,6 +2,7 @@
 -- |        OzWare       |
 -- |    V3 Dashboard     |
 -- ======================
+task.defer(function()
 
 local Players      = game:GetService("Players")
 local RS           = game:GetService("ReplicatedStorage")
@@ -2599,3 +2600,5 @@ UIS.InputChanged:Connect(function(i)
 end)
 
 end -- close Float button do block
+
+end) -- close task.defer wrapper
