@@ -938,10 +938,9 @@ do
     local ROW_ORDER  = 3
 
     local row = Instance.new("Frame")
-    row.Size=UDim2.new(1,0,0,34); row.BackgroundColor3=C.CARD
+    row.Size=UDim2.new(1,0,0,40); row.BackgroundColor3=Color3.fromRGB(30,30,30)
     row.BorderSizePixel=0; row.LayoutOrder=ROW_ORDER; row.ZIndex=3
     row.Parent=matchSec
-    corner(row,0)
 
     local waveLbl = Instance.new("TextLabel", row)
     waveLbl.Size=UDim2.new(0.5,0,1,0); waveLbl.BackgroundTransparency=1
@@ -954,7 +953,7 @@ do
     local btnM=Instance.new("TextButton", row)
     btnM.Size=UDim2.new(0,28,0,24); btnM.AnchorPoint=Vector2.new(1,0.5)
     btnM.Position=UDim2.new(1,-64,0.5,0)
-    btnM.BackgroundColor3=C.PANEL; btnM.BorderSizePixel=0
+    btnM.BackgroundColor3=Color3.fromRGB(42,42,48); btnM.BorderSizePixel=0
     btnM.Text="−"; btnM.TextColor3=C.TEXT; btnM.TextSize=16
     btnM.Font=FONT_BOLD; btnM.AutoButtonColor=false; btnM.ZIndex=4
     corner(btnM,5)
@@ -964,14 +963,14 @@ do
     numLbl.Size=UDim2.new(0,32,1,0); numLbl.AnchorPoint=Vector2.new(1,0)
     numLbl.Position=UDim2.new(1,-34,0,0)
     numLbl.BackgroundTransparency=1; numLbl.Text=tostring(targetWave)
-    numLbl.TextColor3=C.ACCENT2; numLbl.TextSize=14
+    numLbl.TextColor3=C.TEXT; numLbl.TextSize=14
     numLbl.Font=FONT_BOLD; numLbl.ZIndex=4
 
     -- Plus button
     local btnP=Instance.new("TextButton", row)
     btnP.Size=UDim2.new(0,28,0,24); btnP.AnchorPoint=Vector2.new(1,0.5)
     btnP.Position=UDim2.new(1,-4,0.5,0)
-    btnP.BackgroundColor3=C.PANEL; btnP.BorderSizePixel=0
+    btnP.BackgroundColor3=Color3.fromRGB(42,42,48); btnP.BorderSizePixel=0
     btnP.Text="+"; btnP.TextColor3=C.TEXT; btnP.TextSize=16
     btnP.Font=FONT_BOLD; btnP.AutoButtonColor=false; btnP.ZIndex=4
     corner(btnP,5)
@@ -1234,9 +1233,9 @@ corner(allColBtn,6)
 
 local allListFrame = Instance.new("Frame", modSec)
 allListFrame.Size=UDim2.new(1,0,0,0); allListFrame.AutomaticSize=Enum.AutomaticSize.Y
-allListFrame.BackgroundTransparency=1; allListFrame.BorderSizePixel=0
+allListFrame.BackgroundTransparency=0; allListFrame.BackgroundColor3=Color3.fromRGB(30,30,30); allListFrame.BorderSizePixel=0
 allListFrame.LayoutOrder=4; allListFrame.Visible=false
-listLayout(allListFrame, nil, 4)
+listLayout(allListFrame, nil, 0)
 
 local allOpen = false
 allColBtn.Text = "▶  All Modifier Priorities"
@@ -1257,9 +1256,9 @@ corner(rstColBtn,6)
 
 local rstListFrame = Instance.new("Frame", modSec)
 rstListFrame.Size=UDim2.new(1,0,0,0); rstListFrame.AutomaticSize=Enum.AutomaticSize.Y
-rstListFrame.BackgroundTransparency=1; rstListFrame.BorderSizePixel=0
+rstListFrame.BackgroundTransparency=0; rstListFrame.BackgroundColor3=Color3.fromRGB(30,30,30); rstListFrame.BorderSizePixel=0
 rstListFrame.LayoutOrder=8; rstListFrame.Visible=false
-listLayout(rstListFrame, nil, 4)
+listLayout(rstListFrame, nil, 0)
 
 local rstOpen = false
 rstColBtn.Text = "▶  Starting Modifier Priorities"
@@ -1268,24 +1267,29 @@ makeCollapsible(rstColBtn, rstListFrame, "Starting Modifier Priorities")
 -- Row builder
 local function makeModRow(parent, name, priTable, saveFn, order)
     local row = Instance.new("Frame", parent)
-    row.Size=UDim2.new(1,0,0,32); row.BackgroundColor3=C.CARD
+    row.Size=UDim2.new(1,0,0,38); row.BackgroundColor3=Color3.fromRGB(30,30,30)
     row.BorderSizePixel=0; row.LayoutOrder=order or 999; row.ZIndex=3
-    corner(row,6); stroke(row,C.BORDER,1)
+    -- divider (skip on first row)
+    if (order or 999) > 1 then
+        local sep=Instance.new("Frame",row)
+        sep.Size=UDim2.new(1,-20,0,1); sep.Position=UDim2.new(0,10,0,0)
+        sep.BackgroundColor3=Color3.fromRGB(40,40,45); sep.BorderSizePixel=0; sep.ZIndex=4
+    end
     local lbl = Instance.new("TextLabel", row)
-    lbl.Size=UDim2.new(1,-66,1,0); lbl.Position=UDim2.new(0,8,0,0)
+    lbl.Size=UDim2.new(1,-66,1,0); lbl.Position=UDim2.new(0,14,0,0)
     lbl.BackgroundTransparency=1; lbl.Text=name
-    lbl.TextColor3=C.TEXT; lbl.TextSize=12; lbl.Font=FONT_REG
+    lbl.TextColor3=C.SUBTEXT; lbl.TextSize=13; lbl.Font=FONT_REG
     lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.ZIndex=4
     lbl.TextTruncate=Enum.TextTruncate.AtEnd
     local box = Instance.new("TextBox", row)
-    box.Size=UDim2.new(0,52,0,24); box.AnchorPoint=Vector2.new(1,0.5)
-    box.Position=UDim2.new(1,-4,0.5,0)
-    box.BackgroundColor3=C.BG; box.BorderSizePixel=0
+    box.Size=UDim2.new(0,44,0,26); box.AnchorPoint=Vector2.new(1,0.5)
+    box.Position=UDim2.new(1,-10,0.5,0)
+    box.BackgroundColor3=Color3.fromRGB(40,40,45); box.BorderSizePixel=0
     box.Text=tostring(priTable[name] or 0)
     box.PlaceholderText="0"; box.PlaceholderColor3=C.DIM
-    box.TextColor3=C.ACCENT2; box.TextSize=13; box.Font=FONT_BOLD
+    box.TextColor3=C.TEXT; box.TextSize=13; box.Font=FONT_BOLD
     box.TextXAlignment=Enum.TextXAlignment.Center; box.ZIndex=4
-    corner(box,5); stroke(box,C.BORDER,1)
+    corner(box,5)
     box.FocusLost:Connect(function()
         local n = tonumber(box.Text) or 0
         priTable[name] = n; box.Text = tostring(n); saveFn()
@@ -1295,10 +1299,12 @@ end
 -- Group header helper
 local function groupHdr(parent, text, order)
     local h = Instance.new("TextLabel", parent)
-    h.Size=UDim2.new(1,0,0,20); h.BackgroundColor3=C.PANEL
-    h.BorderSizePixel=0; h.Text="── "..text.." ──"
-    h.TextColor3=C.ACCENT2; h.TextSize=11; h.Font=FONT_BOLD
-    h.ZIndex=3; h.LayoutOrder=order; corner(h,5)
+    h.Size=UDim2.new(1,0,0,24); h.BackgroundColor3=Color3.fromRGB(30,30,30)
+    h.BackgroundTransparency=0; h.BorderSizePixel=0
+    h.Text="─── "..text.." ───"
+    h.TextColor3=C.DIM; h.TextSize=10; h.Font=FONT_BOLD
+    h.TextXAlignment=Enum.TextXAlignment.Center
+    h.ZIndex=3; h.LayoutOrder=order
 end
 
 -- Populate ALL list (Additive + Starting)
@@ -2109,7 +2115,7 @@ listScroll.CanvasSize = UDim2.new(0,0,0,0)
 listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 listScroll.LayoutOrder = 1
 listScroll.Parent = listSec
-corner(listScroll, 7); stroke(listScroll, C.BORDER, 1)
+corner(listScroll, 8)
 listLayout(listScroll, nil, 4); padding(listScroll, nil, 6, 6, 6, 6)
 
 -- Status label
@@ -2161,13 +2167,13 @@ local function rebuildList()
         local mac = macros[name]
         local row = Instance.new("TextButton")
         row.Size = UDim2.new(1,0,0,32)
-        row.BackgroundColor3 = (selectedMacro == name) and C.ACCENT or C.PANEL
+        row.BackgroundColor3 = (selectedMacro == name) and C.ACCENT or Color3.fromRGB(35,35,38)
         row.AutoButtonColor = false
         row.Text = ""
         row.BorderSizePixel = 0
         row.LayoutOrder = i
         row.Parent = listScroll
-        corner(row, 6)
+        corner(row, 5)
 
         local lbl = Instance.new("TextLabel")
         lbl.Size = UDim2.new(1,-60,1,0)
