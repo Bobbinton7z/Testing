@@ -21,23 +21,23 @@ task.wait(2)
 local Net = RS:WaitForChild("Networking")
 
 -- ======================
--- THEME (dark grey / light pink text)
+-- THEME (dark grey header+sidebar / light grey content / light pink text)
 -- ======================
 local C = {
-    BG       = Color3.fromRGB(45, 45, 48),           -- dark grey background
-    PANEL    = Color3.fromRGB(80, 80, 85),           -- light grey sidebar/panels/tabs
-    CARD     = Color3.fromRGB(58, 58, 62),           -- slightly lighter dark grey cards
+    BG       = Color3.fromRGB(205, 205, 210),        -- light grey content area
+    PANEL    = Color3.fromRGB(178, 178, 185),        -- light grey buttons/toggles/chips
+    CARD     = Color3.fromRGB(192, 192, 198),        -- light grey cards/sections
     BORDER   = Color3.fromRGB(255, 255, 255),        -- white border
-    ACCENT   = Color3.fromRGB(255, 160, 200),        -- light pink buttons
-    ACCENT2  = Color3.fromRGB(255, 180, 210),        -- light pink highlight text
-    GREEN    = Color3.fromRGB(80, 200, 140),
-    RED      = Color3.fromRGB(220, 70, 100),
+    ACCENT   = Color3.fromRGB(255, 155, 200),        -- light pink active/selected
+    ACCENT2  = Color3.fromRGB(255, 175, 215),        -- light pink accent text
+    GREEN    = Color3.fromRGB(80,  200, 140),
+    RED      = Color3.fromRGB(220, 70,  100),
     YELLOW   = Color3.fromRGB(230, 180, 60),
-    TEXT     = Color3.fromRGB(255, 190, 215),        -- light pink text
-    SUBTEXT  = Color3.fromRGB(220, 150, 180),        -- dimmer light pink
-    DIM      = Color3.fromRGB(180, 120, 150),
-    DISABLED = Color3.fromRGB(120, 100, 110),
-    ACTIVE   = Color3.fromRGB(255, 160, 200),        -- active tab pill
+    TEXT     = Color3.fromRGB(255, 175, 210),        -- light pink — all text
+    SUBTEXT  = Color3.fromRGB(220, 140, 170),        -- dimmer light pink
+    DIM      = Color3.fromRGB(185, 110, 145),
+    DISABLED = Color3.fromRGB(150, 120, 140),
+    ACTIVE   = Color3.fromRGB(255, 155, 200),        -- active tab/toggle highlight
 }
 local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
@@ -255,17 +255,17 @@ winStroke.Color     = Color3.fromRGB(255, 255, 255)
 winStroke.Thickness = 4
 winStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
--- Main background gradient — dark grey
+-- Main background gradient — light grey content area
 do
     local bg = Instance.new("Frame", win)
-    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(45,45,48)
+    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(205,205,210)
     bg.BorderSizePixel=0; bg.ZIndex=0
     Instance.new("UICorner", bg).CornerRadius=UDim.new(0,16)
     local g=Instance.new("UIGradient", bg)
     g.Color=ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(55, 55, 60)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(45, 45, 48)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(38, 38, 42)),
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(212, 212, 217)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(205, 205, 210)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(198, 198, 204)),
     })
     g.Rotation = 135
 end
@@ -304,7 +304,8 @@ end
 -- ── Header (logo banner) ─────────────────────────────────────────
 local header = Instance.new("Frame", win)
 header.Size                  = UDim2.new(1, 0, 0, 78)
-header.BackgroundTransparency = 1
+header.BackgroundTransparency = 0
+header.BackgroundColor3       = Color3.fromRGB(45, 45, 50)
 header.BorderSizePixel        = 0
 header.ZIndex                 = 12
 Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
@@ -312,7 +313,7 @@ Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
 local sep = Instance.new("Frame", win)
 sep.Size             = UDim2.new(1,0,0,1)
 sep.Position         = UDim2.new(0,0,0,78)
-sep.BackgroundColor3 = Color3.fromRGB(60,30,90)
+sep.BackgroundColor3 = Color3.fromRGB(255,255,255)
 sep.BorderSizePixel  = 0; sep.ZIndex = 14
 
 -- Logo image centered in header
@@ -331,7 +332,7 @@ logoFallback.AnchorPoint      = Vector2.new(0.5, 0.5)
 logoFallback.Position         = UDim2.new(0.5, 0, 0.5, 0)
 logoFallback.BackgroundTransparency = 1
 logoFallback.Text             = "OzWare"
-logoFallback.TextColor3       = Color3.fromRGB(255,255,255)
+logoFallback.TextColor3       = Color3.fromRGB(255, 175, 210)
 logoFallback.TextSize         = 28
 logoFallback.Font             = FONT_BOLD
 logoFallback.ZIndex           = 15
@@ -381,7 +382,7 @@ end)
 local sidebar = Instance.new("Frame", win)
 sidebar.Size             = UDim2.new(0, SIDEBAR_W, 1, -96)
 sidebar.Position         = UDim2.new(0, 0, 0, 86)
-sidebar.BackgroundColor3 = Color3.fromRGB(180, 130, 100)  -- light coffee
+sidebar.BackgroundColor3 = Color3.fromRGB(45, 45, 50)  -- dark grey
 sidebar.BorderSizePixel  = 0; sidebar.ZIndex = 11
 -- Right border only
 local sideStroke = Instance.new("Frame", sidebar)
@@ -436,7 +437,7 @@ local TAB_NAMES = {"Lobby","Joiner","Game","Odyssey","SpringLTM","Macro"}
 local function makePage()
     local p=Instance.new("ScrollingFrame")
     p.Size=UDim2.new(1,0,1,0); p.BackgroundTransparency=1; p.BorderSizePixel=0
-    p.ScrollBarThickness=3; p.ScrollBarImageColor3=Color3.fromRGB(180,60,255)
+    p.ScrollBarThickness=3; p.ScrollBarImageColor3=C.ACCENT
     p.CanvasSize=UDim2.new(0,0,0,0); p.AutomaticCanvasSize=Enum.AutomaticSize.Y
     p.Visible=false; p.ZIndex=12; p.Parent=contentArea
     listLayout(p,nil,8); padding(p,nil,4,12,2,8)
@@ -447,18 +448,17 @@ local function switchTab(name)
     for n,_ in pairs(tabPages) do
         tabPages[n].Visible=false
         if tabButtons[n] then
-            tween(tabButtons[n],{BackgroundTransparency=1},0.15)
-            if tabLabels[n] then tabLabels[n].TextColor3=Color3.fromRGB(120,100,150) end
-            if tabIcons[n]  then tabIcons[n].TextColor3=Color3.fromRGB(120,100,150) end
-            -- hide active indicator
+            tween(tabButtons[n],{BackgroundColor3=C.PANEL},0.15)
+            if tabLabels[n] then tabLabels[n].TextColor3=C.SUBTEXT end
+            if tabIcons[n]  then tabIcons[n].TextColor3=C.SUBTEXT end
             local ind = tabButtons[n]:FindFirstChild("ActiveBar")
             if ind then tween(ind,{BackgroundTransparency=1},0.15) end
         end
     end
     tabPages[name].Visible=true
-    tween(tabButtons[name],{BackgroundTransparency=0.88},0.15)
-    tabLabels[name].TextColor3=Color3.fromRGB(255,255,255)
-    tabIcons[name].TextColor3=C.ACCENT2
+    tween(tabButtons[name],{BackgroundColor3=C.BG},0.15)
+    tabLabels[name].TextColor3=C.TEXT
+    tabIcons[name].TextColor3=C.TEXT
     local ind = tabButtons[name]:FindFirstChild("ActiveBar")
     if ind then tween(ind,{BackgroundTransparency=0},0.2) end
     activeTab=name
@@ -466,16 +466,19 @@ end
 
 for i,name in ipairs(TAB_NAMES) do
     local b = Instance.new("TextButton", tabList)
-    b.Size=UDim2.new(1,0,0,40); b.BackgroundColor3=Color3.fromRGB(180,80,255)
-    b.BackgroundTransparency=1; b.Text=""; b.AutoButtonColor=false
+    b.Size=UDim2.new(1,-8,0,36); b.BackgroundColor3=C.PANEL
+    b.BackgroundTransparency=0; b.Text=""; b.AutoButtonColor=false
     b.BorderSizePixel=0; b.LayoutOrder=i; b.ZIndex=13
-    Instance.new("UICorner",b).CornerRadius=UDim.new(0,0)
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)
+    local bs=Instance.new("UIStroke",b)
+    bs.Color=Color3.fromRGB(255,255,255); bs.Thickness=1
+    bs.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
 
     -- Left accent bar (visible when active)
     local bar = Instance.new("Frame", b)
     bar.Name="ActiveBar"; bar.Size=UDim2.new(0,3,0.6,0)
     bar.AnchorPoint=Vector2.new(0,0.5); bar.Position=UDim2.new(0,0,0.5,0)
-    bar.BackgroundColor3=C.ACCENT2; bar.BorderSizePixel=0; bar.ZIndex=15
+    bar.BackgroundColor3=C.ACCENT; bar.BorderSizePixel=0; bar.ZIndex=15
     bar.BackgroundTransparency=1
     Instance.new("UICorner",bar).CornerRadius=UDim.new(0,2)
 
@@ -483,7 +486,7 @@ for i,name in ipairs(TAB_NAMES) do
     local lbl = Instance.new("TextLabel", b)
     lbl.Size=UDim2.new(1,-16,1,0); lbl.Position=UDim2.new(0,14,0,0)
     lbl.BackgroundTransparency=1; lbl.Text=name
-    lbl.TextColor3=Color3.fromRGB(110,95,140)
+    lbl.TextColor3=C.SUBTEXT
     lbl.TextSize=13; lbl.Font=FONT_SEMI
     lbl.TextXAlignment=Enum.TextXAlignment.Left
     lbl.ZIndex=14
@@ -499,14 +502,14 @@ for i,name in ipairs(TAB_NAMES) do
     b.MouseButton1Click:Connect(function() switchTab(name) end)
     b.MouseEnter:Connect(function()
         if activeTab~=name then
-            tween(b,{BackgroundTransparency=0.93},0.1)
-            lbl.TextColor3=Color3.fromRGB(180,160,210)
+            tween(b,{BackgroundColor3=C.CARD},0.1)
+            lbl.TextColor3=C.TEXT
         end
     end)
     b.MouseLeave:Connect(function()
         if activeTab~=name then
-            tween(b,{BackgroundTransparency=1},0.1)
-            lbl.TextColor3=Color3.fromRGB(110,95,140)
+            tween(b,{BackgroundColor3=C.PANEL},0.1)
+            lbl.TextColor3=C.SUBTEXT
         end
     end)
 end
