@@ -756,11 +756,11 @@ end
 
 -- ── Cancel popup: watch Visible signal — far more reliable than polling ────
 task.spawn(function()
-    local popupScreen = pg:WaitForChild("PopupScreen", 30)
+    local popupScreen = realGui:WaitForChild("PopupScreen", 30)
     if not popupScreen then return end
     local function tryCancel()
         if not popupScreen.Visible then return end
-        task.wait(0.15)  -- brief delay so children are fully ready
+        task.wait(0.15)
         pcall(function()
             local btn = safePath(popupScreen,
                 "BaseCancelFrame","Main","Buttons","Cancel","Button")
@@ -768,7 +768,7 @@ task.spawn(function()
         end)
     end
     popupScreen:GetPropertyChangedSignal("Visible"):Connect(tryCancel)
-    tryCancel()  -- handle if already visible on inject
+    tryCancel()
 end)
 
 -- ── Auto-retry (exact path watchers) ────────────────────────────────────────
@@ -1130,44 +1130,32 @@ do
 
     -- Read wave directly from label path every 0.25s
     -- (avoids stale currentWave when HUD connection dies on restart)
-    local function readWaveDirect()
-        local cur = 0
-        pcall(function()
-            local hud = realGui:FindFirstChild("HUD")
-            local map = hud and hud:FindFirstChild("Map")
-            local wi  = map and map:FindFirstChild("WaveInfo")
-            local wo  = wi  and wi:FindFirstChild("Wave")
-            if not wo then return end
-            local ok, txt = pcall(function() return wo.Text end)
-            if not ok then
-                local c = wo:FindFirstChildOfClass("TextLabel")
-                ok, txt = pcall(function() return c.Text end)
-            end
-            cur = tonumber((txt or ""):match("(%d+)")) or 0
-        end)
-        return cur
-    end
-
-    task.spawn(function()
-        while task.wait(0.25) do
-            if not getRestartOnWave() then
-                restartFired = false
-            elseif not inGameMode() then
-                restartFired = false
-            else
-                local cur = readWaveDirect()
-                if cur == 0 then
-                    restartFired = false
-                elseif cur >= targetWave and not restartFired then
-                    restartFired = true
-                    local ev = Net:FindFirstChild("MatchRestartSettingEvent")
-                    if ev then pcall(function() ev:FireServer("Vote") end) end
-                elseif cur < targetWave then
-                    restartFired = false
-                end
-            end
+    -- Use Heartbeat + currentWave (reliable — path confirmed working)
+    RunSvc.Heartbeat:Connect(function()
+        if not getRestartOnWave() then restartFired = false; return end
+        if not inGameMode()       then restartFired = false; return end
+        local cur = currentWave
+        if cur == 0 then restartFired = false; return end
+        if cur >= targetWave and not restartFired then
+            restartFired = true
+            local ev = Net:FindFirstChild("MatchRestartSettingEvent")
+            if ev then pcall(function() ev:FireServer("Vote") end) end
+        elseif cur < targetWave then
+            restartFired = false
         end
     end)
+
+    -- Reset restartFired when WaveInfoEvent fires wave 0 or 1 (new match started)
+    local waveEvRst = Net:FindFirstChild("WaveInfoEvent")
+    if waveEvRst then
+        waveEvRst.OnClientEvent:Connect(function(...)
+            for _, v in ipairs({...}) do
+                local n = (type(v)=="number" and v) or
+                          (type(v)=="table" and tonumber(v.Wave or v.Current or v[1]))
+                if n and n <= 1 then restartFired = false; break end
+            end
+        end)
+    end
 
     -- Also hook MatchRestarted signal as extra safety net
     pcall(function()
