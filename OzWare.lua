@@ -82,6 +82,16 @@ local ok, _gui  = pcall(function() return gethui() end)
 local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
 local realGui   = player:WaitForChild("PlayerGui")
 
+-- Safe path traversal — accessible everywhere in the script
+local function safePath(root, ...)
+    local cur = root
+    for _, key in ipairs({...}) do
+        if not cur then return nil end
+        cur = cur:FindFirstChild(key)
+    end
+    return cur
+end
+
 -- 2-second wait so game state fully loads before any function reads gamemode
 task.wait(2)
 
@@ -765,15 +775,6 @@ end)
 task.spawn(function()
     local pg = player.PlayerGui
 
-    local function safePath(root, ...)
-        local cur = root
-        for _, key in ipairs({...}) do
-            if not cur then return nil end
-            cur = cur:FindFirstChild(key)
-        end
-        return cur
-    end
-
     while task.wait(0.5) do
         -- (cancel button handled via Visible signal — see setup below)
 
@@ -781,12 +782,14 @@ task.spawn(function()
         -- Auto Next / Auto Retry — Next takes priority when available
         pcall(function()
             local endEv   = Net:FindFirstChild("EndScreen") and Net.EndScreen:FindFirstChild("VoteEvent")
-            local nextBtn  = safePath(pg,"EndScreen","Holder","Buttons","Next","Button")
-            local retryBtn = safePath(pg,"EndScreen","Holder","Buttons","Retry","Button")
-            if getAutoNext and getAutoNext() and nextBtn and nextBtn.Visible then
+            local endScreen = pg:FindFirstChild("EndScreen")
+            if not (endScreen and endScreen.Enabled) then return end
+            local nextBtn  = safePath(endScreen,"Holder","Buttons","Next","Button")
+            local retryBtn = safePath(endScreen,"Holder","Buttons","Retry","Button")
+            if getAutoNext and getAutoNext() and nextBtn then
                 if endEv then endEv:FireServer("Next") end
                 nextBtn.MouseButton1Click:Fire()
-            elseif getAutoRetry and getAutoRetry() and retryBtn and retryBtn.Visible then
+            elseif getAutoRetry and getAutoRetry() and retryBtn then
                 if endEv then endEv:FireServer("Retry") end
                 retryBtn.MouseButton1Click:Fire()
             end
@@ -1147,17 +1150,21 @@ do
 
     task.spawn(function()
         while task.wait(0.25) do
-            if not getRestartOnWave() then restartFired = false; continue end
-            if not inGameMode()       then restartFired = false; continue end
-            local cur = readWaveDirect()
-            if cur == 0 then
+            if not getRestartOnWave() then
                 restartFired = false
-            elseif cur >= targetWave and not restartFired then
-                restartFired = true
-                local ev = Net:FindFirstChild("MatchRestartSettingEvent")
-                if ev then pcall(function() ev:FireServer("Vote") end) end
-            elseif cur < targetWave then
+            elseif not inGameMode() then
                 restartFired = false
+            else
+                local cur = readWaveDirect()
+                if cur == 0 then
+                    restartFired = false
+                elseif cur >= targetWave and not restartFired then
+                    restartFired = true
+                    local ev = Net:FindFirstChild("MatchRestartSettingEvent")
+                    if ev then pcall(function() ev:FireServer("Vote") end) end
+                elseif cur < targetWave then
+                    restartFired = false
+                end
             end
         end
     end)
