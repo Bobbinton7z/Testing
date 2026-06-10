@@ -2540,6 +2540,7 @@ floatBtn.BackgroundTransparency=0
 floatBtn.BorderSizePixel=0; floatBtn.AutoButtonColor=false
 floatBtn.ZIndex=50; floatBtn.Image=""; floatBtn.Parent=gui
 Instance.new("UICorner",floatBtn).CornerRadius=UDim.new(0,26)
+floatBtn.ClipsDescendants=true
 stroke(floatBtn,Color3.fromRGB(0,0,0),2)
 
 -- Glow bloom
@@ -2551,7 +2552,10 @@ fbGlow.ImageTransparency=0.55; fbGlow.ZIndex=49
 
 -- Logo image on float button
 local eyeLbl = Instance.new("ImageLabel",floatBtn)
-eyeLbl.Size=UDim2.new(1,0,1,0); eyeLbl.BackgroundTransparency=1
+eyeLbl.Size=UDim2.new(0,44,0,44)
+eyeLbl.AnchorPoint=Vector2.new(0.5,0.5)
+eyeLbl.Position=UDim2.new(0.5,0,0.5,0)
+eyeLbl.BackgroundTransparency=1
 eyeLbl.Image="rbxassetid://85161257906284"
 eyeLbl.ScaleType=Enum.ScaleType.Fit; eyeLbl.ZIndex=51
 
