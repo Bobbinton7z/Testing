@@ -744,7 +744,24 @@ end
 
 
 
--- ── Alert auto-dismiss + auto-retry (exact path watchers) ─────────────────
+-- ── Cancel popup: watch Visible signal — far more reliable than polling ────
+task.spawn(function()
+    local popupScreen = pg:WaitForChild("PopupScreen", 30)
+    if not popupScreen then return end
+    local function tryCancel()
+        if not popupScreen.Visible then return end
+        task.wait(0.15)  -- brief delay so children are fully ready
+        pcall(function()
+            local btn = safePath(popupScreen,
+                "BaseCancelFrame","Main","Buttons","Cancel","Button")
+            if btn then btn.MouseButton1Click:Fire() end
+        end)
+    end
+    popupScreen:GetPropertyChangedSignal("Visible"):Connect(tryCancel)
+    tryCancel()  -- handle if already visible on inject
+end)
+
+-- ── Auto-retry (exact path watchers) ────────────────────────────────────────
 task.spawn(function()
     local pg = player.PlayerGui
 
@@ -758,14 +775,7 @@ task.spawn(function()
     end
 
     while task.wait(0.5) do
-        -- Auto-dismiss restart alert popup (exact path)
-        pcall(function()
-            local cancelBtn = safePath(pg,
-                "PopupScreen","BaseCancelFrame","Main","Buttons","Cancel","Button")
-            if cancelBtn and cancelBtn.Visible then
-                cancelBtn.MouseButton1Click:Fire()
-            end
-        end)
+        -- (cancel button handled via Visible signal — see setup below)
 
         -- Auto-retry end screen (exact path + remote)
         -- Auto Next / Auto Retry — Next takes priority when available
@@ -1098,9 +1108,14 @@ do
     local restartFired = false
 
     local function setWave(n)
-        targetWave           = math.clamp(n, 1, 999)
+        local newTarget = math.clamp(n, 1, 999)
+        -- Only reset fired flag if new target is beyond current wave
+        -- (prevents immediate re-fire when lowering the target)
+        if currentWave < newTarget then
+            restartFired = false
+        end
+        targetWave           = newTarget
         waveBox.Text         = tostring(targetWave)
-        restartFired         = false
         settings.restartWave = targetWave
         saveSettings()
     end
@@ -1110,19 +1125,44 @@ do
         if n then setWave(n) else waveBox.Text = tostring(targetWave) end
     end)
 
-    RunSvc.Heartbeat:Connect(function()
-        if not getRestartOnWave() then restartFired = false; return end
-        if not inGameMode() then restartFired = false; return end
-        local cur = currentWave
-        if cur == 0 then restartFired = false; return end
-        if cur >= targetWave and not restartFired then
-            restartFired = true
-            local ev = Net:FindFirstChild("MatchRestartSettingEvent")
-            if ev then pcall(function() ev:FireServer("Vote") end) end
+    -- Read wave directly from label path every 0.25s
+    -- (avoids stale currentWave when HUD connection dies on restart)
+    local function readWaveDirect()
+        local cur = 0
+        pcall(function()
+            local hud = realGui:FindFirstChild("HUD")
+            local map = hud and hud:FindFirstChild("Map")
+            local wi  = map and map:FindFirstChild("WaveInfo")
+            local wo  = wi  and wi:FindFirstChild("Wave")
+            if not wo then return end
+            local ok, txt = pcall(function() return wo.Text end)
+            if not ok then
+                local c = wo:FindFirstChildOfClass("TextLabel")
+                ok, txt = pcall(function() return c.Text end)
+            end
+            cur = tonumber((txt or ""):match("(%d+)")) or 0
+        end)
+        return cur
+    end
+
+    task.spawn(function()
+        while task.wait(0.25) do
+            if not getRestartOnWave() then restartFired = false; continue end
+            if not inGameMode()       then restartFired = false; continue end
+            local cur = readWaveDirect()
+            if cur == 0 then
+                restartFired = false
+            elseif cur >= targetWave and not restartFired then
+                restartFired = true
+                local ev = Net:FindFirstChild("MatchRestartSettingEvent")
+                if ev then pcall(function() ev:FireServer("Vote") end) end
+            elseif cur < targetWave then
+                restartFired = false
+            end
         end
-        if cur < targetWave then restartFired = false end
     end)
 
+    -- Also hook MatchRestarted signal as extra safety net
     pcall(function()
         local gh = require(game.ReplicatedStorage.Modules.Gameplay.GameHandler)
         if gh and gh.MatchRestarted then
