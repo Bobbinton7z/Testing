@@ -759,7 +759,7 @@ task.spawn(function()
     local popupScreen = realGui:WaitForChild("PopupScreen", 30)
     if not popupScreen then return end
     local function tryCancel()
-        if not popupScreen.Visible then return end
+        if not popupScreen.Enabled then return end
         task.wait(0.15)
         pcall(function()
             local btn = safePath(popupScreen,
@@ -767,7 +767,7 @@ task.spawn(function()
             if btn then btn.MouseButton1Click:Fire() end
         end)
     end
-    popupScreen:GetPropertyChangedSignal("Visible"):Connect(tryCancel)
+    popupScreen:GetPropertyChangedSignal("Enabled"):Connect(tryCancel)
     tryCancel()
 end)
 
@@ -1108,14 +1108,16 @@ do
     waveBox.TextXAlignment=Enum.TextXAlignment.Center; waveBox.ZIndex=4
     corner(waveBox,5)
 
-    local restartFired = false
+    local restartFired    = false
+    local lastRestartTime = 0
+    local RESTART_CD      = 22  -- seconds; covers placement phase after restart
 
     local function setWave(n)
         local newTarget = math.clamp(n, 1, 999)
-        -- Only reset fired flag if new target is beyond current wave
-        -- (prevents immediate re-fire when lowering the target)
         if currentWave < newTarget then
-            restartFired = false
+            -- Target raised above current wave — reset so it can fire at new target
+            restartFired    = false
+            lastRestartTime = 0   -- clear cooldown so new target fires promptly
         end
         targetWave           = newTarget
         waveBox.Text         = tostring(targetWave)
@@ -1136,8 +1138,10 @@ do
         if not inGameMode()       then restartFired = false; return end
         local cur = currentWave
         if cur == 0 then restartFired = false; return end
-        if cur >= targetWave and not restartFired then
-            restartFired = true
+        local elapsed = tick() - lastRestartTime
+        if cur >= targetWave and not restartFired and elapsed > RESTART_CD then
+            restartFired    = true
+            lastRestartTime = tick()
             local ev = Net:FindFirstChild("MatchRestartSettingEvent")
             if ev then pcall(function() ev:FireServer("Vote") end) end
         elseif cur < targetWave then
