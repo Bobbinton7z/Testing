@@ -2,6 +2,72 @@
 -- |        OzWare       |
 -- |    V3 Dashboard     |
 -- ======================
+
+-- ======================
+-- ANTI-CHEAT BYPASS
+-- ======================
+do
+    -- Phase 1: Neutralise Heartbeat-based AC tick functions.
+    -- Targets closures with exactly 3 upvalues whose first upvalue is a boolean —
+    -- the known signature of the game's scheduler detection loop.
+    local _RunService = game:GetService("RunService")
+    local ok1, conns = pcall(getconnections, _RunService.Heartbeat)
+    if ok1 and conns then
+        for _, conn in ipairs(conns) do
+            local fn = conn.Function
+            if fn then
+                local ok2, uvCount = pcall(function()
+                    return #debug.getupvalues(fn)
+                end)
+                if ok2 and uvCount == 3 then
+                    local ok3, uv1 = pcall(debug.getupvalue, fn, 1)
+                    if ok3 and typeof(uv1) == "boolean" then
+                        pcall(hookfunction, fn, function() end)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Phase 2: Silently intercept xpcall to suppress AC error reporting.
+    -- No prints inside the hook — xpcall fires thousands of times per second
+    -- so any logging here causes lag. Cache capped at 200 to prevent memory bloat.
+    local acCache = {}
+    local acCount = 0
+    local CACHE_CAP = 200
+    local origXpcall
+    pcall(function()
+        origXpcall = hookfunction(xpcall, function(...)
+            local fn = select(1, ...)
+            if not acCache[fn] then
+                if acCount < CACHE_CAP then
+                    acCount = acCount + 1
+                    acCache[fn] = { origXpcall(...) }
+                else
+                    return origXpcall(...)
+                end
+            end
+            return table.unpack(acCache[fn])
+        end)
+    end)
+
+    -- Phase 3: Scan GC for the AC update closure at bytecode offset 0x01AC.
+    pcall(function()
+        for _, v in ipairs(getgc(true)) do
+            if typeof(v) == "table" and rawget(v, "update") then
+                if islclosure(v.update) then
+                    local uvs = debug.getupvalues(v.update)
+                    if #uvs == 1 then
+                        if debug.getinfo(v.update, "l") == 0x01AC then
+                            hookfunction(v.update, function() end)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
 task.defer(function()
 
 local Players      = game:GetService("Players")
@@ -202,7 +268,7 @@ loadOzSettings()
 -- WINDOW  (premium redesign)
 -- Logo image: upload OzWare logo to Roblox, replace LOGO_ASSET_ID below
 -- ======================
-local LOGO_ASSET = "rbxassetid://134273399594278"
+local LOGO_ASSET = "rbxassetid://109657187781033"
 local WIN_W, WIN_H = 720, 440
 local SIDEBAR_W    = 152
 
@@ -676,17 +742,47 @@ do
 end
 end
 
--- Auto Skip Start: uses game's own SettingsEvent("Toggle", "AutoSkipStart")
-do
-local matchStartSec = section(lobbyPage, "Match Settings", 3)
-local _, getAutoSkipStart, onAutoSkipStart = toggle(matchStartSec, "Auto Start Match", 1, false, "lobby.autoskipstart")
-label(matchStartSec, "Automatically votes to start the match", 2)
-local settingsEvLobby = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
-onAutoSkipStart(function()
-    local ev = settingsEvLobby or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
-    if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
+
+
+-- ── Alert auto-dismiss + auto-retry (exact path watchers) ─────────────────
+task.spawn(function()
+    local pg = player.PlayerGui
+
+    local function safePath(root, ...)
+        local cur = root
+        for _, key in ipairs({...}) do
+            if not cur then return nil end
+            cur = cur:FindFirstChild(key)
+        end
+        return cur
+    end
+
+    while task.wait(0.5) do
+        -- Auto-dismiss restart alert popup (exact path)
+        pcall(function()
+            local cancelBtn = safePath(pg,
+                "PopupScreen","BaseCancelFrame","Main","Buttons","Cancel","Button")
+            if cancelBtn and cancelBtn.Visible then
+                cancelBtn.MouseButton1Click:Fire()
+            end
+        end)
+
+        -- Auto-retry end screen (exact path + remote)
+        if getAutoRetry and getAutoRetry() then
+            pcall(function()
+                local retryBtn = safePath(pg,
+                    "EndScreen","Holder","Buttons","Retry","Button")
+                if retryBtn and retryBtn.Visible then
+                    local endEv = Net:FindFirstChild("EndScreen") and
+                                  Net.EndScreen:FindFirstChild("VoteEvent")
+                    if endEv then endEv:FireServer("Retry") end
+                    retryBtn.MouseButton1Click:Fire()
+                end
+            end)
+        end
+    end
 end)
-end
+
 
 -- ======================
 -- JOINER TAB
@@ -994,7 +1090,7 @@ do
         if not inGameMode() then restartFired = false; return end
 
         local cur = currentWave
-        if cur == 0 then return end
+        if cur == 0 then restartFired = false; return end  -- reset flag so it fires again after restart
 
         if cur >= targetWave and not restartFired then
             restartFired = true
@@ -1003,9 +1099,33 @@ do
         end
         if cur < targetWave then restartFired = false end
     end)
+
+    -- Also hook MatchRestarted signal from GameHandler if accessible
+    pcall(function()
+        local gh = require(game.ReplicatedStorage.Modules.Gameplay.GameHandler)
+        if gh and gh.MatchRestarted then
+            gh.MatchRestarted:Connect(function()
+                restartFired = false
+            end)
+        end
+    end)
 end
 
 -- Skip Wave: toggle, fires every 3s while on and in-match
+-- Auto Vote Start: fires AutoSkipStart setting toggle
+local _, getAutoSkipStart, onAutoSkipStart = toggle(matchSec, "Auto Vote Start", 4, false, "game.autoskipstart")
+label(matchSec, "Automatically votes to start the match", 5);do
+    local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+    onAutoSkipStart(function()
+        local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+        if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
+    end)
+end
+
+-- Auto Retry: fires VoteEvent(Retry) + clicks Retry button on end screen
+local _, getAutoRetry = toggle(matchSec, "Auto Retry", 6, false, "game.autoretry")
+label(matchSec, "Automatically retries when the match ends", 7)
+
 local _, getSkipWave, onSkipWave = toggle(matchSec, "Skip Wave", 1, false, "game.skipwave")
 -- Correct path: Networking.Settings.SettingsEvent (NOT directly under Networking)
 local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
@@ -2005,7 +2125,7 @@ do
         if not getWavePurchase() then fired = {}; return end
         if not inGameMode() then fired = {}; return end
         local cur = currentWave
-        if cur == 0 then return end
+        if cur == 0 then restartFired = false; return end  -- reset flag so it fires again after restart
         if cur < 5 then fired = {}; return end
         for _, w in ipairs(MILESTONES) do
             if cur >= w and not fired[w] then
