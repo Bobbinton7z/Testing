@@ -768,18 +768,19 @@ task.spawn(function()
         end)
 
         -- Auto-retry end screen (exact path + remote)
-        if getAutoRetry and getAutoRetry() then
-            pcall(function()
-                local retryBtn = safePath(pg,
-                    "EndScreen","Holder","Buttons","Retry","Button")
-                if retryBtn and retryBtn.Visible then
-                    local endEv = Net:FindFirstChild("EndScreen") and
-                                  Net.EndScreen:FindFirstChild("VoteEvent")
-                    if endEv then endEv:FireServer("Retry") end
-                    retryBtn.MouseButton1Click:Fire()
-                end
-            end)
-        end
+        -- Auto Next / Auto Retry — Next takes priority when available
+        pcall(function()
+            local endEv   = Net:FindFirstChild("EndScreen") and Net.EndScreen:FindFirstChild("VoteEvent")
+            local nextBtn  = safePath(pg,"EndScreen","Holder","Buttons","Next","Button")
+            local retryBtn = safePath(pg,"EndScreen","Holder","Buttons","Retry","Button")
+            if getAutoNext and getAutoNext() and nextBtn and nextBtn.Visible then
+                if endEv then endEv:FireServer("Next") end
+                nextBtn.MouseButton1Click:Fire()
+            elseif getAutoRetry and getAutoRetry() and retryBtn and retryBtn.Visible then
+                if endEv then endEv:FireServer("Retry") end
+                retryBtn.MouseButton1Click:Fire()
+            end
+        end)
     end
 end)
 
@@ -1010,11 +1011,50 @@ end
 
 local matchSec = section(gamePage, "Match Controls", 1)
 
--- Restart on Wave: votes to restart when the current wave reaches the target
-local _, getRestartOnWave, onRestartOnWave = toggle(matchSec, "Restart on Wave", 1, false, "game.restartonwave")
-label(matchSec, "Votes to restart when the wave number is reached", 2)
+-- ── Gameplay collapsible ──────────────────────────────────────────────────
+local gpSelBtn = Instance.new("TextButton", matchSec)
+gpSelBtn.Size=UDim2.new(1,0,0,38); gpSelBtn.BackgroundColor3=Color3.fromRGB(30,30,30)
+gpSelBtn.BackgroundTransparency=0; gpSelBtn.BorderSizePixel=0; gpSelBtn.LayoutOrder=1; gpSelBtn.ZIndex=3
+gpSelBtn.Text="▶  Gameplay"; gpSelBtn.TextColor3=C.SUBTEXT; gpSelBtn.TextSize=12; gpSelBtn.Font=FONT_SEMI
+gpSelBtn.AutoButtonColor=false
+do local d=Instance.new("Frame",gpSelBtn); d.Size=UDim2.new(1,-20,0,1); d.Position=UDim2.new(0,10,0,0); d.BackgroundColor3=Color3.fromRGB(40,40,45); d.BorderSizePixel=0; d.ZIndex=4 end
+gpSelBtn.MouseEnter:Connect(function() tween(gpSelBtn,{BackgroundColor3=Color3.fromRGB(40,40,40)},0.08) end)
+gpSelBtn.MouseLeave:Connect(function() tween(gpSelBtn,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08) end)
 
--- Wave number stepper (default 15, live-updating)
+local gpList = Instance.new("Frame", matchSec)
+gpList.Size=UDim2.new(1,0,0,0); gpList.AutomaticSize=Enum.AutomaticSize.Y
+gpList.BackgroundColor3=Color3.fromRGB(30,30,30); gpList.BorderSizePixel=0
+gpList.LayoutOrder=1; gpList.ZIndex=3
+listLayout(gpList,nil,0)
+makeCollapsible(gpSelBtn, gpList, "Gameplay")
+
+-- Auto Vote Start
+local _, getAutoSkipStart, onAutoSkipStart = toggle(gpList, "Auto Vote Start", 1, false, "game.autoskipstart")
+do
+    local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+    onAutoSkipStart(function()
+        local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+        if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
+    end)
+end
+-- Auto Next
+local _, getAutoNext = toggle(gpList, "Auto Next", 2, false, "game.autonext")
+-- Auto Retry
+local _, getAutoRetry = toggle(gpList, "Auto Retry", 3, false, "game.autoretry")
+-- Auto Skip Wave
+local _, getSkipWave, onSkipWave = toggle(gpList, "Auto Skip Wave", 4, false, "game.skipwave")
+do
+    local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+    onSkipWave(function()
+        local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+        if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end) end
+    end)
+end
+-- Auto Restart
+local _, getRestartOnWave, onRestartOnWave = toggle(gpList, "Auto Restart", 5, false, "game.restartonwave")
+label(gpList, "Votes to restart when wave number is reached", 6)
+
+-- On Wave: keyboard-editable TextBox (same style as modifier boxes)
 do
     local WAVE_SAVE = "OzWare_settings.json"
     local settings  = {}
@@ -1031,67 +1071,50 @@ do
     end
 
     local targetWave = tonumber(settings.restartWave) or 15
-    local ROW_ORDER  = 3
 
     local row = Instance.new("Frame")
     row.Size=UDim2.new(1,0,0,40); row.BackgroundColor3=Color3.fromRGB(30,30,30)
-    row.BorderSizePixel=0; row.LayoutOrder=ROW_ORDER; row.ZIndex=3
-    row.Parent=matchSec
+    row.BorderSizePixel=0; row.LayoutOrder=7; row.ZIndex=3
+    row.Parent=gpList
+    do local d=Instance.new("Frame",row); d.Size=UDim2.new(1,-20,0,1); d.Position=UDim2.new(0,10,0,0); d.BackgroundColor3=Color3.fromRGB(40,40,45); d.BorderSizePixel=0; d.ZIndex=4 end
 
     local waveLbl = Instance.new("TextLabel", row)
-    waveLbl.Size=UDim2.new(0.5,0,1,0); waveLbl.BackgroundTransparency=1
+    waveLbl.Size=UDim2.new(1,-80,1,0); waveLbl.BackgroundTransparency=1
     waveLbl.Text="On Wave:"; waveLbl.TextColor3=C.TEXT
     waveLbl.TextSize=13; waveLbl.Font=FONT_REG
     waveLbl.TextXAlignment=Enum.TextXAlignment.Left
-    waveLbl.Position=UDim2.new(0,10,0,0); waveLbl.ZIndex=4
+    waveLbl.Position=UDim2.new(0,14,0,0); waveLbl.ZIndex=4
 
-    -- Minus button
-    local btnM=Instance.new("TextButton", row)
-    btnM.Size=UDim2.new(0,28,0,24); btnM.AnchorPoint=Vector2.new(1,0.5)
-    btnM.Position=UDim2.new(1,-64,0.5,0)
-    btnM.BackgroundColor3=Color3.fromRGB(42,42,48); btnM.BorderSizePixel=0
-    btnM.Text="−"; btnM.TextColor3=C.TEXT; btnM.TextSize=16
-    btnM.Font=FONT_BOLD; btnM.AutoButtonColor=false; btnM.ZIndex=4
-    corner(btnM,5)
-
-    -- Wave number display
-    local numLbl=Instance.new("TextLabel", row)
-    numLbl.Size=UDim2.new(0,32,1,0); numLbl.AnchorPoint=Vector2.new(1,0)
-    numLbl.Position=UDim2.new(1,-34,0,0)
-    numLbl.BackgroundTransparency=1; numLbl.Text=tostring(targetWave)
-    numLbl.TextColor3=C.TEXT; numLbl.TextSize=14
-    numLbl.Font=FONT_BOLD; numLbl.ZIndex=4
-
-    -- Plus button
-    local btnP=Instance.new("TextButton", row)
-    btnP.Size=UDim2.new(0,28,0,24); btnP.AnchorPoint=Vector2.new(1,0.5)
-    btnP.Position=UDim2.new(1,-4,0.5,0)
-    btnP.BackgroundColor3=Color3.fromRGB(42,42,48); btnP.BorderSizePixel=0
-    btnP.Text="+"; btnP.TextColor3=C.TEXT; btnP.TextSize=16
-    btnP.Font=FONT_BOLD; btnP.AutoButtonColor=false; btnP.ZIndex=4
-    corner(btnP,5)
+    local waveBox=Instance.new("TextBox", row)
+    waveBox.Size=UDim2.new(0,52,0,26); waveBox.AnchorPoint=Vector2.new(1,0.5)
+    waveBox.Position=UDim2.new(1,-10,0.5,0)
+    waveBox.BackgroundColor3=Color3.fromRGB(40,40,45); waveBox.BorderSizePixel=0
+    waveBox.Text=tostring(targetWave)
+    waveBox.PlaceholderText="1-999"; waveBox.PlaceholderColor3=C.DIM
+    waveBox.TextColor3=C.TEXT; waveBox.TextSize=13; waveBox.Font=FONT_BOLD
+    waveBox.TextXAlignment=Enum.TextXAlignment.Center; waveBox.ZIndex=4
+    corner(waveBox,5)
 
     local restartFired = false
 
     local function setWave(n)
-        targetWave        = math.clamp(n, 1, 999)
-        numLbl.Text       = tostring(targetWave)
-        restartFired      = false
+        targetWave           = math.clamp(n, 1, 999)
+        waveBox.Text         = tostring(targetWave)
+        restartFired         = false
         settings.restartWave = targetWave
         saveSettings()
     end
 
-    btnM.MouseButton1Click:Connect(function() setWave(targetWave - 1) end)
-    btnP.MouseButton1Click:Connect(function() setWave(targetWave + 1) end)
+    waveBox.FocusLost:Connect(function()
+        local n = tonumber(waveBox.Text)
+        if n then setWave(n) else waveBox.Text = tostring(targetWave) end
+    end)
 
-    -- Heartbeat: watch wave label in HUD for the target wave
     RunSvc.Heartbeat:Connect(function()
         if not getRestartOnWave() then restartFired = false; return end
         if not inGameMode() then restartFired = false; return end
-
         local cur = currentWave
-        if cur == 0 then restartFired = false; return end  -- reset flag so it fires again after restart
-
+        if cur == 0 then restartFired = false; return end
         if cur >= targetWave and not restartFired then
             restartFired = true
             local ev = Net:FindFirstChild("MatchRestartSettingEvent")
@@ -1100,41 +1123,14 @@ do
         if cur < targetWave then restartFired = false end
     end)
 
-    -- Also hook MatchRestarted signal from GameHandler if accessible
     pcall(function()
         local gh = require(game.ReplicatedStorage.Modules.Gameplay.GameHandler)
         if gh and gh.MatchRestarted then
-            gh.MatchRestarted:Connect(function()
-                restartFired = false
-            end)
+            gh.MatchRestarted:Connect(function() restartFired = false end)
         end
     end)
 end
 
--- Skip Wave: toggle, fires every 3s while on and in-match
--- Auto Vote Start: fires AutoSkipStart setting toggle
-local _, getAutoSkipStart, onAutoSkipStart = toggle(matchSec, "Auto Vote Start", 4, false, "game.autoskipstart")
-label(matchSec, "Automatically votes to start the match", 5);do
-    local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
-    onAutoSkipStart(function()
-        local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
-        if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
-    end)
-end
-
--- Auto Retry: fires VoteEvent(Retry) + clicks Retry button on end screen
-local _, getAutoRetry = toggle(matchSec, "Auto Retry", 6, false, "game.autoretry")
-label(matchSec, "Automatically retries when the match ends", 7)
-
-local _, getSkipWave, onSkipWave = toggle(matchSec, "Skip Wave", 1, false, "game.skipwave")
--- Correct path: Networking.Settings.SettingsEvent (NOT directly under Networking)
-local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
-onSkipWave(function()
-    local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
-    if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end) end
-end)
-
--- ======================
 -- UTILITY
 -- ======================
 local utilSec = section(gamePage, "Utility", 2)
