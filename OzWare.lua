@@ -2535,12 +2535,12 @@ floatBtn.Name="OzFloat"
 floatBtn.Size=UDim2.new(0,52,0,52)
 floatBtn.Position=UDim2.new(0,16,1,-68)
 floatBtn.AnchorPoint=Vector2.new(0,0)
-floatBtn.BackgroundColor3=Color3.fromRGB(18,10,30)
+floatBtn.BackgroundColor3=Color3.fromRGB(0,0,0)
 floatBtn.BackgroundTransparency=0
 floatBtn.BorderSizePixel=0; floatBtn.AutoButtonColor=false
 floatBtn.ZIndex=50; floatBtn.Image=""; floatBtn.Parent=gui
 Instance.new("UICorner",floatBtn).CornerRadius=UDim.new(0,26)
-stroke(floatBtn,C.ACCENT,2)
+stroke(floatBtn,Color3.fromRGB(0,0,0),2)
 
 -- Glow bloom
 local fbGlow = Instance.new("ImageLabel",floatBtn)
@@ -2549,11 +2549,11 @@ fbGlow.Position=UDim2.new(0.5,0,0.5,0); fbGlow.BackgroundTransparency=1
 fbGlow.Image="rbxassetid://5028857084"; fbGlow.ImageColor3=C.ACCENT2
 fbGlow.ImageTransparency=0.55; fbGlow.ZIndex=49
 
--- Eye icon (matches OzWare logo aesthetic)
-local eyeLbl = Instance.new("TextLabel",floatBtn)
+-- Logo image on float button
+local eyeLbl = Instance.new("ImageLabel",floatBtn)
 eyeLbl.Size=UDim2.new(1,0,1,0); eyeLbl.BackgroundTransparency=1
-eyeLbl.Text="👁"; eyeLbl.TextSize=24; eyeLbl.Font=FONT_BOLD
-eyeLbl.TextColor3=C.ACCENT2; eyeLbl.ZIndex=51
+eyeLbl.Image="rbxassetid://85161257906284"
+eyeLbl.ScaleType=Enum.ScaleType.Fit; eyeLbl.ZIndex=51
 
 
 -- Float button: drag vs tap
