@@ -760,11 +760,19 @@ task.spawn(function()
     if not popupScreen then return end
     local function tryCancel()
         if not popupScreen.Enabled then return end
-        task.wait(0.15)
+        task.wait(0.2)
         pcall(function()
-            local btn = safePath(popupScreen,
+            local container = safePath(popupScreen,
                 "BaseCancelFrame","Main","Buttons","Cancel","Button")
-            if btn then btn.MouseButton1Click:Fire() end
+            if not container then return end
+            -- Try the container itself first
+            pcall(function() container.MouseButton1Click:Fire() end)
+            -- Then search every descendant for the real clickable button
+            for _, child in ipairs(container:GetDescendants()) do
+                if child:IsA("TextButton") or child:IsA("ImageButton") then
+                    pcall(function() child.MouseButton1Click:Fire() end)
+                end
+            end
         end)
     end
     popupScreen:GetPropertyChangedSignal("Enabled"):Connect(tryCancel)
@@ -1108,16 +1116,15 @@ do
     waveBox.TextXAlignment=Enum.TextXAlignment.Center; waveBox.ZIndex=4
     corner(waveBox,5)
 
-    local restartFired    = false
-    local lastRestartTime = 0
-    local RESTART_CD      = 22  -- seconds; covers placement phase after restart
+    local restartFired      = false
+    local waveAtTargetSince = 0   -- tick() when wave first reached target
+    local WAVE_STABLE_SECS  = 2   -- seconds wave must stay at target before firing
 
     local function setWave(n)
         local newTarget = math.clamp(n, 1, 999)
         if currentWave < newTarget then
-            -- Target raised above current wave — reset so it can fire at new target
-            restartFired    = false
-            lastRestartTime = 0   -- clear cooldown so new target fires promptly
+            restartFired      = false
+            waveAtTargetSince = 0
         end
         targetWave           = newTarget
         waveBox.Text         = tostring(targetWave)
@@ -1137,15 +1144,20 @@ do
         if not getRestartOnWave() then restartFired = false; return end
         if not inGameMode()       then restartFired = false; return end
         local cur = currentWave
-        if cur == 0 then restartFired = false; return end
-        local elapsed = tick() - lastRestartTime
-        if cur >= targetWave and not restartFired and elapsed > RESTART_CD then
-            restartFired    = true
-            lastRestartTime = tick()
-            local ev = Net:FindFirstChild("MatchRestartSettingEvent")
-            if ev then pcall(function() ev:FireServer("Vote") end) end
+        if cur == 0 then restartFired = false; waveAtTargetSince = 0; return end
+        if cur >= targetWave and not restartFired then
+            -- Start or check the stability timer
+            if waveAtTargetSince == 0 then
+                waveAtTargetSince = tick()
+            elseif tick() - waveAtTargetSince >= WAVE_STABLE_SECS then
+                restartFired      = true
+                waveAtTargetSince = 0
+                local ev = Net:FindFirstChild("MatchRestartSettingEvent")
+                if ev then pcall(function() ev:FireServer("Vote") end) end
+            end
         elseif cur < targetWave then
-            restartFired = false
+            restartFired      = false
+            waveAtTargetSince = 0
         end
     end)
 
@@ -1156,7 +1168,7 @@ do
             for _, v in ipairs({...}) do
                 local n = (type(v)=="number" and v) or
                           (type(v)=="table" and tonumber(v.Wave or v.Current or v[1]))
-                if n and n <= 1 then restartFired = false; break end
+                if n and n <= 1 then restartFired = false; waveAtTargetSince = 0; break end
             end
         end)
     end
@@ -2160,7 +2172,7 @@ do
         if not getWavePurchase() then fired = {}; return end
         if not inGameMode() then fired = {}; return end
         local cur = currentWave
-        if cur == 0 then restartFired = false; return end  -- reset flag so it fires again after restart
+        if cur == 0 then restartFired = false; waveAtTargetSince = 0; return end  -- reset flag so it fires again after restart
         if cur < 5 then fired = {}; return end
         for _, w in ipairs(MILESTONES) do
             if cur >= w and not fired[w] then
