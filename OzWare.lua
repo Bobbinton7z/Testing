@@ -771,6 +771,10 @@ task.spawn(function()
             if not btn then return end
             btn.MouseButton1Click:Fire()
             pcall(function() btn.Activated:Fire() end)
+            pcall(function()
+                local conns = getconnections(btn.MouseButton1Click)
+                for _, c in ipairs(conns) do pcall(c.Function) end
+            end)
         end)
 
         -- Auto-retry end screen (exact path + remote)
@@ -1123,12 +1127,16 @@ do
 
     -- Read wave directly from label path every 0.25s
     -- (avoids stale currentWave when HUD connection dies on restart)
-    -- WaveInfoEvent("Show") fires when a wave ACTUALLY starts (not placement phase)
-    local waveInfoEvRst = Net:FindFirstChild("WaveInfoEvent")
-    if waveInfoEvRst then
-        waveInfoEvRst.OnClientEvent:Connect(function(action, data)
-            if action ~= "Show" then return end
-            local waveNum = (type(data) == "table" and data.Wave) or 0
+    -- NotificationEvent fires "Wave N" when enemies actually spawn (wave truly started)
+    -- More reliable than WaveInfoEvent("Show") which fires during pre-wave countdown
+    local notifEvRst = Net:FindFirstChild("ClientListeners") and
+                       Net.ClientListeners:FindFirstChild("NotificationEvent")
+    if notifEvRst then
+        notifEvRst.OnClientEvent:Connect(function(data)
+            if type(data) ~= "table" then return end
+            local txt = data.Text or ""
+            local waveNum = tonumber(txt:match("^Wave (%d+)$"))
+            if not waveNum then return end
             if waveNum > 0 then currentWave = waveNum end
             if not getRestartOnWave() then return end
             if waveNum >= targetWave and not restartFired then
@@ -1147,15 +1155,32 @@ do
         interfaceEvRst.OnClientEvent:Connect(function(action)
             if action ~= "Restarted" then return end
             restartFired = false
-            -- Dismiss the "match has been restarted" popup immediately
-            task.wait(0.1)
+            -- Dismiss the "match has been restarted" popup
+            task.wait(0.3)
             pcall(function()
                 local ps = realGui:FindFirstChild("PopupScreen")
                 if not ps then return end
-                local btn = safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button")
-                if not btn then return end
-                btn.MouseButton1Click:Fire()
-                pcall(function() btn.Activated:Fire() end)
+                -- Try Button and its siblings (Inner, Cancel frame itself)
+                local targets = {
+                    safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button"),
+                    safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Inner"),
+                    safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel"),
+                }
+                for _, obj in ipairs(targets) do
+                    if obj then
+                        pcall(function() obj.MouseButton1Click:Fire() end)
+                        pcall(function() obj.Activated:Fire() end)
+                        -- Try calling connected handlers directly
+                        pcall(function()
+                            local conns = getconnections(obj.MouseButton1Click)
+                            for _, c in ipairs(conns) do pcall(c.Function) end
+                        end)
+                        pcall(function()
+                            local conns = getconnections(obj.Activated)
+                            for _, c in ipairs(conns) do pcall(c.Function) end
+                        end)
+                    end
+                end
             end)
         end)
     end
