@@ -754,37 +754,24 @@ end
 
 
 
--- ── Cancel popup: watch Visible signal — far more reliable than polling ────
-task.spawn(function()
-    local popupScreen = realGui:WaitForChild("PopupScreen", 30)
-    if not popupScreen then return end
-    local function tryCancel()
-        if not popupScreen.Enabled then return end
-        task.wait(0.2)
-        pcall(function()
-            local container = safePath(popupScreen,
-                "BaseCancelFrame","Main","Buttons","Cancel","Button")
-            if not container then return end
-            -- Try the container itself first
-            pcall(function() container.MouseButton1Click:Fire() end)
-            -- Then search every descendant for the real clickable button
-            for _, child in ipairs(container:GetDescendants()) do
-                if child:IsA("TextButton") or child:IsA("ImageButton") then
-                    pcall(function() child.MouseButton1Click:Fire() end)
-                end
-            end
-        end)
-    end
-    popupScreen:GetPropertyChangedSignal("Enabled"):Connect(tryCancel)
-    tryCancel()
-end)
-
--- ── Auto-retry (exact path watchers) ────────────────────────────────────────
+-- ── Auto-retry + cancel popup (polling loop) ───────────────────────────────
 task.spawn(function()
     local pg = player.PlayerGui
 
     while task.wait(0.5) do
-        -- (cancel button handled via Visible signal — see setup below)
+        -- Auto-dismiss popup — fallback polling (checks both Enabled and Visible)
+        pcall(function()
+            local ps = realGui:FindFirstChild("PopupScreen")
+            if not ps then return end
+            local showing = false
+            pcall(function() showing = ps.Enabled end)
+            if not showing then pcall(function() showing = ps.Visible end) end
+            if not showing then return end
+            local btn = safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button")
+            if not btn then return end
+            btn.MouseButton1Click:Fire()
+            pcall(function() btn.Activated:Fire() end)
+        end)
 
         -- Auto-retry end screen (exact path + remote)
         -- Auto Next / Auto Retry — Next takes priority when available
@@ -1116,15 +1103,12 @@ do
     waveBox.TextXAlignment=Enum.TextXAlignment.Center; waveBox.ZIndex=4
     corner(waveBox,5)
 
-    local restartFired      = false
-    local waveAtTargetSince = 0   -- tick() when wave first reached target
-    local WAVE_STABLE_SECS  = 2   -- seconds wave must stay at target before firing
+    local restartFired = false
 
     local function setWave(n)
         local newTarget = math.clamp(n, 1, 999)
         if currentWave < newTarget then
-            restartFired      = false
-            waveAtTargetSince = 0
+            restartFired = false
         end
         targetWave           = newTarget
         waveBox.Text         = tostring(targetWave)
@@ -1139,47 +1123,42 @@ do
 
     -- Read wave directly from label path every 0.25s
     -- (avoids stale currentWave when HUD connection dies on restart)
-    -- Use Heartbeat + currentWave (reliable — path confirmed working)
-    RunSvc.Heartbeat:Connect(function()
-        if not getRestartOnWave() then restartFired = false; return end
-        if not inGameMode()       then restartFired = false; return end
-        local cur = currentWave
-        if cur == 0 then restartFired = false; waveAtTargetSince = 0; return end
-        if cur >= targetWave and not restartFired then
-            -- Start or check the stability timer
-            if waveAtTargetSince == 0 then
-                waveAtTargetSince = tick()
-            elseif tick() - waveAtTargetSince >= WAVE_STABLE_SECS then
-                restartFired      = true
-                waveAtTargetSince = 0
+    -- WaveInfoEvent("Show") fires when a wave ACTUALLY starts (not placement phase)
+    local waveInfoEvRst = Net:FindFirstChild("WaveInfoEvent")
+    if waveInfoEvRst then
+        waveInfoEvRst.OnClientEvent:Connect(function(action, data)
+            if action ~= "Show" then return end
+            local waveNum = (type(data) == "table" and data.Wave) or 0
+            if waveNum > 0 then currentWave = waveNum end
+            if not getRestartOnWave() then return end
+            if waveNum >= targetWave and not restartFired then
+                restartFired = true
                 local ev = Net:FindFirstChild("MatchRestartSettingEvent")
                 if ev then pcall(function() ev:FireServer("Vote") end) end
-            end
-        elseif cur < targetWave then
-            restartFired      = false
-            waveAtTargetSince = 0
-        end
-    end)
-
-    -- Reset restartFired when WaveInfoEvent fires wave 0 or 1 (new match started)
-    local waveEvRst = Net:FindFirstChild("WaveInfoEvent")
-    if waveEvRst then
-        waveEvRst.OnClientEvent:Connect(function(...)
-            for _, v in ipairs({...}) do
-                local n = (type(v)=="number" and v) or
-                          (type(v)=="table" and tonumber(v.Wave or v.Current or v[1]))
-                if n and n <= 1 then restartFired = false; waveAtTargetSince = 0; break end
+            elseif waveNum > 0 and waveNum < targetWave then
+                restartFired = false
             end
         end)
     end
 
-    -- Also hook MatchRestarted signal as extra safety net
-    pcall(function()
-        local gh = require(game.ReplicatedStorage.Modules.Gameplay.GameHandler)
-        if gh and gh.MatchRestarted then
-            gh.MatchRestarted:Connect(function() restartFired = false end)
-        end
-    end)
+    -- InterfaceEvent("Restarted") fires when match successfully restarts
+    local interfaceEvRst = Net:FindFirstChild("InterfaceEvent")
+    if interfaceEvRst then
+        interfaceEvRst.OnClientEvent:Connect(function(action)
+            if action ~= "Restarted" then return end
+            restartFired = false
+            -- Dismiss the "match has been restarted" popup immediately
+            task.wait(0.1)
+            pcall(function()
+                local ps = realGui:FindFirstChild("PopupScreen")
+                if not ps then return end
+                local btn = safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button")
+                if not btn then return end
+                btn.MouseButton1Click:Fire()
+                pcall(function() btn.Activated:Fire() end)
+            end)
+        end)
+    end
 end
 
 -- UTILITY
