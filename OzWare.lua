@@ -759,23 +759,7 @@ task.spawn(function()
     local pg = player.PlayerGui
 
     while task.wait(0.5) do
-        -- Auto-dismiss popup — fallback polling (checks both Enabled and Visible)
-        pcall(function()
-            local ps = realGui:FindFirstChild("PopupScreen")
-            if not ps then return end
-            local showing = false
-            pcall(function() showing = ps.Enabled end)
-            if not showing then pcall(function() showing = ps.Visible end) end
-            if not showing then return end
-            local btn = safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button")
-            if not btn then return end
-            btn.MouseButton1Click:Fire()
-            pcall(function() btn.Activated:Fire() end)
-            pcall(function()
-                local conns = getconnections(btn.MouseButton1Click)
-                for _, c in ipairs(conns) do pcall(c.Function) end
-            end)
-        end)
+        -- (cancel handled by InterfaceEvent("Restarted") retry loop)
 
         -- Auto-retry end screen (exact path + remote)
         -- Auto Next / Auto Retry — Next takes priority when available
@@ -1044,9 +1028,17 @@ makeCollapsible(gpSelBtn, gpList, "Gameplay")
 local _, getAutoSkipStart, onAutoSkipStart = toggle(gpList, "Auto Vote Start", 1, false, "game.autoskipstart")
 do
     local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
-    onAutoSkipStart(function()
+    onAutoSkipStart(function(enabled)
         local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
         if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
+        -- If just enabled mid-match, fire the vote button immediately once
+        if enabled then
+            task.spawn(function()
+                task.wait(0.3)
+                local rv = Net:FindFirstChild("MatchRestartSettingEvent")
+                if rv then pcall(function() rv:FireServer("Vote") end) end
+            end)
+        end
     end)
 end
 -- Auto Next
@@ -1118,6 +1110,12 @@ do
         waveBox.Text         = tostring(targetWave)
         settings.restartWave = targetWave
         saveSettings()
+        -- If we're already at or past the target, fire restart immediately
+        if getRestartOnWave() and currentWave >= newTarget and currentWave > 0 and not restartFired then
+            restartFired = true
+            local ev = Net:FindFirstChild("MatchRestartSettingEvent")
+            if ev then pcall(function() ev:FireServer("Vote") end) end
+        end
     end
 
     waveBox.FocusLost:Connect(function()
@@ -1127,59 +1125,70 @@ do
 
     -- Read wave directly from label path every 0.25s
     -- (avoids stale currentWave when HUD connection dies on restart)
-    -- NotificationEvent fires "Wave N" when enemies actually spawn (wave truly started)
-    -- More reliable than WaveInfoEvent("Show") which fires during pre-wave countdown
-    local notifEvRst = Net:FindFirstChild("ClientListeners") and
-                       Net.ClientListeners:FindFirstChild("NotificationEvent")
-    if notifEvRst then
-        notifEvRst.OnClientEvent:Connect(function(data)
-            if type(data) ~= "table" then return end
-            local txt = data.Text or ""
-            local waveNum = tonumber(txt:match("^Wave (%d+)$"))
-            if not waveNum then return end
-            if waveNum > 0 then currentWave = waveNum end
-            if not getRestartOnWave() then return end
-            if waveNum >= targetWave and not restartFired then
-                restartFired = true
-                local ev = Net:FindFirstChild("MatchRestartSettingEvent")
-                if ev then pcall(function() ev:FireServer("Vote") end) end
-            elseif waveNum > 0 and waveNum < targetWave then
-                restartFired = false
+    -- WaveInfoEvent sequence (from decompiled handler):
+    --   "Show" fires during intermission (pre-wave countdown) → track wave number
+    --   "Hide" fires when enemies actually spawn (real wave start) → trigger here
+    local pendingWave = 0
+    local waveInfoEvRst = Net:FindFirstChild("WaveInfoEvent")
+    if waveInfoEvRst then
+        waveInfoEvRst.OnClientEvent:Connect(function(action, data)
+            if action == "Show" then
+                -- Store upcoming wave number — don't trigger yet (still countdown)
+                pendingWave = (type(data) == "table" and data.Wave) or 0
+            elseif action == "Hide" then
+                -- Banner hides = enemies spawning = wave truly started
+                local waveNum = pendingWave
+                if waveNum > 0 then currentWave = waveNum end
+                if not getRestartOnWave() then return end
+                if waveNum >= targetWave and not restartFired then
+                    restartFired = true
+                    local ev = Net:FindFirstChild("MatchRestartSettingEvent")
+                    if ev then pcall(function() ev:FireServer("Vote") end) end
+                elseif waveNum > 0 and waveNum < targetWave then
+                    restartFired = false
+                end
             end
         end)
     end
 
-    -- InterfaceEvent("Restarted") fires when match successfully restarts
+    -- GameEvent("MatchStarted") = definitive new match signal — reset restart state
+    -- Also fires auto vote start button once so the vote happens immediately
+    local gameEvRst = Net:FindFirstChild("GameEvent")
+    if gameEvRst then
+        gameEvRst.OnClientEvent:Connect(function(action)
+            if action ~= "MatchStarted" then return end
+            restartFired = false
+            -- Fire vote-to-start button once; AutoSkipStart setting handles the rest
+            if getAutoSkipStart and getAutoSkipStart() then
+                task.spawn(function()
+                    task.wait(0.5)
+                    local rv = Net:FindFirstChild("MatchRestartSettingEvent")
+                    if rv then pcall(function() rv:FireServer("Vote") end) end
+                end)
+            end
+        end)
+    end
+
+    -- InterfaceEvent("Restarted") also resets — belt-and-suspenders
     local interfaceEvRst = Net:FindFirstChild("InterfaceEvent")
     if interfaceEvRst then
         interfaceEvRst.OnClientEvent:Connect(function(action)
             if action ~= "Restarted" then return end
-            restartFired = false
-            -- Dismiss the "match has been restarted" popup
-            task.wait(0.3)
-            pcall(function()
+            restartFired = false  -- reset FIRST before any wave notification can fire
+            -- Retry-loop to dismiss the popup — keeps trying until it disappears
+            task.spawn(function()
                 local ps = realGui:FindFirstChild("PopupScreen")
                 if not ps then return end
-                -- Try Button and its siblings (Inner, Cancel frame itself)
-                local targets = {
-                    safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button"),
-                    safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Inner"),
-                    safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel"),
-                }
-                for _, obj in ipairs(targets) do
-                    if obj then
-                        pcall(function() obj.MouseButton1Click:Fire() end)
-                        pcall(function() obj.Activated:Fire() end)
-                        -- Try calling connected handlers directly
-                        pcall(function()
-                            local conns = getconnections(obj.MouseButton1Click)
-                            for _, c in ipairs(conns) do pcall(c.Function) end
-                        end)
-                        pcall(function()
-                            local conns = getconnections(obj.Activated)
-                            for _, c in ipairs(conns) do pcall(c.Function) end
-                        end)
-                    end
+                local btn = safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button")
+                if not btn then return end
+                for _ = 1, 20 do          -- retry every 0.3s for up to 6 seconds
+                    task.wait(0.3)
+                    btn.MouseButton1Click:Fire()
+                    pcall(function() btn.Activated:Fire() end)
+                    pcall(function()
+                        local conns = getconnections(btn.MouseButton1Click)
+                        for _, c in ipairs(conns) do pcall(c.Function) end
+                    end)
                 end
             end)
         end)
