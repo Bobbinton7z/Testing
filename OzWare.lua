@@ -1986,25 +1986,8 @@ do
     local currentOffer = nil  -- stored card offer data
     local openedChestIds = {}
 
-    local function hookIgnore(folder)
-        folder.ChildAdded:Connect(function(model)
-            if not getAutoCollectChests() then return end
-            local n = model.Name
-            if n:sub(1,13) ~= "OdysseyChest_" then return end
-            if n:sub(1,17) == "OdysseyChestPing_" then return end
-            if openedChestIds[n] then return end
-            openedChestIds[n] = true
-            task.wait(0.1)
-            local sm = Net:FindFirstChild("StageMechanics")
-            local cr = sm and sm:FindFirstChild("OdysseyChest")
-            if cr then pcall(function() cr:FireServer("OpenChest", n:sub(14)) end) end
-        end)
-    end
-    local ignoreFolder = workspace:FindFirstChild("Ignore")
-    if ignoreFolder then hookIgnore(ignoreFolder) end
-    workspace.ChildAdded:Connect(function(c)
-        if c.Name == "Ignore" then openedChestIds = {}; hookIgnore(c) end
-    end)
+    -- Chest opening now handled via TreasureEvent.OnClientEvent("Begin") below
+    -- (removed old StageMechanics.OdysseyChest UUID approach — incorrect for Adventure)
 
     task.spawn(function()
         local ody = Net:WaitForChild("Odyssey", 120)
@@ -2051,20 +2034,25 @@ do
                 if action ~= "Offer" then return end
                 if not getSkipUnitReward() then return end
                 task.defer(function()
-                    pcall(function() unitEvC:FireServer("Skip", nil) end)
+                    pcall(function() unitEvC:FireServer("Skip", nil) end)  -- confirmed from decompile
                 end)
             end)
         end
 
-        -- Treasure: collect when floor begins
+        -- Treasure: confirmed from decompile — TreasureEvent:FireServer("OpenChest", N)
+        -- N is a 1-based chest index, TotalChests (default 6) says how many exist
         local treasureEvC = adv:FindFirstChild("TreasureEvent")
         if treasureEvC then
-            treasureEvC.OnClientEvent:Connect(function(action)
+            treasureEvC.OnClientEvent:Connect(function(action, data)
                 if action ~= "Begin" then return end
                 if not getAutoCollectChests() then return end
+                local totalChests = (type(data) == "table" and data.TotalChests) or 6
                 task.spawn(function()
                     task.wait(0.3)
-                    collectAndCloseTreasure()
+                    for i = 1, totalChests do
+                        pcall(function() treasureEvC:FireServer("OpenChest", i) end)
+                        task.wait(0.1)
+                    end
                 end)
             end)
         end
@@ -2083,16 +2071,11 @@ do
                 if action == "Offer" then
                     currentOffer = data
                     if not (getAutoPick() or getAutoRagnawCards()) then return end
-                    -- Calculate best card now so hook can use it immediately
+                    -- Pick randomly from available options
                     local opts = type(data) == "table" and data.Options
-                    local bestIdx, bestScore = 1, -1
-                    if type(opts) == "table" then
-                        for i, card in ipairs(opts) do
-                            if type(card) == "table" then
-                                local s = rarityScore(tostring(card.Rarity or ""):lower())
-                                if s > bestScore then bestIdx=i; bestScore=s end
-                            end
-                        end
+                    local bestIdx = 1
+                    if type(opts) == "table" and #opts > 0 then
+                        bestIdx = math.random(1, #opts)
                     end
                     pendingIdx  = bestIdx
                     pendingPick = true
