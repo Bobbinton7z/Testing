@@ -80,7 +80,8 @@ local HttpService  = game:GetService("HttpService")
 local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
 local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
-local realGui   = player:WaitForChild("PlayerGui")
+local realGui        = player:WaitForChild("PlayerGui")
+local currentStageData = {}  -- populated by GameEvent data and ShowEndScreenEvent
 
 -- Safe path traversal — accessible everywhere in the script
 local function safePath(root, ...)
@@ -754,31 +755,39 @@ end
 
 
 
--- ── Auto-retry + cancel popup (polling loop) ───────────────────────────────
-task.spawn(function()
-    local pg = player.PlayerGui
-
-    while task.wait(0.5) do
-        -- (cancel handled by InterfaceEvent("Restarted") retry loop)
-
-        -- Auto-retry end screen (exact path + remote)
-        -- Auto Next / Auto Retry — Next takes priority when available
-        pcall(function()
-            local endEv   = Net:FindFirstChild("EndScreen") and Net.EndScreen:FindFirstChild("VoteEvent")
-            local endScreen = pg:FindFirstChild("EndScreen")
-            if not (endScreen and endScreen.Enabled) then return end
-            local nextBtn  = safePath(endScreen,"Holder","Buttons","Next","Button")
-            local retryBtn = safePath(endScreen,"Holder","Buttons","Retry","Button")
-            if getAutoNext and getAutoNext() and nextBtn then
-                if endEv then endEv:FireServer("Next") end
-                nextBtn.MouseButton1Click:Fire()
-            elseif getAutoRetry and getAutoRetry() and retryBtn then
-                if endEv then endEv:FireServer("Retry") end
-                retryBtn.MouseButton1Click:Fire()
-            end
-        end)
-    end
-end)
+-- ── Auto Next / Auto Retry via ShowEndScreenEvent (event-driven) ─────────────
+-- ShowEndScreenEvent fires with full match data the instant end screen appears
+-- EndScreen is cloned fresh each time so polling FindFirstChild is unreliable
+-- Buttons use Activated not MouseButton1Click (confirmed from decompile)
+local _showEndEv = Net:FindFirstChild("EndScreen") and
+                   Net.EndScreen:FindFirstChild("ShowEndScreenEvent")
+if _showEndEv then
+    _showEndEv.OnClientEvent:Connect(function(data)
+        -- Store stage info for feature gating
+        if type(data) == "table" then
+            currentStageData = data
+        end
+        local endEv = Net.EndScreen:FindFirstChild("VoteEvent")
+        if not endEv then return end
+        task.wait(0.5)  -- let UI initialise
+        -- Auto Next takes priority over Retry when both are on
+        if getAutoNext and getAutoNext() then
+            endEv:FireServer("Next")
+            pcall(function()
+                local es = realGui:FindFirstChild("EndScreen")
+                local btn = es and safePath(es,"Holder","Buttons","Next","Button")
+                if btn then btn.Activated:Fire() end
+            end)
+        elseif getAutoRetry and getAutoRetry() then
+            endEv:FireServer("Retry")
+            pcall(function()
+                local es = realGui:FindFirstChild("EndScreen")
+                local btn = es and safePath(es,"Holder","Buttons","Retry","Button")
+                if btn then btn.Activated:Fire() end
+            end)
+        end
+    end)
+end
 
 
 -- ======================
@@ -1151,14 +1160,14 @@ do
         end)
     end
 
-    -- GameEvent("MatchStarted") = definitive new match signal — reset restart state
-    -- Also fires auto vote start button once so the vote happens immediately
-    local gameEvRst = Net:FindFirstChild("GameEvent")
-    if gameEvRst then
-        gameEvRst.OnClientEvent:Connect(function(action)
-            if action ~= "MatchStarted" then return end
+    -- Use GameHandler module signals directly (most reliable)
+    pcall(function()
+        local gh = require(game.ReplicatedStorage.Modules.Gameplay.GameHandler)
+        gh.MatchRestarted:Connect(function()
             restartFired = false
-            -- Fire vote-to-start button once; AutoSkipStart setting handles the rest
+        end)
+        gh.MatchStarted:Connect(function()
+            restartFired = false
             if getAutoSkipStart and getAutoSkipStart() then
                 task.spawn(function()
                     task.wait(0.5)
@@ -1167,29 +1176,51 @@ do
                 end)
             end
         end)
+    end)
+    -- Fallback: raw GameEvent if require fails in executor
+    local gameEvRst = Net:FindFirstChild("GameEvent")
+    if gameEvRst then
+        gameEvRst.OnClientEvent:Connect(function(action)
+            if action == "GameRestarted" or action == "MatchStarted" then
+                restartFired = false
+            end
+            if action == "MatchStarted" and getAutoSkipStart and getAutoSkipStart() then
+                task.spawn(function()
+                    task.wait(0.5)
+                    local rv = Net:FindFirstChild("MatchRestartSettingEvent")
+                    if rv then pcall(function() rv:FireServer("Vote") end) end
+                end)
+            end
+        end)
     end
-
-    -- InterfaceEvent("Restarted") also resets — belt-and-suspenders
+    -- InterfaceEvent("Restarted") — final safety net
     local interfaceEvRst = Net:FindFirstChild("InterfaceEvent")
     if interfaceEvRst then
         interfaceEvRst.OnClientEvent:Connect(function(action)
-            if action ~= "Restarted" then return end
-            restartFired = false  -- reset FIRST before any wave notification can fire
-            -- Retry-loop to dismiss the popup — keeps trying until it disappears
-            task.spawn(function()
+            if action == "Restarted" then restartFired = false end
+        end)
+    end
+
+
+    -- PopupEvent fires ("BaseCancelFrame", message) the instant the popup appears
+    -- Much more reliable than polling — click Cancel immediately on the event
+    local popupEv = Net:FindFirstChild("ClientListeners") and
+                    Net.ClientListeners:FindFirstChild("PopupEvent")
+    if popupEv then
+        popupEv.OnClientEvent:Connect(function(frameName)
+            if frameName ~= "BaseCancelFrame" then return end
+            task.wait(0.1)  -- one frame for UI to settle
+            pcall(function()
                 local ps = realGui:FindFirstChild("PopupScreen")
                 if not ps then return end
                 local btn = safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button")
                 if not btn then return end
-                for _ = 1, 20 do          -- retry every 0.3s for up to 6 seconds
-                    task.wait(0.3)
-                    btn.MouseButton1Click:Fire()
-                    pcall(function() btn.Activated:Fire() end)
-                    pcall(function()
-                        local conns = getconnections(btn.MouseButton1Click)
-                        for _, c in ipairs(conns) do pcall(c.Function) end
-                    end)
-                end
+                btn.MouseButton1Click:Fire()
+                pcall(function() btn.Activated:Fire() end)
+                pcall(function()
+                    local conns = getconnections(btn.Activated)
+                    for _, c in ipairs(conns) do pcall(c.Function) end
+                end)
             end)
         end)
     end
