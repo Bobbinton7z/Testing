@@ -2305,10 +2305,81 @@ local function requestNextRoom()
 end
 
 
+-- ── Module-level state — declared here so _doPick and all callbacks share the same upvalues ──
+local _currentOffer      = nil
+local _voteIsActive      = false
+local _advCardEvC        = nil
+local _endScreenShowing  = false
+local _endScreenEvRef    = nil
+local _shopIsOpen        = false
+local _shopEvRef         = nil
+local _unitRewardShowing = false
+local _unitRewardEvRef   = nil
+local getAutoUnitCard    = nil  -- assigned inside Unit Card do block below
+
+-- _doPick defined here so both the Unit Card do block and the event handlers share it
+local function _doPick(offer)
+    if not offer or not _advCardEvC then return end
+    local opts = type(offer) == "table" and offer.Options or {}
+    local kind = type(offer) == "table" and (offer.Kind or "") or ""
+    local bestIdx = nil
+
+    if kind == "Character" and getAutoUnitCard and getAutoUnitCard() then
+        if _unitCardsPicked >= 4 then
+            pcall(function() _advCardEvC:FireServer("Skip", 0) end)
+            return
+        end
+        local sel = _cardState.selectedUnit
+        local matched = {}
+        for i, card in ipairs(opts) do
+            if type(card) == "table" then
+                local charName = card.CharacterName or ""
+                if charName ~= "" and (not sel or charName == sel) then
+                    table.insert(matched, {idx=i, id=card.CardId or ""})
+                end
+            end
+        end
+        if #matched == 0 then
+            for i, card in ipairs(opts) do
+                if type(card) == "table" then
+                    table.insert(matched, {idx=i, id=card.CardId or ""})
+                end
+            end
+        end
+        if #matched > 0 then
+            for _, m in ipairs(matched) do
+                if _cardState.unitPriority[m.id] then bestIdx=m.idx; break end
+            end
+            if not bestIdx then bestIdx = matched[math.random(#matched)].idx end
+        end
+
+    elseif kind ~= "Character" and getAutoPick and getAutoPick() then
+        for i, card in ipairs(opts) do
+            if type(card) == "table" then
+                local name = card.CardName or card.CardId or card.DisplayName or ""
+                if _cardState.basicPriority[name] then bestIdx = i; break end
+            end
+        end
+        if not bestIdx and #opts > 0 then bestIdx = math.random(1, #opts) end
+    end
+
+    if not bestIdx then return end
+    local captured = bestIdx
+    task.spawn(function()
+        task.wait(0.2)
+        local ok = pcall(function() _advCardEvC:FireServer("Pick", captured) end)
+        if not ok then
+            task.wait(1)
+            pcall(function() _advCardEvC:FireServer("Pick", captured) end)
+        end
+    end)
+end
+
 -- ── Unit Card Section ─────────────────────────────────────────────
 do
 local unitCardSec = section(odysseyPage, "Unit Card", 2)
-local _, getAutoUnitCard, onAutoUnitCard = toggle(unitCardSec, "Auto Unit Card", 1, false, "odyssey.autounitcard")
+local _, _gAutoUnitCard, onAutoUnitCard = toggle(unitCardSec, "Auto Unit Card", 1, false, "odyssey.autounitcard")
+getAutoUnitCard = _gAutoUnitCard  -- assign to outer upvalue so _doPick can see it
 onAutoUnitCard(function(on)
     if on and _currentOffer then _doPick(_currentOffer) end
 end)
@@ -2478,76 +2549,6 @@ for i, card in ipairs(_BASIC_CARDS) do
 end
 end -- Basic Cards section
 
--- ── Module-level state for live-update callbacks ─────────────────
-local _currentOffer      = nil    -- current card offer
-local _voteIsActive      = false  -- adventure vote running
-local _advCardEvC        = nil    -- CardPickEvent remote
-local _endScreenShowing  = false  -- end screen currently visible
-local _endScreenEvRef    = nil    -- Net.EndScreen.VoteEvent remote
-local _shopIsOpen        = false  -- adventure shop currently open
-local _shopEvRef         = nil    -- ShopEvent remote
-local _unitRewardShowing = false  -- unit reward offer showing
-local _unitRewardEvRef   = nil    -- UnitRewardEvent remote
-
--- Shared pick logic — called from offer handler AND from toggle-on callbacks
-local function _doPick(offer)
-    if not offer or not _advCardEvC then return end
-    local opts = type(offer) == "table" and offer.Options or {}
-    local kind = type(offer) == "table" and (offer.Kind or "") or ""
-    local bestIdx = nil
-
-    if kind == "Character" and getAutoUnitCard and getAutoUnitCard() then
-        if _unitCardsPicked >= 4 then
-            pcall(function() _advCardEvC:FireServer("Skip", 0) end)
-            return
-        end
-        local sel = _cardState.selectedUnit
-        local matched = {}
-        for i, card in ipairs(opts) do
-            if type(card) == "table" then
-                local charName = card.CharacterName or ""
-                if charName ~= "" and (not sel or charName == sel) then
-                    table.insert(matched, {idx=i, id=card.CardId or ""})
-                end
-            end
-        end
-        if #matched == 0 then
-            for i, card in ipairs(opts) do
-                if type(card) == "table" then
-                    table.insert(matched, {idx=i, id=card.CardId or ""})
-                end
-            end
-        end
-        if #matched > 0 then
-            for _, m in ipairs(matched) do
-                if _cardState.unitPriority[m.id] then bestIdx=m.idx; break end
-            end
-            if not bestIdx then bestIdx = matched[math.random(#matched)].idx end
-        end
-
-    elseif kind ~= "Character" and getAutoPick and getAutoPick() then
-        -- CardName confirmed from Cobalt capture (field is CardName, not CardId/DisplayName)
-        for i, card in ipairs(opts) do
-            if type(card) == "table" then
-                local name = card.CardName or card.CardId or card.DisplayName or ""
-                if _cardState.basicPriority[name] then bestIdx = i; break end
-            end
-        end
-        if not bestIdx and #opts > 0 then bestIdx = math.random(1, #opts) end
-    end
-
-    if not bestIdx then return end
-    local captured = bestIdx
-    task.spawn(function()
-        task.wait(0.2)
-        local ok = pcall(function() _advCardEvC:FireServer("Pick", captured) end)
-        if not ok then
-            task.wait(1)
-            pcall(function() _advCardEvC:FireServer("Pick", captured) end)
-        end
-    end)
-end
-
 -- ── Odyssey automation: event-driven ────────────────────────────
 -- All connections use WaitForChild so lobby injection works too.
 do
@@ -2619,19 +2620,28 @@ do
             end)
         end
 
-        -- Treasure: confirmed from decompile — TreasureEvent:FireServer("OpenChest", N)
-        -- N is a 1-based chest index, TotalChests (default 6) says how many exist
+        -- Treasure: scan workspace.Ignore for OdysseyChest_<uuid> and fire per UUID
         local treasureEvC = adv:FindFirstChild("TreasureEvent")
         if treasureEvC then
-            treasureEvC.OnClientEvent:Connect(function(action, data)
+            treasureEvC.OnClientEvent:Connect(function(action)
                 if action ~= "Begin" then return end
                 if not getAutoCollectChests() then return end
-                local totalChests = (type(data) == "table" and data.TotalChests) or 6
                 task.spawn(function()
                     task.wait(0.3)
-                    for i = 1, totalChests do
-                        pcall(function() treasureEvC:FireServer("OpenChest", i) end)
-                        task.wait(0.1)
+                    local ignore = workspace:FindFirstChild("Ignore")
+                    if not ignore then return end
+                    local opened = {}
+                    for _, model in ipairs(ignore:GetChildren()) do
+                        local n = model.Name
+                        -- Match OdysseyChest_<uuid>, exclude OdysseyChestPing_
+                        if n:sub(1,13) == "OdysseyChest_" and n:sub(1,17) ~= "OdysseyChestPing_" then
+                            local uuid = n:sub(14)
+                            if not opened[uuid] then
+                                opened[uuid] = true
+                                pcall(function() treasureEvC:FireServer("OpenChest", uuid) end)
+                                task.wait(0.1)
+                            end
+                        end
                     end
                 end)
             end)
