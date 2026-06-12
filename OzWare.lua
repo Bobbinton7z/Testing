@@ -560,6 +560,11 @@ local function toggle(parent, text, order, default, saveKey)
     end)
 
     local callbacks={}
+    local function setter(val)
+        if enabled == val then return end
+        enabled = val; setSavedToggle(saveKey, enabled); apply()
+        for _, cb in ipairs(callbacks) do task.spawn(cb, enabled) end
+    end
     row.MouseButton1Click:Connect(function()
         enabled=not enabled; setSavedToggle(saveKey,enabled); apply()
         for _,cb in ipairs(callbacks) do task.spawn(cb,enabled) end
@@ -567,7 +572,7 @@ local function toggle(parent, text, order, default, saveKey)
     return row, function() return enabled end, function(cb)
         table.insert(callbacks,cb)
         if enabled then task.spawn(cb,true) end
-    end
+    end, setter
 end
 
 -- Smooth collapsible
@@ -1926,7 +1931,40 @@ local _RARITY_COLOR = {
     Mythic       = Color3.fromRGB(220,80,150),
 }
 
--- ODYSSEY TAB  (dynamic, no UUIDs)
+-- Pre-compute unique 1-N default rankings for basic cards.
+-- Lower rarity = lower rank, higher rarity = higher rank.
+-- Within same rarity, cards keep their order from _BASIC_CARDS.
+local _BASIC_CARD_DEFAULTS = {}
+do
+    local _rarityOrder = {Rare=1, Epic=2, Legendary=3, Mythic=4}
+    local _sorted = {}
+    for _, c in ipairs(_BASIC_CARDS) do table.insert(_sorted, c) end
+    table.sort(_sorted, function(a, b)
+        return (_rarityOrder[a.r] or 0) < (_rarityOrder[b.r] or 0)
+    end)
+    for rank, c in ipairs(_sorted) do
+        _BASIC_CARD_DEFAULTS[c.n] = rank
+    end
+end
+
+-- Refresher lookup tables so swap can update the other card's UI label instantly
+local _basicCardRefreshers = {}  -- {[cardName] = refreshFn}
+local _unitCardRefreshers  = {}  -- {[cardId]   = refreshFn}
+
+-- Swap helper: change key in tbl by delta, swapping with any other entry at the target value
+local function _doPrioritySwap(tbl, refreshers, key, delta)
+    local oldP = getPriority(tbl, key)
+    local newP = math.max(1, math.min(999, oldP + delta))
+    if newP == oldP then return end
+    for otherKey, _ in pairs(tbl) do
+        if otherKey ~= key and getPriority(tbl, otherKey) == newP then
+            tbl[otherKey] = oldP
+            if refreshers[otherKey] then refreshers[otherKey]() end
+            break
+        end
+    end
+    tbl[key] = newP
+end
 -- ======================
 do
 local odysseyPage = tabPages["Odyssey"]
@@ -1974,22 +2012,30 @@ onAutoNextRoom(function(on)
     end
 end)
 label(advListFrame, "Continues to the next room automatically", 2)
-local _, getAutoPick, onAutoPick = toggle(advListFrame, "Auto Select Cards", 3, true, "odyssey.auto_select_cards")
+local _, getAutoPick, onAutoPick, setAutoPick = toggle(advListFrame, "Auto Select Cards", 3, true, "odyssey.auto_select_cards")
 onAutoPick(function(on)
+    if on and getRandomPick and getRandomPick() then setRandomPick(false) end
     if not on then return end
     task.spawn(doPickFromPanel)
 end)
-label(advListFrame, "Picks highest rarity card when card screen appears", 4)
-local _, getAutoSkipShop, onAutoSkipShop = toggle(advListFrame, "Auto Skip Shop", 7, false, "odyssey.auto_skip_shop.v3")
+label(advListFrame, "Picks by priority ranking when card screen appears", 4)
+local _, getRandomPick, onRandomPick, setRandomPick = toggle(advListFrame, "Random Pick", 5, false, "odyssey.random_pick")
+onRandomPick(function(on)
+    if on and getAutoPick() then setAutoPick(false) end
+    if not on then return end
+    task.spawn(doPickFromPanel)
+end)
+label(advListFrame, "Picks a card randomly — mutually exclusive with Auto Select Cards", 6)
+local _, getAutoSkipShop, onAutoSkipShop = toggle(advListFrame, "Auto Skip Shop", 9, false, "odyssey.auto_skip_shop.v3")
 onAutoSkipShop(function(on)
     if on and _shopIsOpen and _shopEvRef then
         pcall(function() _shopEvRef:FireServer("Close", nil) end)
         _shopIsOpen = false
     end
 end)
-label(advListFrame, "Closes Stiches' Shop automatically", 8)
-local _, getAutoCollectChests, onAutoCollectChests = toggle(advListFrame, "Auto Collect Chests", 9, false, "odyssey.auto_collect_chest.v3")
-label(advListFrame, "Opens all chests in Treasure Room", 10)
+label(advListFrame, "Closes Stiches' Shop automatically", 10)
+local _, getAutoCollectChests, onAutoCollectChests = toggle(advListFrame, "Auto Collect Chests", 11, false, "odyssey.auto_collect_chest.v3")
+label(advListFrame, "Opens all chests in Treasure Room", 12)
 onAutoCollectChests(function(on)
     if not on then return end
     local remote = _treasureEvC  -- StageMechanics.OdysseyChest
@@ -2011,14 +2057,14 @@ onAutoCollectChests(function(on)
         end
     end)
 end)
-local _, getSkipUnitReward, onSkipUnitReward = toggle(advListFrame, "Skip Unit Reward", 11, false, "odyssey.skip_unit_reward")
+local _, getSkipUnitReward, onSkipUnitReward = toggle(advListFrame, "Skip Unit Reward", 13, false, "odyssey.skip_unit_reward")
 onSkipUnitReward(function(on)
     if on and _unitRewardShowing and _unitRewardEvRef then
         pcall(function() _unitRewardEvRef:FireServer("Skip", nil) end)
         _unitRewardShowing = false
     end
 end)
-label(advListFrame, "Skips unit reward panel after elite rooms", 12)
+label(advListFrame, "Skips unit reward panel after elite rooms", 14)
 
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
@@ -2379,12 +2425,23 @@ local function _normName(s)
     return s:lower():match("^%s*(.-)%s*$")  -- trim + lowercase
 end
 
+-- Returns numeric priority for a key; handles old boolean saves (true → 1)
+local function getPriority(tbl, key)
+    local v = tbl[key]
+    if not v then return 0 end
+    if v == true then return 1 end  -- backward compat with old boolean saves
+    return tonumber(v) or 0
+end
+
 -- _doPick defined here so both the Unit Card do block and the event handlers share it
 local function _doPick(offer)
     if not offer or not _advCardEvC then return end
     local opts = type(offer) == "table" and offer.Options or {}
     local kind = type(offer) == "table" and (offer.Kind or "") or ""
     local bestIdx = nil
+
+    -- Random Pick and Auto Select Cards are mutually exclusive (enforced by UI)
+    local useRandom = getRandomPick and getRandomPick()
 
     if kind == "Character" and getAutoUnitCard and getAutoUnitCard() then
         if _unitCardsPicked >= 4 then
@@ -2409,37 +2466,52 @@ local function _doPick(offer)
             end
         end
         if #matched > 0 then
-            for _, m in ipairs(matched) do
-                if _cardState.unitPriority[m.id] then bestIdx=m.idx; break end
+            if useRandom then
+                bestIdx = matched[math.random(#matched)].idx
+            else
+                local bestPrio = -1
+                for _, m in ipairs(matched) do
+                    local p = getPriority(_cardState.unitPriority, m.id)
+                    if p > bestPrio then bestPrio = p; bestIdx = m.idx end
+                end
+                if bestPrio == 0 then bestIdx = matched[math.random(#matched)].idx end
             end
-            if not bestIdx then bestIdx = matched[math.random(#matched)].idx end
         end
 
-    elseif kind ~= "Character" and getAutoPick and getAutoPick() then
-        for i, card in ipairs(opts) do
-            if type(card) == "table" then
-                local name     = card.CardName or card.CardId or card.DisplayName or ""
-                local normCard = _normName(name)
-                -- Check exact match first, then normalized match
-                local hit = _cardState.basicPriority[name]
-                if not hit then
-                    for storedName, _ in pairs(_cardState.basicPriority) do
-                        if _normName(storedName) == normCard then hit = true; break end
+    elseif kind ~= "Character" and ((getAutoPick and getAutoPick()) or useRandom) then
+        if useRandom then
+            if #opts > 0 then bestIdx = math.random(1, #opts) end
+        else
+            local bestPrio = 0
+            for i, card in ipairs(opts) do
+                if type(card) == "table" then
+                    local name     = card.CardName or card.CardId or card.DisplayName or ""
+                    local normCard = _normName(name)
+                    local p = getPriority(_cardState.basicPriority, name)
+                    if p == 0 then
+                        for storedName, _ in pairs(_cardState.basicPriority) do
+                            if _normName(storedName) == normCard then
+                                p = getPriority(_cardState.basicPriority, storedName); break
+                            end
+                        end
                     end
+                    if p > bestPrio then bestPrio = p; bestIdx = i end
                 end
-                if hit then bestIdx = i; break end
             end
+            if not bestIdx and #opts > 0 then bestIdx = math.random(1, #opts) end
         end
-        if not bestIdx and #opts > 0 then bestIdx = math.random(1, #opts) end
     end
 
     if not bestIdx then return end
-    local captured = bestIdx
+    local captured  = bestIdx
+    local isUnitCard = kind == "Character"
     task.spawn(function()
         task.wait(0.2)
-        local ok = pcall(function() _advCardEvC:FireServer("Pick", captured) end)
-        if not ok then
-            task.wait(1)
+        -- Unit cards: first fire selects, second fire confirms (card 1 is pre-selected
+        -- so firing twice is harmless for it; cards 2/3 require two fires to pick)
+        pcall(function() _advCardEvC:FireServer("Pick", captured) end)
+        if isUnitCard then
+            task.wait(0.35)
             pcall(function() _advCardEvC:FireServer("Pick", captured) end)
         end
     end)
@@ -2450,36 +2522,34 @@ local _pickFired       = false  -- set when doPickFromPanel fires, cleared on gr
 -- GUI-based card pick fallback: used when _currentOffer is nil
 -- Reads card buttons from the panel and matches against priority via text blob
 local function doPickFromPanel()
-    if not (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then return end
+    local useRandom = getRandomPick and getRandomPick()
+    if not (getAutoPick() or (getAutoUnitCard and getAutoUnitCard()) or useRandom) then return end
     local ev = getONet("CardPickEvent")
     if not ev then return end
 
-    -- If we have offer data, delegate to _doPick (handles full priority logic)
     if _currentOffer then
         _doPick(_currentOffer)
         return
     end
 
-    -- Offer data unavailable — read from GUI
     local cards = getCardButtons()
     if not cards or #cards == 0 then return end
 
     local bestIdx = nil
-    if getAutoPick() then
-        -- Try to find a priority card by substring matching against the text blob
-        -- (blob includes card name + rarity + description concatenated)
+    if useRandom or not getAutoPick() then
+        bestIdx = math.random(1, #cards)
+    else
+        local bestPrio = 0
         for i, c in ipairs(cards) do
-            local blob = c.text  -- already lowercased by getCardButtons
+            local blob = c.text
             for storedName, _ in pairs(_cardState.basicPriority) do
-                if blob:find(_normName(storedName), 1, true) then
-                    bestIdx = i; break
+                local p = getPriority(_cardState.basicPriority, storedName)
+                if p > bestPrio and blob:find(_normName(storedName), 1, true) then
+                    bestPrio = p; bestIdx = i
                 end
             end
-            if bestIdx then break end
         end
         if not bestIdx then bestIdx = math.random(1, #cards) end
-    elseif getAutoUnitCard and getAutoUnitCard() then
-        bestIdx = math.random(1, #cards)
     end
 
     if not bestIdx then return end
@@ -2500,20 +2570,22 @@ local function hookCardPanel()
     local hud = getAdventureHUD()
     if not hud then return end
 
+    local function shouldPick()
+        return getAutoPick() or (getAutoUnitCard and getAutoUnitCard()) or (getRandomPick and getRandomPick())
+    end
+
     local function connectPanel(panel)
         if _cardPanelHooked then return end
         _cardPanelHooked = true
         panel:GetPropertyChangedSignal("Visible"):Connect(function()
             if not panel.Visible then _pickFired = false; return end
-            if not (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then return end
-            if _currentOffer then return end  -- event path handles it
+            if not shouldPick() then return end
+            if _currentOffer then return end
             if _pickFired then return end
             task.wait(0.2)
             task.spawn(doPickFromPanel)
         end)
-        -- Fire immediately if already visible
-        if panel.Visible and not _currentOffer and not _pickFired
-        and (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then
+        if panel.Visible and not _currentOffer and not _pickFired and shouldPick() then
             task.spawn(doPickFromPanel)
         end
     end
@@ -2554,24 +2626,39 @@ local function makeCardRow(parent, cardId, cardName, rarity, order, priorityTbl)
     end
     local dot=Instance.new("Frame",row); dot.Size=UDim2.new(0,6,0,6); dot.Position=UDim2.new(0,10,0.5,-3)
     dot.BackgroundColor3=_RARITY_COLOR[rarity] or C.SUBTEXT; dot.BorderSizePixel=0; dot.ZIndex=5; corner(dot,3)
-    local lbl=Instance.new("TextLabel",row); lbl.Size=UDim2.new(1,-48,1,0); lbl.Position=UDim2.new(0,22,0,0)
-    lbl.BackgroundTransparency=1; lbl.Text=cardName
-    lbl.TextColor3=priorityTbl[cardId] and C.TEXT or C.SUBTEXT
+    local lbl=Instance.new("TextLabel",row); lbl.Size=UDim2.new(1,-78,1,0); lbl.Position=UDim2.new(0,22,0,0)
+    lbl.BackgroundTransparency=1; lbl.Text=cardName; lbl.TextColor3=C.TEXT
     lbl.TextSize=12; lbl.Font=FONT_REG; lbl.TextXAlignment=Enum.TextXAlignment.Left
     lbl.ZIndex=5; lbl.TextTruncate=Enum.TextTruncate.AtEnd
-    local circ=Instance.new("Frame",row); circ.Size=UDim2.new(0,14,0,14); circ.Position=UDim2.new(1,-24,0.5,-7)
-    circ.BackgroundColor3=priorityTbl[cardId] and C.ACCENT or Color3.fromRGB(55,55,62)
-    circ.BorderSizePixel=0; circ.ZIndex=5; corner(circ,7)
-    local btn=Instance.new("TextButton",row); btn.Size=UDim2.new(1,0,1,0)
-    btn.BackgroundTransparency=1; btn.Text=""; btn.ZIndex=6; btn.AutoButtonColor=false
-    btn.MouseButton1Click:Connect(function()
-        if priorityTbl[cardId] then priorityTbl[cardId]=nil else priorityTbl[cardId]=true end
-        tween(circ,{BackgroundColor3=priorityTbl[cardId] and C.ACCENT or Color3.fromRGB(55,55,62)},0.1)
-        lbl.TextColor3=priorityTbl[cardId] and C.TEXT or C.SUBTEXT
-        _saveCardState()
+    local numLbl=Instance.new("TextLabel",row); numLbl.Size=UDim2.new(0,22,0,20)
+    numLbl.Position=UDim2.new(1,-48,0.5,-10); numLbl.BackgroundTransparency=1
+    numLbl.TextSize=12; numLbl.Font=FONT_SEMI; numLbl.ZIndex=6
+    numLbl.TextXAlignment=Enum.TextXAlignment.Center
+    local function refreshUC()
+        local p=getPriority(priorityTbl,cardId)
+        numLbl.Text=tostring(p); numLbl.TextColor3=C.ACCENT
+        lbl.TextColor3=C.TEXT
+    end
+    refreshUC()
+    _unitCardRefreshers[cardId] = refreshUC  -- register for swap updates
+    local minusBtn=Instance.new("TextButton",row); minusBtn.Size=UDim2.new(0,22,0,22)
+    minusBtn.Position=UDim2.new(1,-72,0.5,-11); minusBtn.BackgroundColor3=Color3.fromRGB(40,40,45)
+    minusBtn.BorderSizePixel=0; minusBtn.Text="-"; minusBtn.TextSize=14; minusBtn.Font=FONT_BOLD
+    minusBtn.TextColor3=C.SUBTEXT; minusBtn.ZIndex=6; minusBtn.AutoButtonColor=false; corner(minusBtn,4)
+    local plusBtn=Instance.new("TextButton",row); plusBtn.Size=UDim2.new(0,22,0,22)
+    plusBtn.Position=UDim2.new(1,-24,0.5,-11); plusBtn.BackgroundColor3=Color3.fromRGB(40,40,45)
+    plusBtn.BorderSizePixel=0; plusBtn.Text="+"; plusBtn.TextSize=14; plusBtn.Font=FONT_BOLD
+    plusBtn.TextColor3=C.SUBTEXT; plusBtn.ZIndex=6; plusBtn.AutoButtonColor=false; corner(plusBtn,4)
+    minusBtn.MouseButton1Click:Connect(function()
+        _doPrioritySwap(priorityTbl, _unitCardRefreshers, cardId, -1)
+        refreshUC(); _saveCardState()
     end)
-    btn.MouseEnter:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(38,38,38)},0.08) end)
-    btn.MouseLeave:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08) end)
+    plusBtn.MouseButton1Click:Connect(function()
+        _doPrioritySwap(priorityTbl, _unitCardRefreshers, cardId, 1)
+        refreshUC(); _saveCardState()
+    end)
+    row.MouseEnter:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(38,38,38)},0.08) end)
+    row.MouseLeave:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08) end)
 end
 
 -- Chip row (horizontal scroll, single-select)
@@ -2610,6 +2697,20 @@ local function rebuildUnitCards()
     end
     if not selUnit then return end
     local cards = _UNIT_CARD_DATA[selUnit] or {}
+    -- Compute unique 1-N defaults for this unit's cards (higher rarity = higher rank)
+    local _rarityOrder = {Rare=1, Epic=2, Legendary=3, Mythic=4}
+    local _sortedU = {}
+    for _, c in ipairs(cards) do table.insert(_sortedU, c) end
+    table.sort(_sortedU, function(a, b)
+        return (_rarityOrder[a.r] or 0) < (_rarityOrder[b.r] or 0)
+    end)
+    for rank, c in ipairs(_sortedU) do
+        if getPriority(_cardState.unitPriority, c.id) == 0 then
+            _cardState.unitPriority[c.id] = rank
+        end
+    end
+    _saveCardState()
+    -- Build rows
     for i, card in ipairs(cards) do
         makeCardRow(ucList, card.id, card.n, card.r, i, _cardState.unitPriority)
     end
@@ -2684,27 +2785,45 @@ for i, card in ipairs(_BASIC_CARDS) do
        s.BackgroundColor3=Color3.fromRGB(40,40,45); s.BorderSizePixel=0; s.ZIndex=5 end
     local dot=Instance.new("Frame",row); dot.Size=UDim2.new(0,6,0,6); dot.Position=UDim2.new(0,10,0.5,-3)
     dot.BackgroundColor3=_RARITY_COLOR[card.r] or C.SUBTEXT; dot.BorderSizePixel=0; dot.ZIndex=5; corner(dot,3)
-    local lbl=Instance.new("TextLabel",row); lbl.Size=UDim2.new(1,-48,1,0); lbl.Position=UDim2.new(0,22,0,0)
+    local lbl=Instance.new("TextLabel",row); lbl.Size=UDim2.new(1,-78,1,0); lbl.Position=UDim2.new(0,22,0,0)
     lbl.BackgroundTransparency=1; lbl.Text=card.n
-    lbl.TextColor3=_cardState.basicPriority[card.n] and C.TEXT or C.SUBTEXT
     lbl.TextSize=12; lbl.Font=FONT_REG; lbl.TextXAlignment=Enum.TextXAlignment.Left
-    lbl.ZIndex=5; lbl.TextTruncate=Enum.TextTruncate.AtEnd
-    local circ=Instance.new("Frame",row); circ.Size=UDim2.new(0,14,0,14); circ.Position=UDim2.new(1,-24,0.5,-7)
-    circ.BackgroundColor3=_cardState.basicPriority[card.n] and C.ACCENT or Color3.fromRGB(55,55,62)
-    circ.BorderSizePixel=0; circ.ZIndex=5; corner(circ,7)
+    lbl.ZIndex=5; lbl.TextTruncate=Enum.TextTruncate.AtEnd; lbl.TextColor3=C.TEXT
     local cardName = card.n
-    local btn=Instance.new("TextButton",row); btn.Size=UDim2.new(1,0,1,0)
-    btn.BackgroundTransparency=1; btn.Text=""; btn.ZIndex=6; btn.AutoButtonColor=false
-    btn.MouseButton1Click:Connect(function()
-        if _cardState.basicPriority[cardName] then _cardState.basicPriority[cardName]=nil
-        else _cardState.basicPriority[cardName]=true end
-        tween(circ,{BackgroundColor3=_cardState.basicPriority[cardName] and C.ACCENT or Color3.fromRGB(55,55,62)},0.1)
-        lbl.TextColor3=_cardState.basicPriority[cardName] and C.TEXT or C.SUBTEXT
-        _saveCardState()
+    -- Init unique rank on first run (never 0)
+    if getPriority(_cardState.basicPriority, cardName) == 0 then
+        _cardState.basicPriority[cardName] = _BASIC_CARD_DEFAULTS[cardName] or 1
+    end
+    local numLbl=Instance.new("TextLabel",row); numLbl.Size=UDim2.new(0,22,0,20)
+    numLbl.Position=UDim2.new(1,-48,0.5,-10); numLbl.BackgroundTransparency=1
+    numLbl.TextSize=12; numLbl.Font=FONT_SEMI; numLbl.ZIndex=6
+    numLbl.TextXAlignment=Enum.TextXAlignment.Center
+    local function refreshBC()
+        local p=getPriority(_cardState.basicPriority,cardName)
+        numLbl.Text=tostring(p); numLbl.TextColor3=C.ACCENT
+    end
+    refreshBC()
+    _basicCardRefreshers[cardName] = refreshBC  -- register for swap updates
+    local minusBtn=Instance.new("TextButton",row); minusBtn.Size=UDim2.new(0,22,0,22)
+    minusBtn.Position=UDim2.new(1,-72,0.5,-11); minusBtn.BackgroundColor3=Color3.fromRGB(40,40,45)
+    minusBtn.BorderSizePixel=0; minusBtn.Text="-"; minusBtn.TextSize=14; minusBtn.Font=FONT_BOLD
+    minusBtn.TextColor3=C.SUBTEXT; minusBtn.ZIndex=6; minusBtn.AutoButtonColor=false; corner(minusBtn,4)
+    local plusBtn=Instance.new("TextButton",row); plusBtn.Size=UDim2.new(0,22,0,22)
+    plusBtn.Position=UDim2.new(1,-24,0.5,-11); plusBtn.BackgroundColor3=Color3.fromRGB(40,40,45)
+    plusBtn.BorderSizePixel=0; plusBtn.Text="+"; plusBtn.TextSize=14; plusBtn.Font=FONT_BOLD
+    plusBtn.TextColor3=C.SUBTEXT; plusBtn.ZIndex=6; plusBtn.AutoButtonColor=false; corner(plusBtn,4)
+    minusBtn.MouseButton1Click:Connect(function()
+        _doPrioritySwap(_cardState.basicPriority, _basicCardRefreshers, cardName, -1)
+        refreshBC(); _saveCardState()
     end)
-    btn.MouseEnter:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(38,38,38)},0.08) end)
-    btn.MouseLeave:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08) end)
+    plusBtn.MouseButton1Click:Connect(function()
+        _doPrioritySwap(_cardState.basicPriority, _basicCardRefreshers, cardName, 1)
+        refreshBC(); _saveCardState()
+    end)
+    row.MouseEnter:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(38,38,38)},0.08) end)
+    row.MouseLeave:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08) end)
 end
+_saveCardState()  -- persist first-run defaults immediately
 end -- Basic Cards section
 
 -- ── Odyssey automation: event-driven ────────────────────────────
