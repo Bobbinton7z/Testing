@@ -2140,7 +2140,8 @@ end
 local function findPanel(name)
     local hud = getAdventureHUD()
     if not hud then return nil end
-    return hud:FindFirstChild(name)
+    -- Recursive search since panels are nested under MatchPanels.Panels etc.
+    return hud:FindFirstChild(name, true)
 end
 
 -- A panel is "open" when Visible=true
@@ -2444,7 +2445,6 @@ local function _doPick(offer)
     end)
 end
 
-local _cardPanelHooked = false  -- prevents double-hooking CardPickPanel
 local _pickFired       = false  -- set when doPickFromPanel fires, cleared on grant/skip
 
 -- GUI-based card pick fallback: used when _currentOffer is nil
@@ -2493,30 +2493,46 @@ local function doPickFromPanel()
     end)
 end
 
--- Hook CardPickPanel visibility instead of polling — fires only when panel appears,
--- no continuous background work. Handles missed Offer events cleanly.
+-- Hook CardPickPanel visibility — fires only when panel appears.
+-- Uses DescendantAdded because panel is created dynamically on each offer.
 local _cardPanelHooked = false
 local function hookCardPanel()
-    if _cardPanelHooked then return end
     local hud = getAdventureHUD()
     if not hud then return end
+
+    local function connectPanel(panel)
+        if _cardPanelHooked then return end
+        _cardPanelHooked = true
+        panel:GetPropertyChangedSignal("Visible"):Connect(function()
+            if not panel.Visible then _pickFired = false; return end
+            if not (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then return end
+            if _currentOffer then return end  -- event path handles it
+            if _pickFired then return end
+            task.wait(0.2)
+            task.spawn(doPickFromPanel)
+        end)
+        -- Fire immediately if already visible
+        if panel.Visible and not _currentOffer and not _pickFired
+        and (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then
+            task.spawn(doPickFromPanel)
+        end
+    end
+
+    -- Panel might already exist
     local panel = hud:FindFirstChild("CardPickPanel", true)
                 or hud:FindFirstChild("ChooseCard", true)
-    if not panel then return end
-    _cardPanelHooked = true
-    panel:GetPropertyChangedSignal("Visible"):Connect(function()
-        if not panel.Visible then _pickFired = false; return end
-        if not (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then return end
-        if _currentOffer then return end  -- event-driven path already handling it
-        if _pickFired then return end      -- already fired for this offer
-        task.wait(0.2)
-        task.spawn(doPickFromPanel)
-    end)
-    -- Fire immediately if already visible (script executed during pick phase)
-    if panel.Visible and not _currentOffer and not _pickFired
-    and (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then
-        task.spawn(doPickFromPanel)
+    if panel then
+        connectPanel(panel)
+        return
     end
+
+    -- Panel doesn't exist yet — watch for it to be added dynamically
+    hud.DescendantAdded:Connect(function(d)
+        if not _cardPanelHooked
+        and (d.Name == "CardPickPanel" or d.Name == "ChooseCard") then
+            connectPanel(d)
+        end
+    end)
 end
 do
 local unitCardSec = section(odysseyPage, "Unit Card", 2)
@@ -2768,7 +2784,7 @@ do
         -- StageMechanics.OdysseyChest:FireServer("OpenChest", id)
         -- Chest ID is read from model's "Id" attribute (preserves original type).
         local treasureEvC = adv:FindFirstChild("TreasureEvent")
-        local stageMech   = Net.Parent:FindFirstChild("StageMechanics")
+        local stageMech   = Net:FindFirstChild("StageMechanics")
         local chestRemote = stageMech and stageMech:FindFirstChild("OdysseyChest")
         _treasureEvC = chestRemote  -- expose for live toggle-on handler
 
