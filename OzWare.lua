@@ -1046,6 +1046,21 @@ do
         local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
         if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
     end)
+    -- Server may reset AutoSkipStart to false — re-enable if our toggle is still on
+    local incomingSkipStartEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+    if incomingSkipStartEv then
+        incomingSkipStartEv.OnClientEvent:Connect(function(action, data)
+            if action ~= "Update" then return end
+            if type(data) ~= "table" then return end
+            if data[1] == "AutoSkipStart" and data[2] == false and getAutoSkipStart() then
+                local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+                if ev then
+                    task.wait(0.1)
+                    pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end)
+                end
+            end
+        end)
+    end
 end
 -- Auto Next
 local _, getAutoNext, onAutoNext = toggle(gpList, "Auto Next", 2, false, "game.autonext")
@@ -1962,12 +1977,7 @@ label(advListFrame, "Continues to the next room automatically", 2)
 local _, getAutoPick, onAutoPick = toggle(advListFrame, "Auto Select Cards", 3, true, "odyssey.auto_select_cards")
 onAutoPick(function(on)
     if not on then return end
-    if _currentOffer then
-        _doPick(_currentOffer)
-    elseif _advCardEvC then
-        -- Missed the Offer event — ask server to re-send current offer
-        pcall(function() _advCardEvC:FireServer("RequestOffer") end)
-    end
+    task.spawn(doPickFromPanel)
 end)
 label(advListFrame, "Picks highest rarity card when card screen appears", 4)
 local _, getAutoSkipShop, onAutoSkipShop = toggle(advListFrame, "Auto Skip Shop", 7, false, "odyssey.auto_skip_shop.v3")
@@ -2435,13 +2445,86 @@ local function _doPick(offer)
     end)
 end
 
--- ── Unit Card Section ─────────────────────────────────────────────
+local _cardPanelHooked = false  -- prevents double-hooking CardPickPanel
+local _pickFired       = false  -- set when doPickFromPanel fires, cleared on grant/skip
+
+-- GUI-based card pick fallback: used when _currentOffer is nil
+-- Reads card buttons from the panel and matches against priority via text blob
+local function doPickFromPanel()
+    if not (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then return end
+    local ev = getONet("CardPickEvent")
+    if not ev then return end
+
+    -- If we have offer data, delegate to _doPick (handles full priority logic)
+    if _currentOffer then
+        _doPick(_currentOffer)
+        return
+    end
+
+    -- Offer data unavailable — read from GUI
+    local cards = getCardButtons()
+    if not cards or #cards == 0 then return end
+
+    local bestIdx = nil
+    if getAutoPick() then
+        -- Try to find a priority card by substring matching against the text blob
+        -- (blob includes card name + rarity + description concatenated)
+        for i, c in ipairs(cards) do
+            local blob = c.text  -- already lowercased by getCardButtons
+            for storedName, _ in pairs(_cardState.basicPriority) do
+                if blob:find(_normName(storedName), 1, true) then
+                    bestIdx = i; break
+                end
+            end
+            if bestIdx then break end
+        end
+        if not bestIdx then bestIdx = math.random(1, #cards) end
+    elseif getAutoUnitCard and getAutoUnitCard() then
+        bestIdx = math.random(1, #cards)
+    end
+
+    if not bestIdx then return end
+    _pickFired = true
+    local idx = bestIdx
+    task.spawn(function()
+        task.wait(0.2)
+        pcall(function() ev:FireServer("Pick", idx) end)
+        task.wait(0.3)
+        pcall(function() ev:FireServer("Pick", idx) end)
+    end)
+end
+
+-- Hook CardPickPanel visibility instead of polling — fires only when panel appears,
+-- no continuous background work. Handles missed Offer events cleanly.
+local _cardPanelHooked = false
+local function hookCardPanel()
+    if _cardPanelHooked then return end
+    local hud = getAdventureHUD()
+    if not hud then return end
+    local panel = hud:FindFirstChild("CardPickPanel", true)
+                or hud:FindFirstChild("ChooseCard", true)
+    if not panel then return end
+    _cardPanelHooked = true
+    panel:GetPropertyChangedSignal("Visible"):Connect(function()
+        if not panel.Visible then _pickFired = false; return end
+        if not (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then return end
+        if _currentOffer then return end  -- event-driven path already handling it
+        if _pickFired then return end      -- already fired for this offer
+        task.wait(0.2)
+        task.spawn(doPickFromPanel)
+    end)
+    -- Fire immediately if already visible (script executed during pick phase)
+    if panel.Visible and not _currentOffer and not _pickFired
+    and (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then
+        task.spawn(doPickFromPanel)
+    end
+end
 do
 local unitCardSec = section(odysseyPage, "Unit Card", 2)
 local _, _gAutoUnitCard, onAutoUnitCard = toggle(unitCardSec, "Auto Unit Card", 1, false, "odyssey.autounitcard")
 getAutoUnitCard = _gAutoUnitCard  -- assign to outer upvalue so _doPick can see it
 onAutoUnitCard(function(on)
-    if on and _currentOffer then _doPick(_currentOffer) end
+    if on then task.spawn(doPickFromPanel) end
 end)
 label(unitCardSec, "Picks cards for selected unit; skips after 4 per run", 2)
 
@@ -2739,14 +2822,19 @@ do
             cardEvC.OnClientEvent:Connect(function(action, data)
                 if action == "Offer" then
                     _currentOffer = data
+                    _pickFired    = false
                     _doPick(data)
                 elseif action == "CharacterCardGranted" then
                     _unitCardsPicked = _unitCardsPicked + 1
                     _currentOffer = nil
+                    _pickFired    = false
                 elseif action == "BasicCardGranted" or action == "Skipped" then
                     _currentOffer = nil
+                    _pickFired    = false
                 end
             end)
+            -- Hook panel visibility now that remotes are ready
+            task.spawn(hookCardPanel)
         end
 
         -- ── Startup state check ───────────────────────────────────────
@@ -2784,16 +2872,9 @@ do
             end
         end
 
-        -- Cards: if card pick panel is already open, request current offer
-        if cardEvC and (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then
-            local hud = getAdventureHUD()
-            local cardPanel = hud and (
-                hud:FindFirstChild("CardPickPanel", true) or
-                hud:FindFirstChild("ChooseCard", true)
-            )
-            if cardPanel and cardPanel.Visible then
-                pcall(function() cardEvC:FireServer("RequestOffer") end)
-            end
+        -- Cards: hook panel visibility for missed-event recovery
+        if getAutoPick() or (getAutoUnitCard and getAutoUnitCard()) then
+            task.spawn(hookCardPanel)
         end
 
         -- Shop: if shop already open, close it
