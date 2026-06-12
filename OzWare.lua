@@ -1045,14 +1045,6 @@ do
     onAutoSkipStart(function(enabled)
         local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
         if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
-        -- If just enabled mid-match, fire the vote button immediately once
-        if enabled then
-            task.spawn(function()
-                task.wait(0.3)
-                local rv = Net:FindFirstChild("MatchRestartSettingEvent")
-                if rv then pcall(function() rv:FireServer("Vote") end) end
-            end)
-        end
     end)
 end
 -- Auto Next
@@ -1069,10 +1061,36 @@ end)
 local _, getSkipWave, onSkipWave = toggle(gpList, "Auto Skip Wave", 4, false, "game.skipwave")
 do
     local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
-    onSkipWave(function()
+    onSkipWave(function(on)
         local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
-        if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end) end
+        if not ev then return end
+        -- Sync toggle state with server immediately
+        -- Read current server state first via a no-op, then set correct state
+        if on then
+            pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
+        else
+            pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
+        end
     end)
+    -- Server resets AutoSkipWaves=false after every wave skip
+    -- Listen for that reset and re-enable if our toggle is still on
+    local incomingSettingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+    if incomingSettingsEv then
+        incomingSettingsEv.OnClientEvent:Connect(function(action, data)
+            if action ~= "Update" then return end
+            if type(data) ~= "table" then return end
+            local key   = data[1]
+            local value = data[2]
+            if key == "AutoSkipWaves" and value == false and getSkipWave() then
+                -- Server reset it — re-enable immediately
+                local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+                if ev then
+                    task.wait(0.1)
+                    pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
+                end
+            end
+        end)
+    end
 end
 -- Auto Restart
 local _, getRestartOnWave, onRestartOnWave = toggle(gpList, "Auto Restart", 5, false, "game.restartonwave")
@@ -1172,7 +1190,6 @@ do
         end)
     end
 
-    -- Use GameHandler module signals directly (most reliable)
     pcall(function()
         local gh = require(game.ReplicatedStorage.Modules.Gameplay.GameHandler)
         gh.MatchRestarted:Connect(function()
@@ -1180,13 +1197,6 @@ do
         end)
         gh.MatchStarted:Connect(function()
             restartFired = false
-            if getAutoSkipStart and getAutoSkipStart() then
-                task.spawn(function()
-                    task.wait(0.5)
-                    local rv = Net:FindFirstChild("MatchRestartSettingEvent")
-                    if rv then pcall(function() rv:FireServer("Vote") end) end
-                end)
-            end
         end)
     end)
     -- Fallback: raw GameEvent if require fails in executor
@@ -1195,13 +1205,6 @@ do
         gameEvRst.OnClientEvent:Connect(function(action)
             if action == "GameRestarted" or action == "MatchStarted" then
                 restartFired = false
-            end
-            if action == "MatchStarted" and getAutoSkipStart and getAutoSkipStart() then
-                task.spawn(function()
-                    task.wait(0.5)
-                    local rv = Net:FindFirstChild("MatchRestartSettingEvent")
-                    if rv then pcall(function() rv:FireServer("Vote") end) end
-                end)
             end
         end)
     end
@@ -1215,23 +1218,36 @@ do
 
 
     -- PopupEvent fires ("BaseCancelFrame", message) the instant the popup appears
-    -- Much more reliable than polling — click Cancel immediately on the event
     local popupEv = Net:FindFirstChild("ClientListeners") and
                     Net.ClientListeners:FindFirstChild("PopupEvent")
     if popupEv then
         popupEv.OnClientEvent:Connect(function(frameName)
             if frameName ~= "BaseCancelFrame" then return end
-            task.wait(0.1)  -- one frame for UI to settle
+            task.wait(0.3)  -- give UI time to fully render
             pcall(function()
                 local ps = realGui:FindFirstChild("PopupScreen")
                 if not ps then return end
-                local btn = safePath(ps,"BaseCancelFrame","Main","Buttons","Cancel","Button")
+                -- Recursive search for the Cancel Button — handles any nesting depth
+                local cancelFrame = ps:FindFirstChild("BaseCancelFrame", true)
+                if not cancelFrame then return end
+                local btn = cancelFrame:FindFirstChild("Button", true)
                 if not btn then return end
-                btn.MouseButton1Click:Fire()
+                -- Try all available firing methods
+                pcall(function() btn.MouseButton1Click:Fire() end)
                 pcall(function() btn.Activated:Fire() end)
+                pcall(function() btn.MouseButton1Down:Fire() end)
+                pcall(function() btn.MouseButton1Up:Fire() end)
                 pcall(function()
-                    local conns = getconnections(btn.Activated)
-                    for _, c in ipairs(conns) do pcall(c.Function) end
+                    if typeof(getconnections) == "function" then
+                        for _, c in ipairs(getconnections(btn.MouseButton1Click)) do
+                            pcall(c.Function)
+                        end
+                    end
+                end)
+                pcall(function()
+                    if typeof(firesignal) == "function" then
+                        firesignal(btn.MouseButton1Click)
+                    end
                 end)
             end)
         end)
