@@ -1941,12 +1941,33 @@ end)
 
 local _, getAutoNextRoom, onAutoNextRoom = toggle(advListFrame, "Auto Next Room", 1, false, "odyssey.auto_next_room")
 onAutoNextRoom(function(on)
-    if on and _voteIsActive then task.spawn(requestNextRoom) end
+    if not on then return end
+    if _voteIsActive then
+        task.spawn(requestNextRoom)
+    else
+        -- Missed VoteStarted event — check map panel directly
+        local hud = getAdventureHUD()
+        if hud then
+            local mapRoot = hud:FindFirstChild("AdventureMapRoot")
+            if mapRoot and mapRoot.Visible then
+                _voteIsActive = true
+                task.spawn(requestNextRoom)
+            end
+        end
+        -- Also try via exposed remote
+        if _voteEvC then task.spawn(requestNextRoom) end
+    end
 end)
 label(advListFrame, "Continues to the next room automatically", 2)
 local _, getAutoPick, onAutoPick = toggle(advListFrame, "Auto Select Cards", 3, true, "odyssey.auto_select_cards")
 onAutoPick(function(on)
-    if on and _currentOffer then _doPick(_currentOffer) end
+    if not on then return end
+    if _currentOffer then
+        _doPick(_currentOffer)
+    elseif _advCardEvC then
+        -- Missed the Offer event — ask server to re-send current offer
+        pcall(function() _advCardEvC:FireServer("RequestOffer") end)
+    end
 end)
 label(advListFrame, "Picks highest rarity card when card screen appears", 4)
 local _, getAutoSkipShop, onAutoSkipShop = toggle(advListFrame, "Auto Skip Shop", 7, false, "odyssey.auto_skip_shop.v3")
@@ -1957,8 +1978,30 @@ onAutoSkipShop(function(on)
     end
 end)
 label(advListFrame, "Closes Stiches' Shop automatically", 8)
-local _, getAutoCollectChests = toggle(advListFrame, "Auto Collect Chests",               9, false, "odyssey.auto_collect_chest.v3")
+local _, getAutoCollectChests, onAutoCollectChests = toggle(advListFrame, "Auto Collect Chests", 9, false, "odyssey.auto_collect_chest.v3")
 label(advListFrame, "Opens all chests in Treasure Room", 10)
+onAutoCollectChests(function(on)
+    if not on then return end
+    -- Live toggle-on: fire chests immediately if already in treasure room
+    local remote = _treasureEvC
+    if not remote then return end
+    task.spawn(function()
+        local ignore = workspace:FindFirstChild("Ignore")
+        if not ignore then return end
+        local opened = {}
+        for _, model in ipairs(ignore:GetChildren()) do
+            local n = model.Name
+            if n:sub(1,13) == "OdysseyChest_" and n:sub(1,17) ~= "OdysseyChestPing_" then
+                local uuid = n:sub(14)
+                if not opened[uuid] then
+                    opened[uuid] = true
+                    pcall(function() remote:FireServer("OpenChest", uuid) end)
+                    task.wait(0.1)
+                end
+            end
+        end
+    end)
+end)
 local _, getSkipUnitReward, onSkipUnitReward = toggle(advListFrame, "Skip Unit Reward", 11, false, "odyssey.skip_unit_reward")
 onSkipUnitReward(function(on)
     if on and _unitRewardShowing and _unitRewardEvRef then
@@ -1971,8 +2014,8 @@ label(advListFrame, "Skips unit reward panel after elite rooms", 12)
 local ragnawPickedThisRun = {}
 local ragnawPickCount     = 0
 
--- ======================
--- Confirmed remote locations (UPD 12.5):
+local _treasureEvC = nil  -- exposed for live toggle-on handler
+local _voteEvC     = nil  -- exposed for live toggle-on handler
 --   Networking.Units.SummonEvent                          — summoning
 --   Networking.Odyssey.Adventure.CardPickEvent            — card pick/skip
 --   Networking.Odyssey.Adventure.ShopEvent                — shop close
@@ -2317,6 +2360,15 @@ local _unitRewardShowing = false
 local _unitRewardEvRef   = nil
 local getAutoUnitCard    = nil  -- assigned inside Unit Card do block below
 
+-- Normalizes card names for priority matching:
+-- handles unicode ellipsis (…) vs ASCII (...) variants
+local function _normName(s)
+    if not s then return "" end
+    s = s:gsub("\226\128\166", "...")  -- unicode ellipsis → ASCII dots
+    s = s:gsub("%s+", " ")             -- collapse whitespace
+    return s:lower():match("^%s*(.-)%s*$")  -- trim + lowercase
+end
+
 -- _doPick defined here so both the Unit Card do block and the event handlers share it
 local function _doPick(offer)
     if not offer or not _advCardEvC then return end
@@ -2356,8 +2408,16 @@ local function _doPick(offer)
     elseif kind ~= "Character" and getAutoPick and getAutoPick() then
         for i, card in ipairs(opts) do
             if type(card) == "table" then
-                local name = card.CardName or card.CardId or card.DisplayName or ""
-                if _cardState.basicPriority[name] then bestIdx = i; break end
+                local name     = card.CardName or card.CardId or card.DisplayName or ""
+                local normCard = _normName(name)
+                -- Check exact match first, then normalized match
+                local hit = _cardState.basicPriority[name]
+                if not hit then
+                    for storedName, _ in pairs(_cardState.basicPriority) do
+                        if _normName(storedName) == normCard then hit = true; break end
+                    end
+                end
+                if hit then bestIdx = i; break end
             end
         end
         if not bestIdx and #opts > 0 then bestIdx = math.random(1, #opts) end
@@ -2565,6 +2625,7 @@ do
 
         -- Vote: fire requestNextRoom when vote starts, one retry after 2s
         local voteEvC = adv:WaitForChild("VoteEvent", 30)
+        _voteEvC = voteEvC  -- expose for live toggle-on handler
         if voteEvC then
             voteEvC.OnClientEvent:Connect(function(action)
                 if action == "VoteStarted" then
@@ -2622,6 +2683,7 @@ do
 
         -- Treasure: scan workspace.Ignore for OdysseyChest_<uuid> and fire per UUID
         local treasureEvC = adv:FindFirstChild("TreasureEvent")
+        _treasureEvC = treasureEvC  -- expose for live toggle-on handler
         if treasureEvC then
             treasureEvC.OnClientEvent:Connect(function(action)
                 if action ~= "Begin" then return end
@@ -2685,6 +2747,64 @@ do
                     _currentOffer = nil
                 end
             end)
+        end
+
+        -- ── Startup state check ───────────────────────────────────────
+        -- Handles the case where script is executed while already inside an adventure
+        -- (events already fired before our listeners connected)
+        task.wait(0.5)
+
+        -- Treasure: if chests are already in workspace.Ignore, open them
+        if getAutoCollectChests() and treasureEvC then
+            task.spawn(function()
+                local ignore = workspace:FindFirstChild("Ignore")
+                if not ignore then return end
+                local opened = {}
+                for _, model in ipairs(ignore:GetChildren()) do
+                    local n = model.Name
+                    if n:sub(1,13) == "OdysseyChest_" and n:sub(1,17) ~= "OdysseyChestPing_" then
+                        local uuid = n:sub(14)
+                        if not opened[uuid] then
+                            opened[uuid] = true
+                            pcall(function() treasureEvC:FireServer("OpenChest", uuid) end)
+                            task.wait(0.1)
+                        end
+                    end
+                end
+            end)
+        end
+
+        -- Vote: if map panel is already visible, fire next room
+        if getAutoNextRoom() and voteEvC then
+            local hud = getAdventureHUD()
+            local mapRoot = hud and hud:FindFirstChild("AdventureMapRoot")
+            if mapRoot and mapRoot.Visible then
+                _voteIsActive = true
+                task.spawn(requestNextRoom)
+            end
+        end
+
+        -- Cards: if card pick panel is already open, request current offer
+        if cardEvC and (getAutoPick() or (getAutoUnitCard and getAutoUnitCard())) then
+            local hud = getAdventureHUD()
+            local cardPanel = hud and (
+                hud:FindFirstChild("CardPickPanel", true) or
+                hud:FindFirstChild("ChooseCard", true)
+            )
+            if cardPanel and cardPanel.Visible then
+                pcall(function() cardEvC:FireServer("RequestOffer") end)
+            end
+        end
+
+        -- Shop: if shop already open, close it
+        if getAutoSkipShop() and _shopEvRef then
+            local hud = getAdventureHUD()
+            local shop = hud and hud:FindFirstChild("Stiches' Shop_Export")
+            if shop and isPanelOpen(shop) then
+                _shopIsOpen = true
+                pcall(function() _shopEvRef:FireServer("Close", nil) end)
+                _shopIsOpen = false
+            end
         end
     end)
 end
