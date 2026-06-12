@@ -1992,8 +1992,7 @@ local _, getAutoCollectChests, onAutoCollectChests = toggle(advListFrame, "Auto 
 label(advListFrame, "Opens all chests in Treasure Room", 10)
 onAutoCollectChests(function(on)
     if not on then return end
-    -- Live toggle-on: fire chests immediately if already in treasure room
-    local remote = _treasureEvC
+    local remote = _treasureEvC  -- StageMechanics.OdysseyChest
     if not remote then return end
     task.spawn(function()
         local ignore = workspace:FindFirstChild("Ignore")
@@ -2002,10 +2001,10 @@ onAutoCollectChests(function(on)
         for _, model in ipairs(ignore:GetChildren()) do
             local n = model.Name
             if n:sub(1,13) == "OdysseyChest_" and n:sub(1,17) ~= "OdysseyChestPing_" then
-                local uuid = n:sub(14)
-                if not opened[uuid] then
-                    opened[uuid] = true
-                    pcall(function() remote:FireServer("OpenChest", uuid) end)
+                local id = model:GetAttribute("Id") or n:sub(14)
+                if id and not opened[id] then
+                    opened[id] = true
+                    pcall(function() remote:FireServer("OpenChest", id) end)
                     task.wait(0.1)
                 end
             end
@@ -2764,30 +2763,40 @@ do
             end)
         end
 
-        -- Treasure: scan workspace.Ignore for OdysseyChest_<uuid> and fire per UUID
+        -- Treasure: TreasureEvent("Begin") is the trigger.
+        -- CONFIRMED from OdysseyChestHandler decompile: chest opening uses
+        -- StageMechanics.OdysseyChest:FireServer("OpenChest", id)
+        -- Chest ID is read from model's "Id" attribute (preserves original type).
         local treasureEvC = adv:FindFirstChild("TreasureEvent")
-        _treasureEvC = treasureEvC  -- expose for live toggle-on handler
+        local stageMech   = Net.Parent:FindFirstChild("StageMechanics")
+        local chestRemote = stageMech and stageMech:FindFirstChild("OdysseyChest")
+        _treasureEvC = chestRemote  -- expose for live toggle-on handler
+
+        local function openAllChests()
+            if not chestRemote then return end
+            local ignore = workspace:FindFirstChild("Ignore")
+            if not ignore then return end
+            local opened = {}
+            for _, model in ipairs(ignore:GetChildren()) do
+                local n = model.Name
+                if n:sub(1,13) == "OdysseyChest_" and n:sub(1,17) ~= "OdysseyChestPing_" then
+                    local id = model:GetAttribute("Id") or n:sub(14)
+                    if id and not opened[id] then
+                        opened[id] = true
+                        pcall(function() chestRemote:FireServer("OpenChest", id) end)
+                        task.wait(0.1)
+                    end
+                end
+            end
+        end
+
         if treasureEvC then
             treasureEvC.OnClientEvent:Connect(function(action)
                 if action ~= "Begin" then return end
                 if not getAutoCollectChests() then return end
                 task.spawn(function()
                     task.wait(0.3)
-                    local ignore = workspace:FindFirstChild("Ignore")
-                    if not ignore then return end
-                    local opened = {}
-                    for _, model in ipairs(ignore:GetChildren()) do
-                        local n = model.Name
-                        -- Match OdysseyChest_<uuid>, exclude OdysseyChestPing_
-                        if n:sub(1,13) == "OdysseyChest_" and n:sub(1,17) ~= "OdysseyChestPing_" then
-                            local uuid = n:sub(14)
-                            if not opened[uuid] then
-                                opened[uuid] = true
-                                pcall(function() treasureEvC:FireServer("OpenChest", uuid) end)
-                                task.wait(0.1)
-                            end
-                        end
-                    end
+                    openAllChests()
                 end)
             end)
         end
