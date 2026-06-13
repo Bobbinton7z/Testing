@@ -2594,6 +2594,18 @@ local function _normName(s)
     return s:lower():match("^%s*(.-)%s*$")  -- trim + lowercase
 end
 
+-- Closes the card pick panel after we fire a pick — the game's close logic
+-- is tied to button click, not server response, so we close it ourselves
+local function closeCardPanel()
+    task.spawn(function()
+        task.wait(0.4)
+        local p = _cardPanelRef
+        if p and p.Parent then
+            pcall(function() p.Visible = false end)
+        end
+    end)
+end
+
 -- _doPick defined here so both the Unit Card do block and the event handlers share it
 local function _doPick(offer)
     if not offer or not _advCardEvC then return end
@@ -2666,10 +2678,9 @@ local function _doPick(offer)
     if not bestIdx then return end
     local captured  = bestIdx
     local isUnitCard = kind == "Character"
+    closeCardPanel()
     task.spawn(function()
         task.wait(0.2)
-        -- Unit cards: first fire selects, second fire confirms (card 1 is pre-selected
-        -- so firing twice is harmless for it; cards 2/3 require two fires to pick)
         pcall(function() _advCardEvC:FireServer("Pick", captured) end)
         if isUnitCard then
             task.wait(0.35)
@@ -2679,6 +2690,7 @@ local function _doPick(offer)
 end
 
 local _pickFired       = false  -- set when doPickFromPanel fires, cleared on grant/skip
+local _cardPanelRef    = nil    -- reference to the CardPickPanel, used to close it after picking
 
 -- GUI-based card pick fallback: used when _currentOffer is nil
 -- Reads card buttons from the panel and matches against priority via text blob
@@ -2716,6 +2728,7 @@ local function doPickFromPanel()
     if not bestIdx then return end
     _pickFired = true
     local idx = bestIdx
+    closeCardPanel()
     task.spawn(function()
         task.wait(0.2)
         pcall(function() ev:FireServer("Pick", idx) end)
@@ -2736,6 +2749,7 @@ local function hookCardPanel()
     local function connectPanel(panel)
         if _cardPanelHooked then return end
         _cardPanelHooked = true
+        _cardPanelRef    = panel  -- store reference so pick logic can close it
         panel:GetPropertyChangedSignal("Visible"):Connect(function()
             if not panel.Visible then _pickFired = false; return end
             if not shouldPick() then return end
