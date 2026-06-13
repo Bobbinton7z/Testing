@@ -1035,10 +1035,14 @@ do
         if not connected then
             connected = connectWaveLabel()
         end
-        -- Fire YenEvent on every wave change — universal across all gamemodes
+        -- Fire YenEvent and AutoSkipStart on every wave change — universal across all gamemodes
         if currentWave ~= prevWave and currentWave > 0 then
             prevWave = currentWave
             if yenEvGlobal then pcall(function() yenEvGlobal:FireServer() end) end
+            if getAutoSkipStart and getAutoSkipStart() then
+                local settEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+                if settEv then pcall(function() settEv:FireServer("Toggle", "AutoSkipStart") end) end
+            end
         end
     end)
 end
@@ -1066,25 +1070,16 @@ makeCollapsible(gpSelBtn, gpList, "Gameplay")
 local _, getAutoSkipStart, onAutoSkipStart = toggle(gpList, "Auto Vote Start", 1, false, "game.autoskipstart")
 do
     local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+    -- Fire once when toggle is enabled (votes immediately for current wave start)
     onAutoSkipStart(function(enabled)
+        if not enabled then return end
+        if not inGameMode() then return end
         local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
         if ev then pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end) end
     end)
-    -- Server may reset AutoSkipStart to false — re-enable if our toggle is still on
-    local incomingSkipStartEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
-    if incomingSkipStartEv then
-        incomingSkipStartEv.OnClientEvent:Connect(function(action, data)
-            if action ~= "Update" then return end
-            if type(data) ~= "table" then return end
-            if data[1] == "AutoSkipStart" and data[2] == false and getAutoSkipStart() then
-                local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
-                if ev then
-                    task.wait(0.1)
-                    pcall(function() ev:FireServer("Toggle", "AutoSkipStart") end)
-                end
-            end
-        end)
-    end
+    -- NOTE: no incoming listener here — AutoSkipStart is a one-time vote per wave.
+    -- The server resets it to false immediately after the vote is cast.
+    -- Re-firing on each wave change is handled in the wave tracker below.
 end
 -- Auto Next
 local _, getAutoNext, onAutoNext = toggle(gpList, "Auto Next", 2, false, "game.autonext")
