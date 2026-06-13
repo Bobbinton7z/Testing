@@ -942,6 +942,19 @@ end
 do
 local gamePage = tabPages["Game"]
 
+-- ── Yen tracking (universal — all gamemodes) ─────────────────────
+-- YenEvent:FireServer() (no args) → server replies OnClientEvent(amount)
+-- Fires automatically on yen change; also manually fired each wave below
+local currentYen = 0
+local yenEvGlobal = Net:FindFirstChild("ClientListeners")
+yenEvGlobal = yenEvGlobal and yenEvGlobal:FindFirstChild("YenEvent")
+if yenEvGlobal then
+    pcall(function() yenEvGlobal:FireServer() end)
+    yenEvGlobal.OnClientEvent:Connect(function(amount)
+        if type(amount) == "number" then currentYen = amount end
+    end)
+end
+
 -- Track current wave — tries WavesAmount label AND WaveInfoEvent as backup
 local currentWave = 0
 do
@@ -1014,12 +1027,18 @@ do
     end
 
     local connected = false
+    local prevWave  = 0
     RunSvc.Heartbeat:Connect(function()
         if not inGameMode() then
-            currentWave = 0; connected = false; return
+            currentWave = 0; connected = false; prevWave = 0; return
         end
         if not connected then
             connected = connectWaveLabel()
+        end
+        -- Fire YenEvent on every wave change — universal across all gamemodes
+        if currentWave ~= prevWave and currentWave > 0 then
+            prevWave = currentWave
+            if yenEvGlobal then pcall(function() yenEvGlobal:FireServer() end) end
         end
     end)
 end
@@ -1709,6 +1728,73 @@ else
     end)
 end
 end -- close modifier do block
+
+-- ── Auto Ability ──────────────────────────────────────────────────
+local abilitySection = section(gamePage, "Auto Ability", 4)
+
+-- ─ Nami Chest ────────────────────────────────────────────────────
+-- Unit passive: spawns a diggable chest each wave
+-- Remote: Networking.Units["Update 10.0"].DigChest:FireServer()
+local _, getNamiChest, onNamiChest = toggle(abilitySection, "Nami Chest", 1, false, "ability.namichest")
+label(abilitySection, "Auto-collects Nami's chest at the start of each wave", 2)
+do
+    -- Resolve remote via FindFirstChild to handle "Update 10.0" key safely
+    local _unitsF   = Net:FindFirstChild("Units")
+    local _update10 = _unitsF and _unitsF:FindFirstChild("Update 10.0")
+    local _digChest = _update10 and _update10:FindFirstChild("DigChest")
+
+    local function fireDigChest()
+        -- Re-resolve remote if needed
+        if not _digChest then
+            _unitsF   = Net:FindFirstChild("Units")
+            _update10 = _unitsF and _unitsF:FindFirstChild("Update 10.0")
+            _digChest = _update10 and _update10:FindFirstChild("DigChest")
+        end
+        if not _digChest then return end
+        -- Scan workspace.Ignore for chest model — UUID from "Id" attribute or name
+        local ignore = workspace:FindFirstChild("Ignore")
+        if not ignore then return end
+        local fired = false
+        for _, model in ipairs(ignore:GetChildren()) do
+            local id = model:GetAttribute("Id")
+            if not id then
+                -- Fallback: check if name looks like a UUID (8-4-4-4-12 hex pattern)
+                if model.Name:match("^%x+%-%x+%-%x+%-%x+%-%x+$") then
+                    id = model.Name
+                end
+            end
+            if id then
+                fired = true
+                pcall(function() _digChest:FireServer(id) end)
+            end
+        end
+        -- If nothing found in Ignore, fire bare as last resort
+        if not fired then
+            pcall(function() _digChest:FireServer() end)
+        end
+    end
+
+    -- Fire when toggle is enabled mid-wave
+    onNamiChest(function(on)
+        if on and inGameMode() then
+            task.wait(0.3)
+            fireDigChest()
+        end
+    end)
+
+    -- Fire on every wave change (chest spawns at wave start)
+    local lastNamiWave = 0
+    RunSvc.Heartbeat:Connect(function()
+        if not getNamiChest() then lastNamiWave = 0; return end
+        if not inGameMode()   then lastNamiWave = 0; return end
+        if currentWave == lastNamiWave or currentWave == 0 then return end
+        lastNamiWave = currentWave
+        task.spawn(function()
+            task.wait(0.5)  -- brief delay for chest to spawn after wave start
+            if getNamiChest() then fireDigChest() end
+        end)
+    end)
+end
 
 end -- close Game Tab do block
 
@@ -3019,7 +3105,16 @@ end -- close Odyssey do block
 -- ======================
 do
 local springPage = tabPages["SpringLTM"]
-local springSec = section(springPage, "Spring LTM", 1)
+local springSec  = section(springPage, "Spring LTM", 1)
+local springNet  = RS:FindFirstChild("Networking")
+local springEv   = springNet and springNet:FindFirstChild("SpringEvent")
+
+-- Spring LTM: must be in a match AND SpringEventHUD present
+local function isSpringLTM()
+    if not inGameMode() then return false end
+    local hud = realGui:FindFirstChild("HUD")
+    return hud ~= nil and hud:FindFirstChild("SpringEventHUD") ~= nil
+end
 
 -- ── Confirm Placement ─────────────────────────────────────────────
 -- UI path: PlayerGui.HUD.SpringEventHUD.WallPlacementHUD (watches whole panel)
@@ -3040,8 +3135,7 @@ do
     local function fireConfirm()
         if confirmFired then return end
         confirmFired = true
-        local ev = Net:FindFirstChild("SpringEvent")
-        ev = ev and ev:FindFirstChild("ConfirmPlacement")
+        local ev = springEv and springEv:FindFirstChild("ConfirmPlacement")
         if ev then pcall(function() ev:FireServer() end) end
     end
 
@@ -3055,38 +3149,39 @@ do
                 confirmFired = false
             end
         end)
-        -- Fire immediately if already visible when we connect
         if panel.Visible and getConfirmPlacement() then fireConfirm() end
     end
 
-    -- Heartbeat: find WallPlacementHUD once, then rely on signal
     RunSvc.Heartbeat:Connect(function()
         if not getConfirmPlacement() then confirmFired = false; return end
-        if not inGameMode()          then confirmFired = false; return end
-        if wpHUD and wpHUD.Parent   then return end  -- already hooked
+        if not isSpringLTM() then confirmFired = false; return end
+        if wpHUD and wpHUD.Parent then return end
         local panel = getWallPlacementHUD()
         if panel then hookWPHUD(panel) end
     end)
 end
 
 -- ── Wave Purchase (Skip 5 at waves 5, 10, 15, 20) ────────────────
+-- Remote: Networking.SpringEvent.ShopEvent:FireServer("Purchase", "SkipWaves5")
+-- YenEvent:FireServer() is fired each wave to keep yen reading fresh
 local _, getWavePurchase = toggle(springSec, "Wave Purchase (Skip 5)", 3, false, "spring.wavepurchase")
 label(springSec, "Purchases Skip Waves x5 at waves 5 → 10 → 15 → 20", 4)
 do
     local MILESTONES = {5, 10, 15, 20}
-    local fired = {}
+    local fired      = {}
+    local shopEv     = springEv and springEv:FindFirstChild("ShopEvent")
+
     RunSvc.Heartbeat:Connect(function()
         if not getWavePurchase() then fired = {}; return end
-        if not inGameMode() then fired = {}; return end
+        if not isSpringLTM()     then fired = {}; return end
         local cur = currentWave
-        if cur == 0 then restartFired = false; waveAtTargetSince = 0; return end  -- reset flag so it fires again after restart
-        if cur < 5 then fired = {}; return end
-        for _, w in ipairs(MILESTONES) do
-            if cur >= w and not fired[w] then
-                fired[w] = true
-                local springEv = Net:FindFirstChild("SpringEvent")
-                local ev = springEv and springEv:FindFirstChild("ShopEvent")
-                if ev then pcall(function() ev:FireServer("Purchase", "SkipWaves5") end) end
+        if cur < 1 then fired = {}; return end
+        if shopEv then
+            for _, w in ipairs(MILESTONES) do
+                if cur >= w and not fired[w] then
+                    fired[w] = true
+                    pcall(function() shopEv:FireServer("Purchase", "SkipWaves5") end)
+                end
             end
         end
     end)
