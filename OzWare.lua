@@ -1947,23 +1947,31 @@ do
     end
 end
 
--- Refresher lookup tables so swap can update the other card's UI label instantly
-local _basicCardRefreshers = {}  -- {[cardName] = refreshFn}
-local _unitCardRefreshers  = {}  -- {[cardId]   = refreshFn}
+-- Returns numeric priority for a key; handles old boolean saves (true → 1)
+local function getPriority(tbl, key)
+    local v = tbl[key]
+    if not v then return 0 end
+    if v == true then return 1 end
+    return tonumber(v) or 0
+end
 
--- Swap helper: change key in tbl by delta, swapping with any other entry at the target value
-local function _doPrioritySwap(tbl, refreshers, key, delta)
+-- Refresher lookup tables so swap can update the other card's UI label instantly
+local _basicCardRefreshers = {}
+local _unitCardRefreshers  = {}
+
+-- Sets key in tbl to newVal, swapping with any other entry that already holds newVal
+local function _doPrioritySet(tbl, refreshers, key, newVal)
+    newVal = math.max(1, math.floor(newVal))
     local oldP = getPriority(tbl, key)
-    local newP = math.max(1, math.min(999, oldP + delta))
-    if newP == oldP then return end
+    if newVal == oldP then return end
     for otherKey, _ in pairs(tbl) do
-        if otherKey ~= key and getPriority(tbl, otherKey) == newP then
+        if otherKey ~= key and getPriority(tbl, otherKey) == newVal then
             tbl[otherKey] = oldP
             if refreshers[otherKey] then refreshers[otherKey]() end
             break
         end
     end
-    tbl[key] = newP
+    tbl[key] = newVal
 end
 -- ======================
 do
@@ -2425,14 +2433,6 @@ local function _normName(s)
     return s:lower():match("^%s*(.-)%s*$")  -- trim + lowercase
 end
 
--- Returns numeric priority for a key; handles old boolean saves (true → 1)
-local function getPriority(tbl, key)
-    local v = tbl[key]
-    if not v then return 0 end
-    if v == true then return 1 end  -- backward compat with old boolean saves
-    return tonumber(v) or 0
-end
-
 -- _doPick defined here so both the Unit Card do block and the event handlers share it
 local function _doPick(offer)
     if not offer or not _advCardEvC then return end
@@ -2558,8 +2558,6 @@ local function doPickFromPanel()
     task.spawn(function()
         task.wait(0.2)
         pcall(function() ev:FireServer("Pick", idx) end)
-        task.wait(0.3)
-        pcall(function() ev:FireServer("Pick", idx) end)
     end)
 end
 
@@ -2626,36 +2624,26 @@ local function makeCardRow(parent, cardId, cardName, rarity, order, priorityTbl)
     end
     local dot=Instance.new("Frame",row); dot.Size=UDim2.new(0,6,0,6); dot.Position=UDim2.new(0,10,0.5,-3)
     dot.BackgroundColor3=_RARITY_COLOR[rarity] or C.SUBTEXT; dot.BorderSizePixel=0; dot.ZIndex=5; corner(dot,3)
-    local lbl=Instance.new("TextLabel",row); lbl.Size=UDim2.new(1,-78,1,0); lbl.Position=UDim2.new(0,22,0,0)
+    local lbl=Instance.new("TextLabel",row); lbl.Size=UDim2.new(1,-62,1,0); lbl.Position=UDim2.new(0,22,0,0)
     lbl.BackgroundTransparency=1; lbl.Text=cardName; lbl.TextColor3=C.TEXT
     lbl.TextSize=12; lbl.Font=FONT_REG; lbl.TextXAlignment=Enum.TextXAlignment.Left
     lbl.ZIndex=5; lbl.TextTruncate=Enum.TextTruncate.AtEnd
-    local numLbl=Instance.new("TextLabel",row); numLbl.Size=UDim2.new(0,22,0,20)
-    numLbl.Position=UDim2.new(1,-48,0.5,-10); numLbl.BackgroundTransparency=1
-    numLbl.TextSize=12; numLbl.Font=FONT_SEMI; numLbl.ZIndex=6
-    numLbl.TextXAlignment=Enum.TextXAlignment.Center
+    local txt=Instance.new("TextBox",row); txt.Size=UDim2.new(0,50,0,22)
+    txt.Position=UDim2.new(1,-56,0.5,-11); txt.BackgroundColor3=Color3.fromRGB(40,40,45)
+    txt.BorderSizePixel=0; txt.TextColor3=C.ACCENT; txt.TextSize=12; txt.Font=FONT_SEMI
+    txt.ZIndex=6; txt.ClearTextOnFocus=false; txt.TextXAlignment=Enum.TextXAlignment.Center
+    corner(txt,4)
     local function refreshUC()
-        local p=getPriority(priorityTbl,cardId)
-        numLbl.Text=tostring(p); numLbl.TextColor3=C.ACCENT
-        lbl.TextColor3=C.TEXT
+        txt.Text=tostring(getPriority(priorityTbl,cardId))
     end
     refreshUC()
-    _unitCardRefreshers[cardId] = refreshUC  -- register for swap updates
-    local minusBtn=Instance.new("TextButton",row); minusBtn.Size=UDim2.new(0,22,0,22)
-    minusBtn.Position=UDim2.new(1,-72,0.5,-11); minusBtn.BackgroundColor3=Color3.fromRGB(40,40,45)
-    minusBtn.BorderSizePixel=0; minusBtn.Text="-"; minusBtn.TextSize=14; minusBtn.Font=FONT_BOLD
-    minusBtn.TextColor3=C.SUBTEXT; minusBtn.ZIndex=6; minusBtn.AutoButtonColor=false; corner(minusBtn,4)
-    local plusBtn=Instance.new("TextButton",row); plusBtn.Size=UDim2.new(0,22,0,22)
-    plusBtn.Position=UDim2.new(1,-24,0.5,-11); plusBtn.BackgroundColor3=Color3.fromRGB(40,40,45)
-    plusBtn.BorderSizePixel=0; plusBtn.Text="+"; plusBtn.TextSize=14; plusBtn.Font=FONT_BOLD
-    plusBtn.TextColor3=C.SUBTEXT; plusBtn.ZIndex=6; plusBtn.AutoButtonColor=false; corner(plusBtn,4)
-    minusBtn.MouseButton1Click:Connect(function()
-        _doPrioritySwap(priorityTbl, _unitCardRefreshers, cardId, -1)
-        refreshUC(); _saveCardState()
-    end)
-    plusBtn.MouseButton1Click:Connect(function()
-        _doPrioritySwap(priorityTbl, _unitCardRefreshers, cardId, 1)
-        refreshUC(); _saveCardState()
+    _unitCardRefreshers[cardId]=refreshUC
+    txt.FocusLost:Connect(function()
+        local v=tonumber(txt.Text)
+        if not v or v<1 then txt.Text=tostring(getPriority(priorityTbl,cardId)); return end
+        _doPrioritySet(priorityTbl,_unitCardRefreshers,cardId,v)
+        txt.Text=tostring(getPriority(priorityTbl,cardId))
+        _saveCardState()
     end)
     row.MouseEnter:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(38,38,38)},0.08) end)
     row.MouseLeave:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08) end)
@@ -2785,40 +2773,30 @@ for i, card in ipairs(_BASIC_CARDS) do
        s.BackgroundColor3=Color3.fromRGB(40,40,45); s.BorderSizePixel=0; s.ZIndex=5 end
     local dot=Instance.new("Frame",row); dot.Size=UDim2.new(0,6,0,6); dot.Position=UDim2.new(0,10,0.5,-3)
     dot.BackgroundColor3=_RARITY_COLOR[card.r] or C.SUBTEXT; dot.BorderSizePixel=0; dot.ZIndex=5; corner(dot,3)
-    local lbl=Instance.new("TextLabel",row); lbl.Size=UDim2.new(1,-78,1,0); lbl.Position=UDim2.new(0,22,0,0)
-    lbl.BackgroundTransparency=1; lbl.Text=card.n
+    local lbl=Instance.new("TextLabel",row); lbl.Size=UDim2.new(1,-62,1,0); lbl.Position=UDim2.new(0,22,0,0)
+    lbl.BackgroundTransparency=1; lbl.Text=card.n; lbl.TextColor3=C.TEXT
     lbl.TextSize=12; lbl.Font=FONT_REG; lbl.TextXAlignment=Enum.TextXAlignment.Left
-    lbl.ZIndex=5; lbl.TextTruncate=Enum.TextTruncate.AtEnd; lbl.TextColor3=C.TEXT
-    local cardName = card.n
-    -- Init unique rank on first run (never 0)
-    if getPriority(_cardState.basicPriority, cardName) == 0 then
-        _cardState.basicPriority[cardName] = _BASIC_CARD_DEFAULTS[cardName] or 1
+    lbl.ZIndex=5; lbl.TextTruncate=Enum.TextTruncate.AtEnd
+    local cardName=card.n
+    if getPriority(_cardState.basicPriority,cardName)==0 then
+        _cardState.basicPriority[cardName]=_BASIC_CARD_DEFAULTS[cardName] or 1
     end
-    local numLbl=Instance.new("TextLabel",row); numLbl.Size=UDim2.new(0,22,0,20)
-    numLbl.Position=UDim2.new(1,-48,0.5,-10); numLbl.BackgroundTransparency=1
-    numLbl.TextSize=12; numLbl.Font=FONT_SEMI; numLbl.ZIndex=6
-    numLbl.TextXAlignment=Enum.TextXAlignment.Center
+    local txt=Instance.new("TextBox",row); txt.Size=UDim2.new(0,50,0,22)
+    txt.Position=UDim2.new(1,-56,0.5,-11); txt.BackgroundColor3=Color3.fromRGB(40,40,45)
+    txt.BorderSizePixel=0; txt.TextColor3=C.ACCENT; txt.TextSize=12; txt.Font=FONT_SEMI
+    txt.ZIndex=6; txt.ClearTextOnFocus=false; txt.TextXAlignment=Enum.TextXAlignment.Center
+    corner(txt,4)
     local function refreshBC()
-        local p=getPriority(_cardState.basicPriority,cardName)
-        numLbl.Text=tostring(p); numLbl.TextColor3=C.ACCENT
+        txt.Text=tostring(getPriority(_cardState.basicPriority,cardName))
     end
     refreshBC()
-    _basicCardRefreshers[cardName] = refreshBC  -- register for swap updates
-    local minusBtn=Instance.new("TextButton",row); minusBtn.Size=UDim2.new(0,22,0,22)
-    minusBtn.Position=UDim2.new(1,-72,0.5,-11); minusBtn.BackgroundColor3=Color3.fromRGB(40,40,45)
-    minusBtn.BorderSizePixel=0; minusBtn.Text="-"; minusBtn.TextSize=14; minusBtn.Font=FONT_BOLD
-    minusBtn.TextColor3=C.SUBTEXT; minusBtn.ZIndex=6; minusBtn.AutoButtonColor=false; corner(minusBtn,4)
-    local plusBtn=Instance.new("TextButton",row); plusBtn.Size=UDim2.new(0,22,0,22)
-    plusBtn.Position=UDim2.new(1,-24,0.5,-11); plusBtn.BackgroundColor3=Color3.fromRGB(40,40,45)
-    plusBtn.BorderSizePixel=0; plusBtn.Text="+"; plusBtn.TextSize=14; plusBtn.Font=FONT_BOLD
-    plusBtn.TextColor3=C.SUBTEXT; plusBtn.ZIndex=6; plusBtn.AutoButtonColor=false; corner(plusBtn,4)
-    minusBtn.MouseButton1Click:Connect(function()
-        _doPrioritySwap(_cardState.basicPriority, _basicCardRefreshers, cardName, -1)
-        refreshBC(); _saveCardState()
-    end)
-    plusBtn.MouseButton1Click:Connect(function()
-        _doPrioritySwap(_cardState.basicPriority, _basicCardRefreshers, cardName, 1)
-        refreshBC(); _saveCardState()
+    _basicCardRefreshers[cardName]=refreshBC
+    txt.FocusLost:Connect(function()
+        local v=tonumber(txt.Text)
+        if not v or v<1 then txt.Text=tostring(getPriority(_cardState.basicPriority,cardName)); return end
+        _doPrioritySet(_cardState.basicPriority,_basicCardRefreshers,cardName,v)
+        txt.Text=tostring(getPriority(_cardState.basicPriority,cardName))
+        _saveCardState()
     end)
     row.MouseEnter:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(38,38,38)},0.08) end)
     row.MouseLeave:Connect(function() tween(row,{BackgroundColor3=Color3.fromRGB(30,30,30)},0.08) end)
