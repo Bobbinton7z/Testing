@@ -1407,9 +1407,15 @@ end
 -- ── FPS Boost ─────────────────────────────────────────────────────
 local fpsApplied     = false
 local greenUnitsConn = nil
+local redEnemiesConn = nil
 
 -- Strips a single unit folder down to flat green geometry
 local function applyGreenUnit(unitFolder)
+    -- Destroy clothing-specific named objects first (Clothes folder, hair/torso rigs)
+    for _, name in ipairs({"Clothes", "HairRig", "TorsoRig"}) do
+        local obj = unitFolder:FindFirstChild(name)
+        if obj then pcall(function() obj:Destroy() end) end
+    end
     for _, inst in ipairs(unitFolder:GetDescendants()) do
         if inst:IsA("BasePart") then
             pcall(function()
@@ -1420,10 +1426,11 @@ local function applyGreenUnit(unitFolder)
             end)
         end
         local cls = inst.ClassName
-        if cls=="ParticleEmitter" or cls=="Trail"     or cls=="Beam"
-        or cls=="Smoke"           or cls=="Fire"      or cls=="Sparkles"
+        if cls=="ParticleEmitter" or cls=="Trail"          or cls=="Beam"
+        or cls=="Smoke"           or cls=="Fire"           or cls=="Sparkles"
         or cls=="SelectionBox"    or cls=="BillboardGui"
-        or cls=="PointLight"      or cls=="SpotLight" or cls=="SurfaceLight" then
+        or cls=="PointLight"      or cls=="SpotLight"      or cls=="SurfaceLight"
+        or cls=="SurfaceAppearance" then  -- strips PBR textures that override material
             pcall(function() inst:Destroy() end)
         elseif inst:IsA("Decal") or inst:IsA("Texture") then
             pcall(function() inst.Transparency=1 end)
@@ -1433,13 +1440,72 @@ local function applyGreenUnit(unitFolder)
     end
 end
 
+-- Strips an enemy model down to red geometry — destroys Outfit, applies red Highlight
+local function applyRedEnemy(entityModel)
+    -- Remove clothing
+    local outfit = entityModel:FindFirstChild("Outfit")
+    if outfit then pcall(function() outfit:Destroy() end) end
+    -- Strip effects from all descendants
+    for _, inst in ipairs(entityModel:GetDescendants()) do
+        if inst:IsA("BasePart") then
+            pcall(function()
+                inst.BrickColor  = BrickColor.new("Bright red")
+                inst.Material    = Enum.Material.SmoothPlastic
+                inst.CastShadow  = false
+                inst.Reflectance = 0
+            end)
+        end
+        local cls = inst.ClassName
+        if cls=="ParticleEmitter" or cls=="Trail"    or cls=="Beam"
+        or cls=="Smoke"           or cls=="Fire"     or cls=="Sparkles"
+        or cls=="BillboardGui"    or cls=="PointLight" or cls=="SpotLight"
+        or cls=="SurfaceLight"    or cls=="SurfaceAppearance" then
+            pcall(function() inst:Destroy() end)
+        elseif inst:IsA("Decal") or inst:IsA("Texture") then
+            pcall(function() inst.Transparency=1 end)
+        elseif inst:IsA("SpecialMesh") then
+            pcall(function() inst.MeshType=Enum.MeshType.Block end)
+        end
+    end
+    -- Apply red Highlight (modify existing or create new)
+    local hl = entityModel:FindFirstChildOfClass("Highlight")
+    if hl then
+        pcall(function()
+            hl.FillColor          = Color3.fromRGB(180, 0, 0)
+            hl.FillTransparency   = 0.55
+            hl.OutlineColor       = Color3.fromRGB(255, 50, 50)
+            hl.OutlineTransparency = 0
+            hl.Enabled            = true
+        end)
+    else
+        pcall(function()
+            local newHl = Instance.new("Highlight", entityModel)
+            newHl.FillColor          = Color3.fromRGB(180, 0, 0)
+            newHl.FillTransparency   = 0.55
+            newHl.OutlineColor       = Color3.fromRGB(255, 50, 50)
+            newHl.OutlineTransparency = 0
+        end)
+    end
+end
+
 -- Hooks workspace.Units so every placement auto-greens during the session
 local function hookGreenUnits(unitsFolder)
     if greenUnitsConn then greenUnitsConn:Disconnect() end
     greenUnitsConn = unitsFolder.ChildAdded:Connect(function(child)
         if fpsApplied then
-            task.wait(0.1) -- let model fully replicate before stripping
+            task.wait(0.1)
             pcall(function() applyGreenUnit(child) end)
+        end
+    end)
+end
+
+-- Hooks workspace.Entities so every new enemy auto-reds during the session
+local function hookRedEnemies(entitiesFolder)
+    if redEnemiesConn then redEnemiesConn:Disconnect() end
+    redEnemiesConn = entitiesFolder.ChildAdded:Connect(function(child)
+        if fpsApplied then
+            task.wait(0.1)
+            pcall(function() applyRedEnemy(child) end)
         end
     end)
 end
@@ -1508,10 +1574,18 @@ local function applyFPSBoost()
             end
         end)
     end
+    -- Red enemies pass — recolors workspace.Entities over the grey simplify pass
+    local entitiesFolder = workspace:FindFirstChild("Entities")
+    if entitiesFolder then
+        for _, child in ipairs(entitiesFolder:GetChildren()) do
+            pcall(function() applyRedEnemy(child) end)
+        end
+        hookRedEnemies(entitiesFolder)
+    end
     notify("FPS Boost ON", true)
 end
 
-local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.fpsbst")
+local _, getBoostFPS
 onBoostFPS(function(on)
     if on then
         -- Only apply during a match, not in lobby
@@ -1527,6 +1601,7 @@ onBoostFPS(function(on)
     elseif not on and fpsApplied then
         fpsApplied = false
         if greenUnitsConn then greenUnitsConn:Disconnect(); greenUnitsConn = nil end
+        if redEnemiesConn then redEnemiesConn:Disconnect(); redEnemiesConn = nil end
         notify("FPS Boost OFF — rejoin to fully restore", true)
     end
 end)
