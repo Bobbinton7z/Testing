@@ -1580,7 +1580,7 @@ local function applyFPSBoost()
     notify("FPS Boost ON", true)
 end
 
-local _, getBoostFPS
+local _, getBoostFPS, onBoostFPS = toggle(utilSec, "Boost FPS", 4, false, "util.fpsbst")
 onBoostFPS(function(on)
     if on then
         -- Only apply during a match, not in lobby
