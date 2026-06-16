@@ -81,7 +81,7 @@ local player    = Players.LocalPlayer
 local ok, _gui  = pcall(function() return gethui() end)
 local playerGui = ok and _gui or player:WaitForChild("PlayerGui")
 local realGui        = player:WaitForChild("PlayerGui")
-local currentStageData = {}  -- populated by GameEvent data and ShowEndScreenEvent
+local currentStageData = {}  -- populated by ShowEndScreenEvent (reserved for future use)
 
 -- Safe path traversal — accessible everywhere in the script
 local function safePath(root, ...)
@@ -115,7 +115,6 @@ local C = {
     SUBTEXT  = Color3.fromRGB(130, 130, 140),        -- grey inactive
     DIM      = Color3.fromRGB(80,  80,  90),         -- very dim
     DISABLED = Color3.fromRGB(75,  75,  82),         -- off-circle (visible on dark bg)
-    ACTIVE   = Color3.fromRGB(220, 80,  150),
 }
 local FONT_BOLD = Enum.Font.GothamBold
 local FONT_SEMI = Enum.Font.GothamSemibold
@@ -760,7 +759,12 @@ end
 
 
 
--- ── End screen vote helper (shared by handler + live callbacks) ──────────────
+-- Forward declarations — used in _doEndScreenVote and _showEndEv below,
+-- but assigned inside their respective do blocks later
+local getAutoNext       = nil
+local getAutoRetry      = nil
+local _endScreenShowing = false
+local _endScreenEvRef   = nil
 local function _doEndScreenVote()
     if not _endScreenEvRef then return end
     task.wait(0.5)
@@ -936,11 +940,9 @@ joinBtn.MouseButton1Click:Connect(function()
 end)
 end
 
--- ======================
--- GAME TAB
--- ======================
-do
-local gamePage = tabPages["Game"]
+-- Server-side state trackers — module scope so startup sync task can read them
+local autoSkipWavesServerState = false
+local autoSkipStartServerState = false
 
 -- ── Yen tracking (universal — all gamemodes) ─────────────────────
 -- YenEvent:FireServer() (no args) → server replies OnClientEvent(amount)
@@ -1082,12 +1084,14 @@ do
     -- Re-firing on each wave change is handled in the wave tracker below.
 end
 -- Auto Next
-local _, getAutoNext, onAutoNext = toggle(gpList, "Auto Next", 2, false, "game.autonext")
+local _, _gAutoNext, onAutoNext = toggle(gpList, "Auto Next", 2, false, "game.autonext")
+getAutoNext = _gAutoNext  -- assign to outer upvalue so _doEndScreenVote can see it
 onAutoNext(function(on)
     if on and _endScreenShowing then task.spawn(_doEndScreenVote) end
 end)
 -- Auto Retry
-local _, getAutoRetry, onAutoRetry = toggle(gpList, "Auto Retry", 3, false, "game.autoretry")
+local _, _gAutoRetry, onAutoRetry = toggle(gpList, "Auto Retry", 3, false, "game.autoretry")
+getAutoRetry = _gAutoRetry  -- assign to outer upvalue so _doEndScreenVote can see it
 onAutoRetry(function(on)
     if on and _endScreenShowing then task.spawn(_doEndScreenVote) end
 end)
@@ -1095,19 +1099,18 @@ end)
 local _, getSkipWave, onSkipWave = toggle(gpList, "Auto Skip Wave", 4, false, "game.skipwave")
 do
     local settingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+    local autoSkipWavesAlreadyInit = false  -- prevent double-init on callback fire
     onSkipWave(function(on)
         local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
         if not ev then return end
-        -- Sync toggle state with server immediately
-        -- Read current server state first via a no-op, then set correct state
-        if on then
+        if on and not autoSkipWavesServerState then
+            -- Server has it off — Toggle to turn on
             pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
-        else
+        elseif not on and autoSkipWavesServerState then
+            -- Server has it on — Toggle to turn off
             pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
         end
     end)
-    -- Server resets AutoSkipWaves=false after every wave skip
-    -- Listen for that reset and re-enable if our toggle is still on
     local incomingSettingsEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
     if incomingSettingsEv then
         incomingSettingsEv.OnClientEvent:Connect(function(action, data)
@@ -1115,17 +1118,45 @@ do
             if type(data) ~= "table" then return end
             local key   = data[1]
             local value = data[2]
-            if key == "AutoSkipWaves" and value == false and getSkipWave() then
-                -- Server reset it — re-enable immediately
-                local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
-                if ev then
-                    task.wait(0.1)
-                    pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
+            if key == "AutoSkipWaves" then
+                autoSkipWavesServerState = value == true
+                if value == false and getSkipWave() then
+                    -- Server reset it — re-enable
+                    local ev = settingsEv or (Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent"))
+                    if ev then
+                        task.wait(0.1)
+                        pcall(function() ev:FireServer("Toggle", "AutoSkipWaves") end)
+                    end
                 end
+            elseif key == "AutoSkipStart" then
+                autoSkipStartServerState = value == true
             end
         end)
     end
 end
+
+-- ── Startup sync: force disable both, wait 1s, re-enable if toggle on ──────
+task.spawn(function()
+    task.wait(1)  -- extra buffer after the 2s initial wait at script top
+    local settEv = Net:FindFirstChild("Settings") and Net.Settings:FindFirstChild("SettingsEvent")
+    if not settEv then return end
+    -- Phase 1: force disable — only fire if server currently has them ON
+    if autoSkipWavesServerState then
+        pcall(function() settEv:FireServer("Toggle", "AutoSkipWaves") end)
+    end
+    if autoSkipStartServerState then
+        pcall(function() settEv:FireServer("Toggle", "AutoSkipStart") end)
+    end
+    -- Wait 1 second as requested
+    task.wait(1)
+    -- Phase 2: re-enable if the user's toggle is on
+    if getSkipWave and getSkipWave() and not autoSkipWavesServerState then
+        pcall(function() settEv:FireServer("Toggle", "AutoSkipWaves") end)
+    end
+    if getAutoSkipStart and getAutoSkipStart() and inGameMode() and not autoSkipStartServerState then
+        pcall(function() settEv:FireServer("Toggle", "AutoSkipStart") end)
+    end
+end)
 -- Auto Restart
 local _, getRestartOnWave, onRestartOnWave = toggle(gpList, "Auto Restart", 5, false, "game.restartonwave")
 label(gpList, "Votes to restart when wave number is reached", 6)
@@ -2572,8 +2603,6 @@ end
 local _currentOffer      = nil
 local _voteIsActive      = false
 local _advCardEvC        = nil
-local _endScreenShowing  = false
-local _endScreenEvRef    = nil
 local _shopIsOpen        = false
 local _shopEvRef         = nil
 local _unitRewardShowing = false
