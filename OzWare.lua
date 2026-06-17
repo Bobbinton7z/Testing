@@ -200,7 +200,7 @@ local _NOTIF_GAP = 4
 local _NOTIF_PAD = 10
 local _MAX_NOTIF = 6
 
-local function _notifTargetPos(slot)   -- slot 0 = topmost
+local function _notifTargetPos(slot)
     return UDim2.new(1, -(_NOTIF_W + _NOTIF_PAD), 0, _NOTIF_PAD + slot * (_NOTIF_H + _NOTIF_GAP))
 end
 
@@ -210,11 +210,16 @@ local function _repositionNotifs()
     end
 end
 
+-- table.find polyfill (unavailable in some executor Lua builds)
+local function _tfind(t, v)
+    for i = 1, #t do if t[i] == v then return i end end
+end
+
 local function notify(msg, ok)
     local color = ok and C.GREEN or C.RED
     local f = Instance.new("Frame")
     f.Size = UDim2.new(0, _NOTIF_W, 0, _NOTIF_H)
-    f.Position = UDim2.new(1, 10, 0, _NOTIF_PAD)   -- starts off-screen right
+    f.Position = UDim2.new(1, 10, 0, _NOTIF_PAD)
     f.BackgroundColor3 = C.PANEL
     f.ZIndex = 100
     f.Parent = gui
@@ -239,7 +244,6 @@ local function notify(msg, ok)
     lbl.TextTruncate = Enum.TextTruncate.AtEnd
     lbl.ZIndex = 101
     lbl.Parent = f
-    -- Evict oldest if over cap
     while #notifStack >= _MAX_NOTIF do
         local old = table.remove(notifStack)
         tween(old, {Position = UDim2.new(1, 10, 0, old.Position.Y.Offset)}, 0.18)
@@ -247,9 +251,8 @@ local function notify(msg, ok)
     end
     table.insert(notifStack, 1, f)
     _repositionNotifs()
-    -- Auto-remove after 3s
     task.delay(3, function()
-        local idx = table.find(notifStack, f)
+        local idx = _tfind(notifStack, f)
         if idx then table.remove(notifStack, idx); _repositionNotifs() end
         local exitY = f.Position.Y.Offset
         tween(f, {Position = UDim2.new(1, 10, 0, exitY)}, 0.22)
@@ -900,20 +903,23 @@ local _, getPotionOn = toggle(craftSec, "Auto Craft & Use Potion", 1, false, "cr
 task.spawn(function()
     while true do
         task.wait(3)
-        if not getPotionOn() then continue end
-        local craftEv = getCraftEv()
-        local useEv   = getUseEv()
-        if not craftEv or not useEv then continue end
-        -- Pre-check materials
-        if getItemCount("Green Essence Stone") < 20 then continue end
-        if getItemCount("Rainbow Essence Stone") < 1 then continue end
-        local ok = pcall(function()
-            craftEv:FireServer("Craft", "Super Lucky Potion", 1)
-        end)
-        killCraftAnim()
-        if not ok then continue end
-        task.wait(0.4)
-        pcall(function() useEv:FireServer("Use", "Super Lucky Potion") end)
+        if getPotionOn() then
+            local craftEv = getCraftEv()
+            local useEv   = getUseEv()
+            if craftEv and useEv then
+                if getItemCount("Green Essence Stone") >= 20
+                   and getItemCount("Rainbow Essence Stone") >= 1 then
+                    local ok = pcall(function()
+                        craftEv:FireServer("Craft", "Super Lucky Potion", 1)
+                    end)
+                    killCraftAnim()
+                    if ok then
+                        task.wait(0.4)
+                        pcall(function() useEv:FireServer("Use", "Super Lucky Potion") end)
+                    end
+                end
+            end
+        end
     end
 end)
 
@@ -1014,34 +1020,35 @@ task.spawn(function()
         if greenCount <= 0 then continue end
         -- Process each stone that's enabled and under target
         for i, ess in ipairs(LEGEND_ESSENCES) do
-            if not essGetOn[i]() then continue end
-            local target = math.clamp(math.floor(tonumber(essAmtBox[i].Text) or 50), 1, 9999)
-            if essCrafted[i] >= target then continue end
-            -- Also stop if already at inventory cap (50 per legendary essence)
-            if getItemCount(ess.name) >= 50 then continue end
-            -- How many green stones can fund this craft? Each costs 3
-            local canMake = math.floor(greenCount / 3)
-            if canMake <= 0 then break end  -- out of green; stop whole pass
-            local remaining = target - essCrafted[i]
-            local batch = math.min(10, canMake, remaining)
-            if batch <= 0 then continue end
-            local craftEv = getCraftEv()
-            if not craftEv then break end
-            -- Pre-check: ensure enough green for this batch
-            if greenCount < batch * 3 then
-                batch = math.floor(greenCount / 3)
-                if batch <= 0 then break end
+            if essGetOn[i]() then
+                local target = math.clamp(math.floor(tonumber(essAmtBox[i].Text) or 50), 1, 9999)
+                local atCap  = getItemCount(ess.name) >= 50
+                if essCrafted[i] < target and not atCap then
+                    local canMake = math.floor(greenCount / 3)
+                    if canMake <= 0 then
+                        break  -- out of green; stop whole pass
+                    end
+                    local remaining = target - essCrafted[i]
+                    local batch = math.min(10, canMake, remaining)
+                    if greenCount < batch * 3 then
+                        batch = math.floor(greenCount / 3)
+                    end
+                    if batch > 0 then
+                        local craftEv = getCraftEv()
+                        if not craftEv then break end
+                        local ok = pcall(function()
+                            craftEv:FireServer("Craft", ess.name, batch)
+                        end)
+                        killCraftAnim()
+                        if ok then
+                            greenCount = greenCount - (batch * 3)
+                            essCrafted[i] = essCrafted[i] + batch
+                            notify(batch.."x "..ess.name.." crafted", true)
+                        end
+                        task.wait(0.35)
+                    end
+                end
             end
-            local ok = pcall(function()
-                craftEv:FireServer("Craft", ess.name, batch)
-            end)
-            killCraftAnim()
-            if ok then
-                greenCount = greenCount - (batch * 3)  -- deduct locally
-                essCrafted[i] = essCrafted[i] + batch
-                notify(batch.."x "..ess.name.." crafted", true)
-            end
-            task.wait(0.35)
         end
     end
 end)
@@ -1052,13 +1059,14 @@ local _, getLeaveMax = toggle(essListFrame, "Leave if max green essences",
 task.spawn(function()
     while true do
         task.wait(4)
-        if not getLeaveMax() or not inGameMode() then continue end
-        local greenCount = getItemCount("Green Essence Stone")
-        if greenCount >= 125 then
-            local lobbyEv = Net:FindFirstChild("LobbyEvent")
-            if lobbyEv then
-                pcall(function() lobbyEv:FireServer("LeaveMatch") end)
-                notify("Left — "..greenCount.." green essences", true)
+        if getLeaveMax() and inGameMode() then
+            local greenCount = getItemCount("Green Essence Stone")
+            if greenCount >= 125 then
+                local lobbyEv = Net:FindFirstChild("LobbyEvent")
+                if lobbyEv then
+                    pcall(function() lobbyEv:FireServer("LeaveMatch") end)
+                    notify("Left — "..greenCount.." green essences", true)
+                end
             end
         end
     end
@@ -1075,22 +1083,22 @@ local _, getMythOn = toggle(craftSec, "Auto Craft Mythical Essence", 4, false, "
 task.spawn(function()
     while true do
         task.wait(0.9)
-        if not getMythOn() then continue end
-        -- Stop at inventory cap
-        if getItemCount("Rainbow Essence Stone") >= 50 then continue end
-        -- Pre-check: all 6 ingredients must be >= 1
-        local canCraft = true
-        for _, req in ipairs(RAINBOW_REQS) do
-            if getItemCount(req) < 1 then canCraft = false; break end
+        if getMythOn() and getItemCount("Rainbow Essence Stone") < 50 then
+            local allOk = true
+            for _, req in ipairs(RAINBOW_REQS) do
+                if getItemCount(req) < 1 then allOk = false; break end
+            end
+            if allOk then
+                local craftEv = getCraftEv()
+                if craftEv then
+                    local ok = pcall(function()
+                        craftEv:FireServer("Craft", "Rainbow Essence Stone", 1)
+                    end)
+                    killCraftAnim()
+                    if ok then notify("1x Rainbow Essence Stone crafted", true) end
+                end
+            end
         end
-        if not canCraft then continue end
-        local craftEv = getCraftEv()
-        if not craftEv then continue end
-        local ok = pcall(function()
-            craftEv:FireServer("Craft", "Rainbow Essence Stone", 1)
-        end)
-        killCraftAnim()
-        if ok then notify("1x Rainbow Essence Stone crafted", true) end
     end
 end)
 
@@ -1182,48 +1190,46 @@ local function loadStages()
     if not sdRoot then return end
 
     for _, typeFolder in ipairs(sdRoot:GetChildren()) do
-        if not typeFolder:IsA("Folder") then continue end
-        local tn = typeFolder.Name
-        local allowed = false
-        for _, t in ipairs(STAGE_TYPES_ALLOWED) do if t == tn then allowed = true; break end end
-        if not allowed then continue end
+        if typeFolder:IsA("Folder") then
+            local tn = typeFolder.Name
+            local allowed = false
+            for _, t in ipairs(STAGE_TYPES_ALLOWED) do if t == tn then allowed = true; break end end
+            if allowed then
+                STAGES[tn]  = {}
+                DISPLAY[tn] = {}
 
-        STAGES[tn]  = {}
-        DISPLAY[tn] = {}
-
-        for _, stageFolder in ipairs(typeFolder:GetChildren()) do
-            if not stageFolder:IsA("Folder") then continue end
-            local sk = stageFolder.Name
-            if sk == "CustomStageData" then continue end
-
-            -- Collect act keys from Acts sub-folder
-            local acts = {}
-            local actsFolder = stageFolder:FindFirstChild("Acts")
-            if actsFolder then
-                for _, actMod in ipairs(actsFolder:GetChildren()) do
-                    if actMod:IsA("ModuleScript") then
-                        table.insert(acts, actMod.Name)
+                for _, stageFolder in ipairs(typeFolder:GetChildren()) do
+                    if stageFolder:IsA("Folder") and stageFolder.Name ~= "CustomStageData" then
+                        local sk = stageFolder.Name
+                        local acts = {}
+                        local actsFolder = stageFolder:FindFirstChild("Acts")
+                        if actsFolder then
+                            for _, actMod in ipairs(actsFolder:GetChildren()) do
+                                if actMod:IsA("ModuleScript") then
+                                    table.insert(acts, actMod.Name)
+                                end
+                            end
+                            table.sort(acts, function(a, b)
+                                local na = tonumber(a:match("%d+")) or 9999
+                                local nb = tonumber(b:match("%d+")) or 9999
+                                if na ~= nb then return na < nb end
+                                return a < b
+                            end)
+                        end
+                        if #acts > 0 then
+                            STAGES[tn][sk]  = acts
+                            local stageMod = stageFolder:FindFirstChild(sk)
+                            if stageMod and stageMod:IsA("ModuleScript") then
+                                local ok, data = pcall(require, stageMod)
+                                if ok and type(data) == "table" then
+                                    DISPLAY[tn][sk] = data.Name or data.StageName or sk
+                                end
+                            end
+                            if not DISPLAY[tn][sk] then DISPLAY[tn][sk] = sk end
+                        end
                     end
                 end
-                table.sort(acts, function(a, b)
-                    local na = tonumber(a:match("%d+")) or 9999
-                    local nb = tonumber(b:match("%d+")) or 9999
-                    if na ~= nb then return na < nb end
-                    return a < b
-                end)
             end
-            if #acts == 0 then continue end
-
-            STAGES[tn][sk]  = acts
-            -- Display name: require the stage module (folder name == module name)
-            local stageMod = stageFolder:FindFirstChild(sk)
-            if stageMod and stageMod:IsA("ModuleScript") then
-                local ok, data = pcall(require, stageMod)
-                if ok and type(data) == "table" then
-                    DISPLAY[tn][sk] = data.Name or data.StageName or sk
-                end
-            end
-            if not DISPLAY[tn][sk] then DISPLAY[tn][sk] = sk end
         end
     end
 end
