@@ -190,36 +190,23 @@ gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = -1
 gui.Parent=playerGui
 
--- Top-right stacking notification system.
--- New notifications appear at the TOP; existing ones slide down.
--- Each slides in from the right and out to the right on expire.
-local notifStack = {}
-local _NOTIF_W   = 230
-local _NOTIF_H   = 36
-local _NOTIF_GAP = 4
-local _NOTIF_PAD = 10
-local _MAX_NOTIF = 6
-
-local function _notifTargetPos(slot)
-    return UDim2.new(1, -(_NOTIF_W + _NOTIF_PAD), 0, _NOTIF_PAD + slot * (_NOTIF_H + _NOTIF_GAP))
-end
-
-local function _repositionNotifs()
-    for i, f in ipairs(notifStack) do
-        tween(f, {Position = _notifTargetPos(i - 1)}, 0.18)
+-- Notification state in one table — saves 8 local registers
+-- (Luau hard cap: 200 locals per function; task.defer wraps the entire script)
+local _N = { stack={}, W=230, H=36, GAP=4, PAD=10, MAX=6 }
+function _N.reposition()
+    for i, f in ipairs(_N.stack) do
+        tween(f, {Position=UDim2.new(1,-(_N.W+_N.PAD),0,_N.PAD+(i-1)*(_N.H+_N.GAP))}, 0.18)
     end
 end
-
--- table.find polyfill (unavailable in some executor Lua builds)
-local function _tfind(t, v)
-    for i = 1, #t do if t[i] == v then return i end end
+function _N.find(v)
+    for i = 1, #_N.stack do if _N.stack[i] == v then return i end end
 end
 
 local function notify(msg, ok)
     local color = ok and C.GREEN or C.RED
     local f = Instance.new("Frame")
-    f.Size = UDim2.new(0, _NOTIF_W, 0, _NOTIF_H)
-    f.Position = UDim2.new(1, 10, 0, _NOTIF_PAD)
+    f.Size = UDim2.new(0, _N.W, 0, _N.H)
+    f.Position = UDim2.new(1, 10, 0, _N.PAD)
     f.BackgroundColor3 = C.PANEL
     f.ZIndex = 100
     f.Parent = gui
@@ -244,20 +231,20 @@ local function notify(msg, ok)
     lbl.TextTruncate = Enum.TextTruncate.AtEnd
     lbl.ZIndex = 101
     lbl.Parent = f
-    while #notifStack >= _MAX_NOTIF do
-        local old = table.remove(notifStack)
-        tween(old, {Position = UDim2.new(1, 10, 0, old.Position.Y.Offset)}, 0.18)
+    while #_N.stack >= _N.MAX do
+        local old = table.remove(_N.stack)
+        tween(old, {Position=UDim2.new(1,10,0,old.Position.Y.Offset)}, 0.18)
         task.delay(0.2, function() pcall(function() old:Destroy() end) end)
     end
-    table.insert(notifStack, 1, f)
-    _repositionNotifs()
+    table.insert(_N.stack, 1, f)
+    _N.reposition()
     task.delay(3, function()
-        local idx = _tfind(notifStack, f)
-        if idx then table.remove(notifStack, idx); _repositionNotifs() end
+        local idx = _N.find(f)
+        if idx then table.remove(_N.stack, idx); _N.reposition() end
         local exitY = f.Position.Y.Offset
-        tween(f, {Position = UDim2.new(1, 10, 0, exitY)}, 0.22)
+        tween(f, {Position=UDim2.new(1,10,0,exitY)}, 0.22)
         local lt = f:FindFirstChildOfClass("TextLabel")
-        if lt then tween(lt, {TextTransparency = 1}, 0.22) end
+        if lt then tween(lt, {TextTransparency=1}, 0.22) end
         task.wait(0.25)
         pcall(function() f:Destroy() end)
     end)
@@ -858,23 +845,16 @@ end
 do
 local craftSec = section(lobbyPage, "Craft & Use", 3)
 
--- ── OwnedItemsHandler — lazy require for item count reads ─────────────────
-local _oih = nil
-task.spawn(function()
-    local sp = game:GetService("StarterPlayer")
-    local mod = sp:FindFirstChild("Modules")
-    mod = mod and mod:FindFirstChild("Data")
-    mod = mod and mod:FindFirstChild("Items")
-    mod = mod and mod:FindFirstChild("OwnedItemsHandler")
-    if not mod then
-        local ps = player:WaitForChild("PlayerScripts", 10)
-        if ps then mod = ps:FindFirstChild("OwnedItemsHandler", true) end
-    end
-    if mod and mod:IsA("ModuleScript") then
-        local ok, h = pcall(require, mod)
-        if ok then _oih = h end
-    end
-end)
+-- OwnedItemsHandler — confirmed path from decompile:
+-- every game script uses require(StarterPlayer.Modules.Data.Items.OwnedItemsHandler)
+local _oih
+do
+    local ok, h = pcall(function()
+        local sp = game:GetService("StarterPlayer")
+        return require(sp:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Items"):WaitForChild("OwnedItemsHandler"))
+    end)
+    _oih = ok and h or nil
+end
 local function getItemCount(name)
     if not _oih then return 0 end
     local ok, n = pcall(function() return _oih.GetItemAmount(name) end)
