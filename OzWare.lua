@@ -2354,8 +2354,9 @@ do
 end
 
 -- ================================================================
--- ODYSSEY CARD DATA
+-- ODYSSEY TAB SETUP (own function — keeps its locals out of task.defer's 200-register budget)
 -- ================================================================
+local function _setupOdysseyTab()
 -- _UNIT_ORDER and _UNIT_SHORT are declared before the Joiner tab (earlier in script)
 local _UNIT_CARD_DATA = {
     ["Iscanur (Pride)"] = {
@@ -2596,7 +2597,6 @@ local function _doPrioritySet(tbl, refreshers, key, newVal)
     tbl[key] = newVal
 end
 -- ======================
-do
 local odysseyPage = tabPages["Odyssey"]
 local autoSec = section(odysseyPage, "Adventure", 1)
 
@@ -3646,7 +3646,8 @@ do
     end)
 end
 
-end -- close Odyssey do block
+end -- _setupOdysseyTab
+_setupOdysseyTab()
 
 -- ======================
 -- SPRING LTM TAB
