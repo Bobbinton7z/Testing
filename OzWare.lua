@@ -190,30 +190,73 @@ gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = -1
 gui.Parent=playerGui
 
-local notifQueue = {}
+-- Top-right stacking notification system.
+-- New notifications appear at the TOP; existing ones slide down.
+-- Each slides in from the right and out to the right on expire.
+local notifStack = {}
+local _NOTIF_W   = 230
+local _NOTIF_H   = 36
+local _NOTIF_GAP = 4
+local _NOTIF_PAD = 10
+local _MAX_NOTIF = 6
+
+local function _notifTargetPos(slot)   -- slot 0 = topmost
+    return UDim2.new(1, -(_NOTIF_W + _NOTIF_PAD), 0, _NOTIF_PAD + slot * (_NOTIF_H + _NOTIF_GAP))
+end
+
+local function _repositionNotifs()
+    for i, f in ipairs(notifStack) do
+        tween(f, {Position = _notifTargetPos(i - 1)}, 0.18)
+    end
+end
+
 local function notify(msg, ok)
     local color = ok and C.GREEN or C.RED
-    local f=Instance.new("Frame")
-    f.Size=UDim2.new(0,300,0,40); f.Position=UDim2.new(0.5,-150,1,20)
-    f.BackgroundColor3=C.PANEL; f.ZIndex=100; f.Parent=gui
-    corner(f,10); stroke(f,color,1)
-    local accent=Instance.new("Frame"); accent.Size=UDim2.new(0,3,1,-12)
-    accent.Position=UDim2.new(0,8,0,6); accent.BackgroundColor3=color
-    accent.ZIndex=101; accent.Parent=f; corner(accent,2)
-    local lbl=Instance.new("TextLabel"); lbl.Size=UDim2.new(1,-22,1,0)
-    lbl.Position=UDim2.new(0,20,0,0); lbl.BackgroundTransparency=1
-    lbl.Text=(ok and "+ " or "x ")..msg; lbl.TextColor3=C.TEXT
-    lbl.TextSize=12; lbl.Font=FONT_SEMI; lbl.TextXAlignment=Enum.TextXAlignment.Left
-    lbl.TextTruncate=Enum.TextTruncate.AtEnd; lbl.ZIndex=101; lbl.Parent=f
-    local targetY = 1 - (0.06 * (#notifQueue + 1))
-    table.insert(notifQueue, f)
-    tween(f, {Position=UDim2.new(0.5,-150,targetY,-50)}, 0.3)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(0, _NOTIF_W, 0, _NOTIF_H)
+    f.Position = UDim2.new(1, 10, 0, _NOTIF_PAD)   -- starts off-screen right
+    f.BackgroundColor3 = C.PANEL
+    f.ZIndex = 100
+    f.Parent = gui
+    corner(f, 8)
+    stroke(f, color, 1)
+    local accent = Instance.new("Frame")
+    accent.Size = UDim2.new(0, 3, 1, -10)
+    accent.Position = UDim2.new(0, 6, 0, 5)
+    accent.BackgroundColor3 = color
+    accent.ZIndex = 101
+    accent.Parent = f
+    corner(accent, 2)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -18, 1, 0)
+    lbl.Position = UDim2.new(0, 16, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = (ok and "+ " or "x ")..msg
+    lbl.TextColor3 = C.TEXT
+    lbl.TextSize = 11
+    lbl.Font = FONT_SEMI
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextTruncate = Enum.TextTruncate.AtEnd
+    lbl.ZIndex = 101
+    lbl.Parent = f
+    -- Evict oldest if over cap
+    while #notifStack >= _MAX_NOTIF do
+        local old = table.remove(notifStack)
+        tween(old, {Position = UDim2.new(1, 10, 0, old.Position.Y.Offset)}, 0.18)
+        task.delay(0.2, function() pcall(function() old:Destroy() end) end)
+    end
+    table.insert(notifStack, 1, f)
+    _repositionNotifs()
+    -- Auto-remove after 3s
     task.delay(3, function()
-        tween(f,{Position=UDim2.new(0.5,-150,1,20), BackgroundTransparency=1},0.25)
-        tween(lbl,{TextTransparency=1},0.25)
-        task.wait(0.3)
-        local i=table.find(notifQueue,f); if i then table.remove(notifQueue,i) end
-        f:Destroy()
+        local idx = table.find(notifStack, f)
+        if idx then table.remove(notifStack, idx); _repositionNotifs() end
+        local exitY = f.Position.Y.Offset
+        tween(f, {Position = UDim2.new(1, 10, 0, exitY)}, 0.22)
+        local lt = f:FindFirstChildOfClass("TextLabel")
+        if lt then tween(lt, {TextTransparency = 1}, 0.22) end
+        task.wait(0.25)
+        pcall(function() f:Destroy() end)
     end)
 end
 local function safeCall(fn, okMsg, failPrefix)
@@ -672,17 +715,64 @@ local function getSummonRemote()
     return units and units:FindFirstChild("SummonEvent")
 end
 
+-- Tracks whether the current summon was fired by OzWare (suppress animation)
+local _ozSummonActive = false
+
+-- Hook SummonEvent.OnClientEvent once; when our flag is set, disable any ScreenGui
+-- that appeared or became enabled after our fire (catches both animation & reward screens)
+task.spawn(function()
+    local unitsFolder = Net:WaitForChild("Units", 15)
+    if not unitsFolder then return end
+    local sumEv = unitsFolder:WaitForChild("SummonEvent", 15)
+    if not sumEv then return end
+    sumEv.OnClientEvent:Connect(function()
+        if not _ozSummonActive then return end
+        task.wait(0.08)
+        for _, gui in ipairs(realGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Enabled then
+                local n = gui.Name:lower()
+                if n:find("summon") or n:find("reward") or n:find("pull") or n:find("result") then
+                    pcall(function() gui.Enabled = false end)
+                end
+            end
+        end
+    end)
+end)
+
+-- On first summon call enable SkipSummonAnimation server-setting (removes the spin)
+
 local function fireBanner(bannerId)
     local remote = getSummonRemote()
     if not remote then
         notify("SummonEvent not found", false)
         return false
     end
-    -- amount=50: game accepts 50 as the max-pull value and deducts the correct
-    -- currency automatically, same as clicking the 10x/50x button manually.
-    return pcall(function()
+    -- Snapshot which ScreenGuis are currently enabled; anything that
+    -- appears/enables after the fire gets hidden so no animation or
+    -- reward popup blocks the screen during auto-summon.
+    local preSnap = {}
+    for _, gui in ipairs(realGui:GetChildren()) do
+        if gui:IsA("ScreenGui") then preSnap[gui] = gui.Enabled end
+    end
+    _ozSummonActive = true
+    local ok = pcall(function()
         remote:FireServer("SummonMany", bannerId, 50)
     end)
+    task.delay(0.6, function()
+        _ozSummonActive = false
+        -- Catch anything that appeared after the fire but not caught by OnClientEvent
+        for _, gui in ipairs(realGui:GetChildren()) do
+            if gui:IsA("ScreenGui") then
+                if not preSnap[gui] or (not preSnap[gui] and gui.Enabled) then
+                    local n = gui.Name:lower()
+                    if n:find("summon") or n:find("reward") or n:find("pull") or n:find("result") then
+                        pcall(function() gui.Enabled = false end)
+                    end
+                end
+            end
+        end
+    end)
+    return ok
 end
 
 local BANNERS = {
@@ -759,6 +849,253 @@ end
 
 
 
+-- ======================
+-- LOBBY TAB — CRAFT & USE
+-- ======================
+do
+local craftSec = section(lobbyPage, "Craft & Use", 3)
+
+-- ── OwnedItemsHandler — lazy require for item count reads ─────────────────
+local _oih = nil
+task.spawn(function()
+    local sp = game:GetService("StarterPlayer")
+    local mod = sp:FindFirstChild("Modules")
+    mod = mod and mod:FindFirstChild("Data")
+    mod = mod and mod:FindFirstChild("Items")
+    mod = mod and mod:FindFirstChild("OwnedItemsHandler")
+    if not mod then
+        local ps = player:WaitForChild("PlayerScripts", 10)
+        if ps then mod = ps:FindFirstChild("OwnedItemsHandler", true) end
+    end
+    if mod and mod:IsA("ModuleScript") then
+        local ok, h = pcall(require, mod)
+        if ok then _oih = h end
+    end
+end)
+local function getItemCount(name)
+    if not _oih then return 0 end
+    local ok, n = pcall(function() return _oih.GetItemAmount(name) end)
+    return ok and type(n) == "number" and n or 0
+end
+
+-- Hide the QuickCraft animation ScreenGui that appears after any CraftingEvent fire
+local function killCraftAnim()
+    task.delay(0.08, function()
+        local qc = realGui:FindFirstChild("QuickCraft")
+        if qc then pcall(function() qc.Enabled = false end) end
+    end)
+end
+
+local function getCraftEv()
+    return Net:FindFirstChild("State") and Net.State:FindFirstChild("CraftingEvent")
+end
+local function getUseEv()
+    return Net:FindFirstChild("ItemUseEvent")
+end
+
+-- ── Auto Craft & Use Super Lucky Potion ──────────────────────────────────────
+-- Recipe: 20 Green Essence Stone + 1 Rainbow Essence Stone
+-- Pre-checks materials every 3s; stops silently when insufficient.
+local _, getPotionOn = toggle(craftSec, "Auto Craft & Use Potion", 1, false, "craft.potion")
+task.spawn(function()
+    while true do
+        task.wait(3)
+        if not getPotionOn() then continue end
+        local craftEv = getCraftEv()
+        local useEv   = getUseEv()
+        if not craftEv or not useEv then continue end
+        -- Pre-check materials
+        if getItemCount("Green Essence Stone") < 20 then continue end
+        if getItemCount("Rainbow Essence Stone") < 1 then continue end
+        local ok = pcall(function()
+            craftEv:FireServer("Craft", "Super Lucky Potion", 1)
+        end)
+        killCraftAnim()
+        if not ok then continue end
+        task.wait(0.4)
+        pcall(function() useEv:FireServer("Use", "Super Lucky Potion") end)
+    end
+end)
+
+-- ── Auto Craft Legendary Essences (collapsible, sequential) ──────────────────
+-- Crafts one stone type at a time, up to 10 per stone per pass.
+-- Remaining count determines batch size: floor(greenCount / 3), capped at 10.
+-- Notifies individually per stone. Stops when green runs out.
+local essColBtn = Instance.new("TextButton", craftSec)
+essColBtn.Size = UDim2.new(1, 0, 0, 30)
+essColBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+essColBtn.BorderSizePixel = 0
+essColBtn.LayoutOrder = 2
+essColBtn.Text = "▶  Auto Craft Essences"
+essColBtn.TextColor3 = C.SUBTEXT
+essColBtn.TextSize = 12
+essColBtn.Font = FONT_SEMI
+essColBtn.AutoButtonColor = false
+essColBtn.ZIndex = 3
+corner(essColBtn, 6)
+
+local essListFrame = Instance.new("Frame", craftSec)
+essListFrame.Size = UDim2.new(1, 0, 0, 0)
+essListFrame.AutomaticSize = Enum.AutomaticSize.Y
+essListFrame.BackgroundTransparency = 1
+essListFrame.BorderSizePixel = 0
+essListFrame.LayoutOrder = 3
+essListFrame.Visible = false
+listLayout(essListFrame, nil, 4)
+
+makeCollapsible(essColBtn, essListFrame, "EssenceCraft")
+
+-- One row per essence: [toggle  |  target textbox]
+local function essRow(parent, labelText, layoutOrder, saveKey)
+    local rowFrame = Instance.new("Frame", parent)
+    rowFrame.Size = UDim2.new(1, 0, 0, 32)
+    rowFrame.BackgroundTransparency = 1
+    rowFrame.LayoutOrder = layoutOrder
+    local rl = Instance.new("UIListLayout", rowFrame)
+    rl.FillDirection = Enum.FillDirection.Horizontal
+    rl.SortOrder = Enum.SortOrder.LayoutOrder
+    rl.Padding = UDim.new(0, 4)
+
+    local toggleHost = Instance.new("Frame", rowFrame)
+    toggleHost.Size = UDim2.new(0.78, 0, 1, 0)
+    toggleHost.BackgroundTransparency = 1
+    toggleHost.LayoutOrder = 1
+    listLayout(toggleHost, nil, 0)
+    local _, getOn = toggle(toggleHost, labelText, 1, false, saveKey)
+
+    local amtBox = Instance.new("TextBox", rowFrame)
+    amtBox.Size = UDim2.new(0.20, 0, 1, 0)
+    amtBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    amtBox.BorderSizePixel = 0
+    amtBox.Text = "50"
+    amtBox.TextColor3 = C.TEXT
+    amtBox.TextSize = 12
+    amtBox.Font = FONT_SEMI
+    amtBox.PlaceholderText = "#"
+    amtBox.PlaceholderColor3 = C.SUBTEXT
+    amtBox.LayoutOrder = 2
+    amtBox.ClearTextOnFocus = false
+    corner(amtBox, 4)
+    return getOn, amtBox
+end
+
+local LEGEND_ESSENCES = {
+    { name = "Pink Essence Stone",   key = "craft.ess.pink"   },
+    { name = "Blue Essence Stone",   key = "craft.ess.blue"   },
+    { name = "Red Essence Stone",    key = "craft.ess.red"    },
+    { name = "Yellow Essence Stone", key = "craft.ess.yellow" },
+    { name = "Purple Essence Stone", key = "craft.ess.purple" },
+}
+local essGetOn   = {}  -- [i] = getOn function
+local essAmtBox  = {}  -- [i] = TextBox
+local essCrafted = {}  -- [i] = craft count for current on-session
+local essWasOn   = {}  -- [i] = bool, tracks toggle state for reset
+
+for i, ess in ipairs(LEGEND_ESSENCES) do
+    local getOn, amtBox = essRow(essListFrame, ess.name, i, ess.key)
+    essGetOn[i]   = getOn
+    essAmtBox[i]  = amtBox
+    essCrafted[i] = 0
+    essWasOn[i]   = false
+end
+
+-- Single sequential loop: iterates through enabled stones one at a time
+task.spawn(function()
+    while true do
+        task.wait(0.8)
+        -- Reset counters for any toggle that just turned off
+        for i = 1, #LEGEND_ESSENCES do
+            local on = essGetOn[i]()
+            if essWasOn[i] and not on then essCrafted[i] = 0 end
+            essWasOn[i] = on
+        end
+        -- Get current green count once per cycle
+        local greenCount = getItemCount("Green Essence Stone")
+        if greenCount <= 0 then continue end
+        -- Process each stone that's enabled and under target
+        for i, ess in ipairs(LEGEND_ESSENCES) do
+            if not essGetOn[i]() then continue end
+            local target = math.clamp(math.floor(tonumber(essAmtBox[i].Text) or 50), 1, 9999)
+            if essCrafted[i] >= target then continue end
+            -- Also stop if already at inventory cap (50 per legendary essence)
+            if getItemCount(ess.name) >= 50 then continue end
+            -- How many green stones can fund this craft? Each costs 3
+            local canMake = math.floor(greenCount / 3)
+            if canMake <= 0 then break end  -- out of green; stop whole pass
+            local remaining = target - essCrafted[i]
+            local batch = math.min(10, canMake, remaining)
+            if batch <= 0 then continue end
+            local craftEv = getCraftEv()
+            if not craftEv then break end
+            -- Pre-check: ensure enough green for this batch
+            if greenCount < batch * 3 then
+                batch = math.floor(greenCount / 3)
+                if batch <= 0 then break end
+            end
+            local ok = pcall(function()
+                craftEv:FireServer("Craft", ess.name, batch)
+            end)
+            killCraftAnim()
+            if ok then
+                greenCount = greenCount - (batch * 3)  -- deduct locally
+                essCrafted[i] = essCrafted[i] + batch
+                notify(batch.."x "..ess.name.." crafted", true)
+            end
+            task.wait(0.35)
+        end
+    end
+end)
+
+-- Leave match if max green essences (max = 125) — at end of essence collapsible
+local _, getLeaveMax = toggle(essListFrame, "Leave if max green essences",
+                              #LEGEND_ESSENCES + 1, false, "craft.leave_max_green")
+task.spawn(function()
+    while true do
+        task.wait(4)
+        if not getLeaveMax() or not inGameMode() then continue end
+        local greenCount = getItemCount("Green Essence Stone")
+        if greenCount >= 125 then
+            local lobbyEv = Net:FindFirstChild("LobbyEvent")
+            if lobbyEv then
+                pcall(function() lobbyEv:FireServer("LeaveMatch") end)
+                notify("Left — "..greenCount.." green essences", true)
+            end
+        end
+    end
+end)
+
+-- ── Auto Craft Mythical Essence (Rainbow) ─────────────────────────────────────
+-- Recipe: 1× each of Pink / Blue / Red / Green / Yellow / Purple
+-- Pre-checks all 6 ingredients before firing. Notifies each craft.
+local RAINBOW_REQS = {
+    "Pink Essence Stone","Blue Essence Stone","Red Essence Stone",
+    "Green Essence Stone","Yellow Essence Stone","Purple Essence Stone"
+}
+local _, getMythOn = toggle(craftSec, "Auto Craft Mythical Essence", 4, false, "craft.ess.mythic")
+task.spawn(function()
+    while true do
+        task.wait(0.9)
+        if not getMythOn() then continue end
+        -- Stop at inventory cap
+        if getItemCount("Rainbow Essence Stone") >= 50 then continue end
+        -- Pre-check: all 6 ingredients must be >= 1
+        local canCraft = true
+        for _, req in ipairs(RAINBOW_REQS) do
+            if getItemCount(req) < 1 then canCraft = false; break end
+        end
+        if not canCraft then continue end
+        local craftEv = getCraftEv()
+        if not craftEv then continue end
+        local ok = pcall(function()
+            craftEv:FireServer("Craft", "Rainbow Essence Stone", 1)
+        end)
+        killCraftAnim()
+        if ok then notify("1x Rainbow Essence Stone crafted", true) end
+    end
+end)
+
+end -- LOBBY TAB — CRAFT & USE
+
 -- Forward declarations — used in _doEndScreenVote and _showEndEv below,
 -- but assigned inside their respective do blocks later
 local getAutoNext       = nil
@@ -804,42 +1141,120 @@ if _showEndEv then
 end
 
 
+-- Odyssey character lists — declared here so both Joiner and Odyssey tabs can use them
+local _UNIT_ORDER = {
+    "Iscanur (Pride)","Song Jinwu and Igros","Rogita (Super 4)",
+    "Shinobi God (Infinite Dreams)","Regnaw (Rage)","Divalo (Requiem)",
+    "Yomomata (Captain)","Hellkiller (Slayer)","Manipulator (Spider)",
+    "Elastic Captain (Cog 5th)"
+}
+local _UNIT_SHORT = {
+    ["Iscanur (Pride)"]               = "Iscanur",
+    ["Song Jinwu and Igros"]          = "Song Jinwu",
+    ["Rogita (Super 4)"]              = "Rogita",
+    ["Shinobi God (Infinite Dreams)"] = "Shinobi God",
+    ["Regnaw (Rage)"]                 = "Regnaw",
+    ["Divalo (Requiem)"]              = "Divalo",
+    ["Yomomata (Captain)"]            = "Yomomata",
+    ["Hellkiller (Slayer)"]           = "Hellkiller",
+    ["Manipulator (Spider)"]          = "Manipulator",
+    ["Elastic Captain (Cog 5th)"]     = "Elastic Cap.",
+}
+
 -- ======================
 -- JOINER TAB
 -- ======================
 do
 local joinerPage = tabPages["Joiner"]
 
--- Helper: build act lists of length n
-local function acts(n) local t={}; for i=1,n do t[i]="Act"..i end; return t end
+-- ── Dynamic stage data from RS.Modules.Data.StagesData ───────────────────────
+-- We only expose the 5 playable types. Acts are read from each stage's Acts folder.
+-- Display names come from requiring the stage module (same name as the folder).
+local STAGE_TYPES_ALLOWED = {"Story","LegendStage","Raid","Challenge","Dungeon"}
 
-local STAGES = {
-    Story        = (function() local t={}; for i=1,12 do t["Stage"..i]=acts(6) end; return t end)(),
-    LegendStage  = (function() local t={}; for i=1,12 do t["Stage"..i]=acts(3) end; return t end)(),
-    Dungeon      = { Stage1={"Act1","Act2","Act3","OccultHunt"}, Stage2={"AntIsland"}, Stage3={"FrozenVolcano"}, Stage4=acts(9), Stage5={"Underworld"} },
-    Raid         = { Stage1=acts(4), Stage2=acts(5), Stage3=acts(2) },
-    Challenge    = { Stage1={"ChallengeAct"}, Stage2={"ChallengeAct"}, Stage3={"ChallengeAct"} },
-    BossEvent    = { IgrosEvent={"Act1","Act1Elite"}, SukonoEvent={"Act1"} },
-}
+local STAGES  = {}  -- [typeName][stageKey] = {actKey, actKey, ...}
+local DISPLAY = {}  -- [typeName][stageKey] = "Human Readable Name"
 
-local selType, selStage, selAct = "Story","Stage1","Act1"
+local function loadStages()
+    local sdRoot = RS:FindFirstChild("Modules")
+    sdRoot = sdRoot and sdRoot:FindFirstChild("Data")
+    sdRoot = sdRoot and sdRoot:FindFirstChild("StagesData")
+    if not sdRoot then return end
+
+    for _, typeFolder in ipairs(sdRoot:GetChildren()) do
+        if not typeFolder:IsA("Folder") then continue end
+        local tn = typeFolder.Name
+        local allowed = false
+        for _, t in ipairs(STAGE_TYPES_ALLOWED) do if t == tn then allowed = true; break end end
+        if not allowed then continue end
+
+        STAGES[tn]  = {}
+        DISPLAY[tn] = {}
+
+        for _, stageFolder in ipairs(typeFolder:GetChildren()) do
+            if not stageFolder:IsA("Folder") then continue end
+            local sk = stageFolder.Name
+            if sk == "CustomStageData" then continue end
+
+            -- Collect act keys from Acts sub-folder
+            local acts = {}
+            local actsFolder = stageFolder:FindFirstChild("Acts")
+            if actsFolder then
+                for _, actMod in ipairs(actsFolder:GetChildren()) do
+                    if actMod:IsA("ModuleScript") then
+                        table.insert(acts, actMod.Name)
+                    end
+                end
+                table.sort(acts, function(a, b)
+                    local na = tonumber(a:match("%d+")) or 9999
+                    local nb = tonumber(b:match("%d+")) or 9999
+                    if na ~= nb then return na < nb end
+                    return a < b
+                end)
+            end
+            if #acts == 0 then continue end
+
+            STAGES[tn][sk]  = acts
+            -- Display name: require the stage module (folder name == module name)
+            local stageMod = stageFolder:FindFirstChild(sk)
+            if stageMod and stageMod:IsA("ModuleScript") then
+                local ok, data = pcall(require, stageMod)
+                if ok and type(data) == "table" then
+                    DISPLAY[tn][sk] = data.Name or data.StageName or sk
+                end
+            end
+            if not DISPLAY[tn][sk] then DISPLAY[tn][sk] = sk end
+        end
+    end
+end
+
+-- Load synchronously; if RS not ready yet give it a moment
+pcall(loadStages)
+if not next(STAGES) then
+    task.delay(3, function() pcall(loadStages) end)
+end
+
+-- ── Stage Joiner UI ───────────────────────────────────────────────────────────
+local selType, selStage, selAct = "Story", "Stage1", "Act1"
 
 local joinSec = section(joinerPage, "Stage Joiner", 1)
-label(joinSec, "Stage Type", 1)
-local typeScroll = hScroll(joinSec, 32, 2)
+label(joinSec, "Type", 1)
+local typeScroll  = hScroll(joinSec, 32, 2)
 label(joinSec, "Stage", 3)
 local stageScroll = hScroll(joinSec, 32, 4)
 label(joinSec, "Act", 5)
-local actScroll = hScroll(joinSec, 32, 6)
+local actScroll   = hScroll(joinSec, 32, 6)
 
 local function refreshActs()
-    for _,c in ipairs(actScroll:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
-    local list = STAGES[selType] and STAGES[selType][selStage] or {}
-    selAct = list[1] or selAct
-    for _,a in ipairs(list) do
-        chip(actScroll, a, a==selAct, function()
-            selAct=a
-            for _,ch in ipairs(actScroll:GetChildren()) do
+    for _, c in ipairs(actScroll:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    local list = (STAGES[selType] and STAGES[selType][selStage]) or {}
+    if list[1] then selAct = list[1] end
+    for _, a in ipairs(list) do
+        chip(actScroll, a, a == selAct, function()
+            selAct = a
+            for _, ch in ipairs(actScroll:GetChildren()) do
                 if ch:IsA("TextButton") then
                     tween(ch,{BackgroundColor3 = ch.Text==selAct and C.ACCENT or C.PANEL})
                     ch.TextColor3 = ch.Text==selAct and C.TEXT or C.SUBTEXT
@@ -850,19 +1265,28 @@ local function refreshActs()
 end
 
 local function refreshStages()
-    for _,c in ipairs(stageScroll:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+    for _, c in ipairs(stageScroll:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
     local stages = STAGES[selType] or {}
     local keys = {}
-    for k in pairs(stages) do table.insert(keys,k) end
-    table.sort(keys)
+    for k in pairs(stages) do table.insert(keys, k) end
+    table.sort(keys, function(a, b)
+        local na = tonumber(a:match("%d+")) or 9999
+        local nb = tonumber(b:match("%d+")) or 9999
+        if na ~= nb then return na < nb end
+        return a < b
+    end)
     selStage = keys[1] or selStage
-    for _,sName in ipairs(keys) do
-        chip(stageScroll, sName, sName==selStage, function()
-            selStage = sName
-            for _,ch in ipairs(stageScroll:GetChildren()) do
+    for _, sk in ipairs(keys) do
+        local label_text = DISPLAY[selType] and DISPLAY[selType][sk] or sk
+        chip(stageScroll, label_text, sk == selStage, function()
+            selStage = sk
+            for _, ch in ipairs(stageScroll:GetChildren()) do
                 if ch:IsA("TextButton") then
-                    tween(ch,{BackgroundColor3 = ch.Text==selStage and C.ACCENT or C.PANEL})
-                    ch.TextColor3 = ch.Text==selStage and C.TEXT or C.SUBTEXT
+                    local isMe = (DISPLAY[selType] and DISPLAY[selType][selStage] or selStage) == ch.Text
+                    tween(ch,{BackgroundColor3 = isMe and C.ACCENT or C.PANEL})
+                    ch.TextColor3 = isMe and C.TEXT or C.SUBTEXT
                 end
             end
             refreshActs()
@@ -871,74 +1295,101 @@ local function refreshStages()
     refreshActs()
 end
 
-local typeKeys = {}
-for k in pairs(STAGES) do table.insert(typeKeys,k) end
-table.sort(typeKeys)
-for _,tName in ipairs(typeKeys) do
-    chip(typeScroll, tName, tName==selType, function()
-        selType=tName
-        for _,ch in ipairs(typeScroll:GetChildren()) do
-            if ch:IsA("TextButton") then
-                tween(ch,{BackgroundColor3 = ch.Text==selType and C.ACCENT or C.PANEL})
-                ch.TextColor3 = ch.Text==selType and C.TEXT or C.SUBTEXT
+-- Populate type chips (only allowed types that have data)
+for _, tName in ipairs(STAGE_TYPES_ALLOWED) do
+    if STAGES[tName] then
+        chip(typeScroll, tName, tName == selType, function()
+            selType = tName
+            for _, ch in ipairs(typeScroll:GetChildren()) do
+                if ch:IsA("TextButton") then
+                    tween(ch,{BackgroundColor3 = ch.Text==selType and C.ACCENT or C.PANEL})
+                    ch.TextColor3 = ch.Text==selType and C.TEXT or C.SUBTEXT
+                end
             end
-        end
-        refreshStages()
-    end)
+            refreshStages()
+        end)
+    end
 end
 refreshStages()
 
+-- Options + join button
 local optSec = section(joinerPage, "Options", 2)
-local _, getNightmare  = toggle(optSec, "Nightmare Mode", 1)
-local _, getFriendsOnly= toggle(optSec, "Friends Only", 2)
-local _, getAutoStart  = toggle(optSec, "Auto-Start Match (actually enter)", 3, true)
+local _, getNightmare   = toggle(optSec, "Nightmare Mode",    1)
+local _, getFriendsOnly = toggle(optSec, "Friends Only",      2)
 
 local joinBtnSec = section(joinerPage, "", 3)
 local joinBtn = btn(joinBtnSec, "Join Match", C.GREEN, 1)
 joinBtn.MouseButton1Click:Connect(function()
     safeCall(function()
         local friendsOnly = getFriendsOnly()
+        -- Confirmed from decompile: LobbyEvent is at Networking.LobbyEvent
+        -- In lobby  → "AddMatch"
+        -- In match  → "StartMatch"
+        -- Payload matches LobbyState.Get() structure exactly
+        local lobbyEv = Net:FindFirstChild("LobbyEvent")
+        if not lobbyEv then error("LobbyEvent not found") end
+
         local payload = {
-            Difficulty  = getNightmare() and "Nightmare" or "Normal",
-            Act         = selAct,
             StageType   = selType,
             Stage       = selStage,
+            Act         = selAct,
+            Difficulty  = getNightmare() and "Nightmare" or "Normal",
             FriendsOnly = friendsOnly,
         }
 
-        -- Search direct children of Networking only — no recursive search.
-        -- Recursive FindFirstChild can match unrelated remotes deeper in the tree.
-        -- AddMatch/CreateMatch excluded — those strings crash SummonButtonsHandler.
-        local joinRemoteNames = {"JoinMatch", "MatchEvent", "LobbyMatchEvent"}
-        local fired = false
-        for _, name in ipairs(joinRemoteNames) do
-            local r = Net:FindFirstChild(name)  -- direct children only
-            if r and (r:IsA("RemoteEvent") or r:IsA("RemoteFunction")) then
-                local ok = pcall(function()
-                    if r:IsA("RemoteFunction") then
-                        r:InvokeServer(friendsOnly, payload)
-                    else
-                        r:FireServer(friendsOnly, payload)
-                    end
-                end)
-                if ok then fired = true; break end
-            end
+        -- In-match uses StartMatch; lobby uses AddMatch
+        if inGameMode() then
+            lobbyEv:FireServer("StartMatch", payload)
+        else
+            lobbyEv:FireServer("AddMatch", payload)
         end
-        if not fired then error("No join remote found") end
-
-        if getAutoStart() then
-            task.wait(0.5)
-            local sm = Net:FindFirstChild("StartMatch", true) or Net:FindFirstChild("PlayMatch", true)
-            if sm and (sm:IsA("RemoteEvent") or sm:IsA("RemoteFunction")) then
-                pcall(function()
-                    if sm:IsA("RemoteFunction") then sm:InvokeServer(friendsOnly)
-                    else sm:FireServer(friendsOnly) end
-                end)
-            end
-        end
-    end, "Joining "..selType.." "..selStage.." "..selAct, "Join failed")
+    end, "Joining "..selType.." "..selStage.."/"..selAct, "Join failed")
 end)
+
+-- ── Odyssey Adventure Joiner ──────────────────────────────────────────────────
+local advSec = section(joinerPage, "Odyssey Adventure", 4)
+label(advSec, "Character", 1)
+local advScroll = hScroll(advSec, 32, 2)
+
+local selAdventure = _UNIT_ORDER[1]
+for _, uName in ipairs(_UNIT_ORDER) do
+    local shortName = _UNIT_SHORT[uName] or uName
+    chip(advScroll, shortName, uName == selAdventure, function()
+        selAdventure = uName
+        for _, ch in ipairs(advScroll:GetChildren()) do
+            if ch:IsA("TextButton") then
+                local isMe = (_UNIT_SHORT[selAdventure] or selAdventure) == ch.Text
+                tween(ch,{BackgroundColor3 = isMe and C.ACCENT or C.PANEL})
+                ch.TextColor3 = isMe and C.TEXT or C.SUBTEXT
+            end
+        end
+    end)
 end
+
+local advBtnSec = section(joinerPage, "", 5)
+local advJoinBtn = btn(advBtnSec, "Join Adventure", C.ACCENT, 1)
+advJoinBtn.MouseButton1Click:Connect(function()
+    safeCall(function()
+        -- Confirmed flow from decompile:
+        -- 1. SetLastCharacter on LoadoutEvent (Networking.Odyssey.Adventure.LoadoutEvent)
+        -- 2. Play "Adventure" on OdysseyEvent (Networking.Odyssey.OdysseyEvent)
+        local odysseyFolder = Net:FindFirstChild("Odyssey")
+        if not odysseyFolder then error("Odyssey folder not found") end
+        local loadoutEv = odysseyFolder:FindFirstChild("Adventure")
+                      and odysseyFolder.Adventure:FindFirstChild("LoadoutEvent")
+        local odysseyEv = odysseyFolder:FindFirstChild("OdysseyEvent")
+        if not loadoutEv then error("LoadoutEvent not found") end
+        if not odysseyEv then error("OdysseyEvent not found")  end
+
+        pcall(function()
+            loadoutEv:FireServer("SetLastCharacter", { CharacterName = selAdventure })
+        end)
+        task.wait(0.25)
+        odysseyEv:FireServer("Play", "Adventure", { CharacterName = selAdventure })
+    end, "Starting Adventure: "..(_UNIT_SHORT[selAdventure] or selAdventure), "Adventure join failed")
+end)
+
+end  -- JOINER TAB
 
 -- Server-side state trackers — module scope so startup sync task can read them
 local autoSkipWavesServerState = false
@@ -955,6 +1406,25 @@ if yenEvGlobal then
     yenEvGlobal.OnClientEvent:Connect(function(amount)
         if type(amount) == "number" then currentYen = amount end
     end)
+end
+
+-- ── BaseCancelFrame auto-dismiss ──────────────────────────────────────────────
+-- PopupEvent.OnClientEvent fires (popupType, message) before the popup renders.
+-- BaseCancelFrame = info-only dismissable alert (no action needed) → destroy it.
+-- BaseConfirmationFrame = yes/no dialog (needed for ninjutsu passive macro) → leave alone.
+do
+    local popupEv = Net:FindFirstChild("ClientListeners")
+    popupEv = popupEv and popupEv:FindFirstChild("PopupEvent")
+    if popupEv then
+        popupEv.OnClientEvent:Connect(function(popupType)
+            if popupType ~= "BaseCancelFrame" then return end
+            task.wait(0.1)
+            local screen = realGui:FindFirstChild("PopupScreen")
+            if screen then
+                pcall(function() screen:Destroy() end)
+            end
+        end)
+    end
 end
 
 -- Track current wave — tries WavesAmount label AND WaveInfoEvent as backup
@@ -1904,24 +2374,7 @@ end -- close Game Tab do block
 -- ================================================================
 -- ODYSSEY CARD DATA
 -- ================================================================
-local _UNIT_ORDER = {
-    "Iscanur (Pride)","Song Jinwu and Igros","Rogita (Super 4)",
-    "Shinobi God (Infinite Dreams)","Regnaw (Rage)","Divalo (Requiem)",
-    "Yomomata (Captain)","Hellkiller (Slayer)","Manipulator (Spider)",
-    "Elastic Captain (Cog 5th)"
-}
-local _UNIT_SHORT = {
-    ["Iscanur (Pride)"]               = "Iscanur",
-    ["Song Jinwu and Igros"]          = "Song Jinwu",
-    ["Rogita (Super 4)"]              = "Rogita",
-    ["Shinobi God (Infinite Dreams)"] = "Shinobi God",
-    ["Regnaw (Rage)"]                 = "Regnaw",
-    ["Divalo (Requiem)"]              = "Divalo",
-    ["Yomomata (Captain)"]            = "Yomomata",
-    ["Hellkiller (Slayer)"]           = "Hellkiller",
-    ["Manipulator (Spider)"]          = "Manipulator",
-    ["Elastic Captain (Cog 5th)"]     = "Elastic Cap.",
-}
+-- _UNIT_ORDER and _UNIT_SHORT are declared before the Joiner tab (earlier in script)
 local _UNIT_CARD_DATA = {
     ["Iscanur (Pride)"] = {
         {id="RarePlaceUpgradeFour",           n="Instant Noon",           r="Rare"},
