@@ -1163,29 +1163,25 @@ local _UNIT_SHORT = {
 do
 local joinerPage = tabPages["Joiner"]
 
--- ── Dynamic stage data from RS.Modules.Data.StagesData ───────────────────────
--- We only expose the 5 playable types. Acts are read from each stage's Acts folder.
--- Display names come from requiring the stage module (same name as the folder).
+-- ── Stage data (same loadStages as before, confirmed paths) ──────────────────
 local STAGE_TYPES_ALLOWED = {"Story","LegendStage","Raid","Challenge","Dungeon"}
-
-local STAGES  = {}  -- [typeName][stageKey] = {actKey, actKey, ...}
-local DISPLAY = {}  -- [typeName][stageKey] = "Human Readable Name"
+local STAGES  = {}
+local DISPLAY = {}
 
 local function loadStages()
     local sdRoot = RS:FindFirstChild("Modules")
     sdRoot = sdRoot and sdRoot:FindFirstChild("Data")
     sdRoot = sdRoot and sdRoot:FindFirstChild("StagesData")
     if not sdRoot then return end
-
     for _, typeFolder in ipairs(sdRoot:GetChildren()) do
         if typeFolder:IsA("Folder") then
             local tn = typeFolder.Name
             local allowed = false
-            for _, t in ipairs(STAGE_TYPES_ALLOWED) do if t == tn then allowed = true; break end end
+            for _, t in ipairs(STAGE_TYPES_ALLOWED) do
+                if t == tn then allowed = true; break end
+            end
             if allowed then
-                STAGES[tn]  = {}
-                DISPLAY[tn] = {}
-
+                STAGES[tn] = {}; DISPLAY[tn] = {}
                 for _, stageFolder in ipairs(typeFolder:GetChildren()) do
                     if stageFolder:IsA("Folder") and stageFolder.Name ~= "CustomStageData" then
                         local sk = stageFolder.Name
@@ -1205,7 +1201,7 @@ local function loadStages()
                             end)
                         end
                         if #acts > 0 then
-                            STAGES[tn][sk]  = acts
+                            STAGES[tn][sk] = acts
                             local stageMod = stageFolder:FindFirstChild(sk)
                             if stageMod and stageMod:IsA("ModuleScript") then
                                 local ok, data = pcall(require, stageMod)
@@ -1221,166 +1217,283 @@ local function loadStages()
         end
     end
 end
-
--- Load synchronously; if RS not ready yet give it a moment
 pcall(loadStages)
-if not next(STAGES) then
-    task.delay(3, function() pcall(loadStages) end)
-end
+if not next(STAGES) then task.delay(3, function() pcall(loadStages) end) end
 
--- ── Stage Joiner UI ───────────────────────────────────────────────────────────
-local selType, selStage, selAct = "Story", "Stage1", "Act1"
+-- ── Global options (apply to all stage-type sections) ────────────────────────
+local optSec = section(joinerPage, "Options", 1)
+local _, getNightmare   = toggle(optSec, "Nightmare Mode", 1, false, "joiner.nightmare")
+local _, getFriendsOnly = toggle(optSec, "Friends Only",   2, false, "joiner.friends")
 
-local joinSec = section(joinerPage, "Stage Joiner", 1)
-label(joinSec, "Type", 1)
-local typeScroll  = hScroll(joinSec, 32, 2)
-label(joinSec, "Stage", 3)
-local stageScroll = hScroll(joinSec, 32, 4)
-label(joinSec, "Act", 5)
-local actScroll   = hScroll(joinSec, 32, 6)
-
-local function refreshActs()
-    for _, c in ipairs(actScroll:GetChildren()) do
-        if c:IsA("TextButton") then c:Destroy() end
-    end
-    local list = (STAGES[selType] and STAGES[selType][selStage]) or {}
-    if list[1] then selAct = list[1] end
-    for _, a in ipairs(list) do
-        chip(actScroll, a, a == selAct, function()
-            selAct = a
-            for _, ch in ipairs(actScroll:GetChildren()) do
-                if ch:IsA("TextButton") then
-                    tween(ch,{BackgroundColor3 = ch.Text==selAct and C.ACCENT or C.PANEL})
-                    ch.TextColor3 = ch.Text==selAct and C.TEXT or C.SUBTEXT
-                end
-            end
-        end)
-    end
-end
-
-local function refreshStages()
-    for _, c in ipairs(stageScroll:GetChildren()) do
-        if c:IsA("TextButton") then c:Destroy() end
-    end
-    local stages = STAGES[selType] or {}
-    local keys = {}
-    for k in pairs(stages) do table.insert(keys, k) end
-    table.sort(keys, function(a, b)
-        local na = tonumber(a:match("%d+")) or 9999
-        local nb = tonumber(b:match("%d+")) or 9999
-        if na ~= nb then return na < nb end
-        return a < b
-    end)
-    selStage = keys[1] or selStage
-    for _, sk in ipairs(keys) do
-        local label_text = DISPLAY[selType] and DISPLAY[selType][sk] or sk
-        chip(stageScroll, label_text, sk == selStage, function()
-            selStage = sk
-            for _, ch in ipairs(stageScroll:GetChildren()) do
-                if ch:IsA("TextButton") then
-                    local isMe = (DISPLAY[selType] and DISPLAY[selType][selStage] or selStage) == ch.Text
-                    tween(ch,{BackgroundColor3 = isMe and C.ACCENT or C.PANEL})
-                    ch.TextColor3 = isMe and C.TEXT or C.SUBTEXT
-                end
-            end
-            refreshActs()
-        end)
-    end
-    refreshActs()
-end
-
--- Populate type chips (only allowed types that have data)
-for _, tName in ipairs(STAGE_TYPES_ALLOWED) do
-    if STAGES[tName] then
-        chip(typeScroll, tName, tName == selType, function()
-            selType = tName
-            for _, ch in ipairs(typeScroll:GetChildren()) do
-                if ch:IsA("TextButton") then
-                    tween(ch,{BackgroundColor3 = ch.Text==selType and C.ACCENT or C.PANEL})
-                    ch.TextColor3 = ch.Text==selType and C.TEXT or C.SUBTEXT
-                end
-            end
-            refreshStages()
-        end)
-    end
-end
-refreshStages()
-
--- Options + join button
-local optSec = section(joinerPage, "Options", 2)
-local _, getNightmare   = toggle(optSec, "Nightmare Mode",    1)
-local _, getFriendsOnly = toggle(optSec, "Friends Only",      2)
-
-local joinBtnSec = section(joinerPage, "", 3)
-local joinBtn = btn(joinBtnSec, "Join Match", C.GREEN, 1)
-joinBtn.MouseButton1Click:Connect(function()
-    safeCall(function()
-        local friendsOnly = getFriendsOnly()
-        -- Confirmed from decompile: LobbyEvent is at Networking.LobbyEvent
-        -- In lobby  → "AddMatch"
-        -- In match  → "StartMatch"
-        -- Payload matches LobbyState.Get() structure exactly
-        local lobbyEv = Net:FindFirstChild("LobbyEvent")
-        if not lobbyEv then error("LobbyEvent not found") end
-
-        local payload = {
-            StageType   = selType,
-            Stage       = selStage,
-            Act         = selAct,
-            Difficulty  = getNightmare() and "Nightmare" or "Normal",
-            FriendsOnly = friendsOnly,
-        }
-
-        -- In-match uses StartMatch; lobby uses AddMatch
-        if inGameMode() then
-            lobbyEv:FireServer("StartMatch", payload)
-        else
-            lobbyEv:FireServer("AddMatch", payload)
+-- ── Helper: build a vertical radio list inside a parent frame ────────────────
+-- Returns a setter table {key → setSelected(bool)} and a getter for current selection
+local function makeRadioList(parent, items, getLabel, savePrefix)
+    -- items: array of keys; getLabel(key) → display string
+    local setters = {}
+    local selected = items[1] or nil
+    for j, key in ipairs(items) do
+        local k = key
+        local f = Instance.new("Frame", parent)
+        f.Size = UDim2.new(1, 0, 0, 30)
+        f.BackgroundColor3 = (j == 1) and C.ACCENT or C.PANEL
+        f.BorderSizePixel = 0
+        f.LayoutOrder = j
+        corner(f, 6)
+        local row = Instance.new("TextButton", f)
+        row.Size = UDim2.new(1, -12, 1, 0)
+        row.Position = UDim2.new(0, 10, 0, 0)
+        row.BackgroundTransparency = 1
+        row.Text = getLabel(k)
+        row.TextColor3 = (j == 1) and C.TEXT or C.SUBTEXT
+        row.TextSize = 12
+        row.Font = FONT_SEMI
+        row.TextXAlignment = Enum.TextXAlignment.Left
+        row.AutoButtonColor = false
+        local function setSel(on)
+            f.BackgroundColor3 = on and C.ACCENT or C.PANEL
+            row.TextColor3 = on and C.TEXT or C.SUBTEXT
         end
-    end, "Joining "..selType.." "..selStage.."/"..selAct, "Join failed")
-end)
+        setters[k] = setSel
+        row.MouseButton1Click:Connect(function()
+            for _, s in pairs(setters) do s(false) end
+            setSel(true)
+            selected = k
+        end)
+    end
+    return setters, function() return selected end
+end
 
--- ── Odyssey Adventure Joiner ──────────────────────────────────────────────────
-local advSec = section(joinerPage, "Odyssey Adventure", 4)
-label(advSec, "Character", 1)
-local advScroll = hScroll(advSec, 32, 2)
+-- ── Helper: collapsible button + list frame inside a section ─────────────────
+local function makeColPanel(parent, label, btnOrder, listOrder)
+    local colBtn = Instance.new("TextButton", parent)
+    colBtn.Size = UDim2.new(1, 0, 0, 28)
+    colBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    colBtn.BorderSizePixel = 0
+    colBtn.LayoutOrder = btnOrder
+    colBtn.Text = "▶  "..label
+    colBtn.TextColor3 = C.SUBTEXT
+    colBtn.TextSize = 12
+    colBtn.Font = FONT_SEMI
+    colBtn.AutoButtonColor = false
+    colBtn.ZIndex = 3
+    corner(colBtn, 6)
+    local colList = Instance.new("Frame", parent)
+    colList.Size = UDim2.new(1, 0, 0, 0)
+    colList.AutomaticSize = Enum.AutomaticSize.Y
+    colList.BackgroundTransparency = 1
+    colList.BorderSizePixel = 0
+    colList.LayoutOrder = listOrder
+    colList.Visible = false
+    listLayout(colList, nil, 2)
+    makeCollapsible(colBtn, colList, label)
+    return colList
+end
+
+-- ── Per-type sections ─────────────────────────────────────────────────────────
+local TYPE_DISPLAY = {
+    Story="Story Mode", LegendStage="Legend Stage",
+    Raid="Raid", Challenge="Challenge", Dungeon="Dungeon"
+}
+
+for i, typeName in ipairs(STAGE_TYPES_ALLOWED) do
+    local dispName = TYPE_DISPLAY[typeName]
+    local sec = section(joinerPage, dispName, i + 1)
+
+    local _, getAutoJoin = toggle(sec, "Auto Join", 1, false, "joiner."..typeName..".auto")
+
+    -- Stage collapsible
+    local stageList = makeColPanel(sec, "Stage", 2, 3)
+
+    -- Act collapsible (rebuilt when stage changes)
+    local actList = makeColPanel(sec, "Act", 4, 5)
+
+    -- State for this type
+    local selStage = nil
+    local selAct   = nil
+    local actSetters = {}
+
+    local function buildActs()
+        for _, c in ipairs(actList:GetChildren()) do
+            if c:IsA("Frame") then c:Destroy() end
+        end
+        actSetters = {}
+        selAct = nil
+        if not selStage then return end
+        local acts = (STAGES[typeName] and STAGES[typeName][selStage]) or {}
+        local newSetters, getSelAct = makeRadioList(actList, acts,
+            function(k) return k end, "joiner."..typeName..".act")
+        actSetters = newSetters
+        selAct = acts[1] or nil
+        -- Wire up act selection to update selAct
+        for _, actKey in ipairs(acts) do
+            local ak = actKey
+            -- Re-wrap click to update selAct (makeRadioList already handles visuals)
+            local origSetter = actSetters[ak]
+            actSetters[ak] = function(on)
+                origSetter(on)
+                if on then selAct = ak end
+            end
+        end
+        -- Reconnect buttons (we need to override clicks since makeRadioList
+        -- closed over its own `selected` var which we can't access)
+        local order = 0
+        for _, child in ipairs(actList:GetChildren()) do
+            if child:IsA("Frame") then
+                order = order + 1
+                local ak = acts[order]
+                if ak then
+                    local row = child:FindFirstChildOfClass("TextButton")
+                    if row then
+                        row.MouseButton1Click:Connect(function()
+                            for _, s in pairs(actSetters) do s(false) end
+                            actSetters[ak](true)
+                            selAct = ak
+                        end)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Build stage list
+    local stageKeys = {}
+    if STAGES[typeName] then
+        for k in pairs(STAGES[typeName]) do table.insert(stageKeys, k) end
+        table.sort(stageKeys, function(a, b)
+            local na = tonumber(a:match("%d+")) or 9999
+            local nb = tonumber(b:match("%d+")) or 9999
+            if na ~= nb then return na < nb end
+            return a < b
+        end)
+    end
+
+    local stageSetters = {}
+    for j, sk in ipairs(stageKeys) do
+        local skk = sk
+        local disp = (DISPLAY[typeName] and DISPLAY[typeName][sk]) or sk
+        local f = Instance.new("Frame", stageList)
+        f.Size = UDim2.new(1, 0, 0, 30)
+        f.BackgroundColor3 = (j == 1) and C.ACCENT or C.PANEL
+        f.BorderSizePixel = 0
+        f.LayoutOrder = j
+        corner(f, 6)
+        local row = Instance.new("TextButton", f)
+        row.Size = UDim2.new(1, -12, 1, 0)
+        row.Position = UDim2.new(0, 10, 0, 0)
+        row.BackgroundTransparency = 1
+        row.Text = disp
+        row.TextColor3 = (j == 1) and C.TEXT or C.SUBTEXT
+        row.TextSize = 12
+        row.Font = FONT_SEMI
+        row.TextXAlignment = Enum.TextXAlignment.Left
+        row.AutoButtonColor = false
+        local function setStageSel(on)
+            f.BackgroundColor3 = on and C.ACCENT or C.PANEL
+            row.TextColor3 = on and C.TEXT or C.SUBTEXT
+        end
+        stageSetters[skk] = setStageSel
+        row.MouseButton1Click:Connect(function()
+            for _, s in pairs(stageSetters) do s(false) end
+            setStageSel(true)
+            selStage = skk
+            buildActs()
+        end)
+    end
+
+    -- Select first stage by default
+    if stageKeys[1] then
+        selStage = stageKeys[1]
+        if stageSetters[selStage] then stageSetters[selStage](true) end
+        buildActs()
+    end
+
+    -- Auto-join loop (10s debounce, lobby-only)
+    task.spawn(function()
+        local lastFire = 0
+        while true do
+            task.wait(0.5)
+            if not getAutoJoin() then continue end
+            if inGameMode() then continue end
+            if not selStage or not selAct then continue end
+            if os.clock() - lastFire < 10 then continue end
+            local lobbyEv = Net:FindFirstChild("LobbyEvent")
+            if not lobbyEv then continue end
+            lastFire = os.clock()
+            pcall(function()
+                lobbyEv:FireServer("AddMatch", {
+                    StageType   = typeName,
+                    Stage       = selStage,
+                    Act         = selAct,
+                    Difficulty  = getNightmare() and "Nightmare" or "Normal",
+                    FriendsOnly = getFriendsOnly(),
+                })
+            end)
+        end
+    end)
+end
+
+-- ── Odyssey Adventure section ─────────────────────────────────────────────────
+local advSec = section(joinerPage, "Odyssey Adventure", #STAGE_TYPES_ALLOWED + 2)
+local _, getAdvJoin = toggle(advSec, "Auto Join", 1, false, "joiner.odyssey.auto")
+
+local charList = makeColPanel(advSec, "Character", 2, 3)
 
 local selAdventure = _UNIT_ORDER[1]
-for _, uName in ipairs(_UNIT_ORDER) do
+local advSetters = {}
+
+for i, uName in ipairs(_UNIT_ORDER) do
+    local un = uName
     local shortName = _UNIT_SHORT[uName] or uName
-    chip(advScroll, shortName, uName == selAdventure, function()
-        selAdventure = uName
-        for _, ch in ipairs(advScroll:GetChildren()) do
-            if ch:IsA("TextButton") then
-                local isMe = (_UNIT_SHORT[selAdventure] or selAdventure) == ch.Text
-                tween(ch,{BackgroundColor3 = isMe and C.ACCENT or C.PANEL})
-                ch.TextColor3 = isMe and C.TEXT or C.SUBTEXT
-            end
-        end
+    local f = Instance.new("Frame", charList)
+    f.Size = UDim2.new(1, 0, 0, 30)
+    f.BackgroundColor3 = (i == 1) and C.ACCENT or C.PANEL
+    f.BorderSizePixel = 0
+    f.LayoutOrder = i
+    corner(f, 6)
+    local row = Instance.new("TextButton", f)
+    row.Size = UDim2.new(1, -12, 1, 0)
+    row.Position = UDim2.new(0, 10, 0, 0)
+    row.BackgroundTransparency = 1
+    row.Text = shortName
+    row.TextColor3 = (i == 1) and C.TEXT or C.SUBTEXT
+    row.TextSize = 12
+    row.Font = FONT_SEMI
+    row.TextXAlignment = Enum.TextXAlignment.Left
+    row.AutoButtonColor = false
+    local function setCharSel(on)
+        f.BackgroundColor3 = on and C.ACCENT or C.PANEL
+        row.TextColor3 = on and C.TEXT or C.SUBTEXT
+    end
+    advSetters[un] = setCharSel
+    row.MouseButton1Click:Connect(function()
+        for _, s in pairs(advSetters) do s(false) end
+        setCharSel(true)
+        selAdventure = un
     end)
 end
 
-local advBtnSec = section(joinerPage, "", 5)
-local advJoinBtn = btn(advBtnSec, "Join Adventure", C.ACCENT, 1)
-advJoinBtn.MouseButton1Click:Connect(function()
-    safeCall(function()
-        -- Confirmed flow from decompile:
-        -- 1. SetLastCharacter on LoadoutEvent (Networking.Odyssey.Adventure.LoadoutEvent)
-        -- 2. Play "Adventure" on OdysseyEvent (Networking.Odyssey.OdysseyEvent)
-        local odysseyFolder = Net:FindFirstChild("Odyssey")
-        if not odysseyFolder then error("Odyssey folder not found") end
-        local loadoutEv = odysseyFolder:FindFirstChild("Adventure")
-                      and odysseyFolder.Adventure:FindFirstChild("LoadoutEvent")
-        local odysseyEv = odysseyFolder:FindFirstChild("OdysseyEvent")
-        if not loadoutEv then error("LoadoutEvent not found") end
-        if not odysseyEv then error("OdysseyEvent not found")  end
-
+task.spawn(function()
+    local lastFire = 0
+    while true do
+        task.wait(0.5)
+        if not getAdvJoin() then continue end
+        if inGameMode() then continue end
+        if os.clock() - lastFire < 10 then continue end
+        local odyFolder = Net:FindFirstChild("Odyssey")
+        if not odyFolder then continue end
+        local loadoutEv = odyFolder:FindFirstChild("Adventure")
+                      and odyFolder.Adventure:FindFirstChild("LoadoutEvent")
+        local odysseyEv = odyFolder:FindFirstChild("OdysseyEvent")
+        if not loadoutEv or not odysseyEv then continue end
+        lastFire = os.clock()
         pcall(function()
-            loadoutEv:FireServer("SetLastCharacter", { CharacterName = selAdventure })
+            loadoutEv:FireServer("SetLastCharacter", {CharacterName = selAdventure})
         end)
         task.wait(0.25)
-        odysseyEv:FireServer("Play", "Adventure", { CharacterName = selAdventure })
-    end, "Starting Adventure: "..(_UNIT_SHORT[selAdventure] or selAdventure), "Adventure join failed")
+        pcall(function()
+            odysseyEv:FireServer("Play", "Adventure", {CharacterName = selAdventure})
+        end)
+    end
 end)
 
 end  -- JOINER TAB
