@@ -667,11 +667,15 @@ local function hScroll(parent, h, order)
     return s
 end
 
+-- Tab page references at task.defer scope so both the tab do blocks AND
+-- standalone sections (craft, game tab) can access them without going out of scope
+local lobbyPage = tabPages["Lobby"]
+local gamePage  = tabPages["Game"]
+
 -- ======================
 -- LOBBY TAB - AUTO SUMMON TOGGLES
 -- ======================
 do
-local lobbyPage = tabPages["Lobby"]
 
 local sumSec = section(lobbyPage, "Auto Summoner", 1)
 
