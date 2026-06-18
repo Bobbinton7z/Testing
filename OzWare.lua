@@ -316,7 +316,7 @@ loadOzSettings()
 -- WINDOW  (premium redesign)
 -- Logo image: upload OzWare logo to Roblox, replace LOGO_ASSET_ID below
 -- ======================
-local LOGO_ASSET = "rbxassetid://112304523807314"
+local LOGO_ASSET = "rbxassetid://103400985818616"
 local WIN_W, WIN_H = 720, 440
 local SIDEBAR_W    = 152
 
@@ -4529,20 +4529,23 @@ floatBtn.Name="OzFloat"
 floatBtn.Size=UDim2.new(0,52,0,52)
 floatBtn.Position=UDim2.new(0,16,1,-68)
 floatBtn.AnchorPoint=Vector2.new(0,0)
-floatBtn.BackgroundColor3=Color3.fromRGB(0,0,0)
-floatBtn.BackgroundTransparency=0
+floatBtn.BackgroundColor3=Color3.fromRGB(255,255,255)
+floatBtn.BackgroundTransparency=0.85
 floatBtn.BorderSizePixel=0; floatBtn.AutoButtonColor=false
 floatBtn.ZIndex=50; floatBtn.Image=""; floatBtn.Parent=gui
 Instance.new("UICorner",floatBtn).CornerRadius=UDim.new(0,26)
 floatBtn.ClipsDescendants=true
-stroke(floatBtn,Color3.fromRGB(0,0,0),2)
+stroke(floatBtn,Color3.fromRGB(255,200,215),1)
+-- make the stroke transparent
+local fStroke = floatBtn:FindFirstChildOfClass("UIStroke")
+if fStroke then fStroke.Transparency = 0.55 end
 
 -- Glow bloom
 local fbGlow = Instance.new("ImageLabel",floatBtn)
 fbGlow.Size=UDim2.new(0,80,0,80); fbGlow.AnchorPoint=Vector2.new(0.5,0.5)
 fbGlow.Position=UDim2.new(0.5,0,0.5,0); fbGlow.BackgroundTransparency=1
 fbGlow.Image="rbxassetid://5028857084"; fbGlow.ImageColor3=C.ACCENT2
-fbGlow.ImageTransparency=0.55; fbGlow.ZIndex=49
+fbGlow.ImageTransparency=0.7; fbGlow.ZIndex=49
 
 -- Logo image on float button
 local eyeLbl = Instance.new("ImageLabel",floatBtn)
@@ -4550,7 +4553,7 @@ eyeLbl.Size=UDim2.new(0,44,0,44)
 eyeLbl.AnchorPoint=Vector2.new(0.5,0.5)
 eyeLbl.Position=UDim2.new(0.5,0,0.5,0)
 eyeLbl.BackgroundTransparency=1
-eyeLbl.Image="rbxassetid://71180844435778"
+eyeLbl.Image="rbxassetid://103400985818616"
 eyeLbl.ScaleType=Enum.ScaleType.Fit; eyeLbl.ZIndex=51
 
 
