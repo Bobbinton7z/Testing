@@ -3646,12 +3646,25 @@ do
 end
 
 end -- _setupOdysseyTab
-_setupOdysseyTab()
+
+-- Tab functions are pcall-wrapped: one tab failing cannot prevent others from loading.
+-- Rules for all future tab additions:
+--   1. Each tab's setup code goes inside its own local function (_setup*Tab)
+--   2. Any require() or WaitForChild() that might yield must be in task.spawn, never inline
+--   3. New module-scope locals must be in a table (not bare) to stay under Luau's 200-register cap
+--   4. Always verify block balance (do/end) after any edit using the tokenizer
+local function _safeSetup(name, fn)
+    local ok, err = pcall(fn)
+    if not ok then notify("["..name.."] setup error: "..tostring(err):sub(1,60), false) end
+end
+_safeSetup("Odyssey",  _setupOdysseyTab)
+_safeSetup("SpringLTM",_setupSpringTab)
+_safeSetup("Macro",    _setupMacroTab)
 
 -- ======================
 -- SPRING LTM TAB
 -- ======================
-do
+local function _setupSpringTab()
 local springPage = tabPages["SpringLTM"]
 local springSec  = section(springPage, "Spring LTM", 1)
 local springNet  = RS:FindFirstChild("Networking")
@@ -3734,12 +3747,12 @@ do
         end
     end)
 end
-end
+end -- _setupSpringTab
 
 -- ======================
 -- MACRO TAB
 -- ======================
-do
+local function _setupMacroTab()
 local macroPage = tabPages["Macro"]
 local Net        = RS:FindFirstChild("Networking")
 local unitEv     = Net and Net:FindFirstChild("UnitEvent")
@@ -4386,7 +4399,7 @@ if _macroGameEv then
     end)
 end
 
-end -- close Macro Tab do block
+end -- _setupMacroTab
 
 -- ======================
 -- BOOT
