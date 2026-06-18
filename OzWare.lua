@@ -845,16 +845,15 @@ end
 do
 local craftSec = section(lobbyPage, "Craft & Use", 3)
 
--- OwnedItemsHandler — confirmed path from decompile:
--- every game script uses require(StarterPlayer.Modules.Data.Items.OwnedItemsHandler)
-local _oih
-do
+-- OwnedItemsHandler — loaded async so require() yield doesn't block script init.
+-- Confirmed path from decompile: every game script uses this exact require.
+local _oih = nil
+task.spawn(function()
     local ok, h = pcall(function()
-        local sp = game:GetService("StarterPlayer")
-        return require(sp:WaitForChild("Modules"):WaitForChild("Data"):WaitForChild("Items"):WaitForChild("OwnedItemsHandler"))
+        return require(game:GetService("StarterPlayer").Modules.Data.Items.OwnedItemsHandler)
     end)
-    _oih = ok and h or nil
-end
+    if ok and type(h) == "table" then _oih = h end
+end)
 local function getItemCount(name)
     if not _oih then return 0 end
     local ok, n = pcall(function() return _oih.GetItemAmount(name) end)
