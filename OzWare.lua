@@ -111,8 +111,8 @@ local C = {
     GREEN    = Color3.fromRGB(80,  200, 140),
     RED      = Color3.fromRGB(220, 70,  100),
     YELLOW   = Color3.fromRGB(230, 180, 60),
-    TEXT     = Color3.fromRGB(235, 235, 235),        -- near-white
-    SUBTEXT  = Color3.fromRGB(130, 130, 140),        -- grey inactive
+    TEXT     = Color3.fromRGB(240, 240, 240),        -- near-white
+    SUBTEXT  = Color3.fromRGB(190, 185, 205),        -- light grey inactive
     DIM      = Color3.fromRGB(80,  80,  90),         -- very dim
     DISABLED = Color3.fromRGB(75,  75,  82),         -- off-circle (visible on dark bg)
 }
@@ -1164,7 +1164,7 @@ do
 local joinerPage = tabPages["Joiner"]
 
 -- ── Stage data (same loadStages as before, confirmed paths) ──────────────────
-local STAGE_TYPES_ALLOWED = {"Story","LegendStage","Raid","Challenge","Dungeon"}
+local STAGE_TYPES_ALLOWED = {"Story","LegendStage","Raid","Dungeon"}
 local STAGES  = {}
 local DISPLAY = {}
 
@@ -1220,15 +1220,12 @@ end
 pcall(loadStages)
 if not next(STAGES) then task.delay(3, function() pcall(loadStages) end) end
 
--- ── Global options (apply to all stage-type sections) ────────────────────────
-local optSec = section(joinerPage, "Options", 1)
-local _, getNightmare   = toggle(optSec, "Nightmare Mode", 1, false, "joiner.nightmare")
-local _, getFriendsOnly = toggle(optSec, "Friends Only",   2, false, "joiner.friends")
+-- Nightmare Mode lives inside Story Mode section only
+-- Friends Only removed from joiner
+local getNightmare = function() return false end  -- overridden when Story section is built
 
--- ── Helper: build a vertical radio list inside a parent frame ────────────────
--- Returns a setter table {key → setSelected(bool)} and a getter for current selection
-local function makeRadioList(parent, items, getLabel, savePrefix)
-    -- items: array of keys; getLabel(key) → display string
+-- ── Helper: vertical radio list ──────────────────────────────────────────────
+local function makeRadioList(parent, items, getLabel)
     local setters = {}
     local selected = items[1] or nil
     for j, key in ipairs(items) do
@@ -1263,7 +1260,7 @@ local function makeRadioList(parent, items, getLabel, savePrefix)
     return setters, function() return selected end
 end
 
--- ── Helper: collapsible button + list frame inside a section ─────────────────
+-- ── Helper: collapsible button + list frame ───────────────────────────────────
 local function makeColPanel(parent, label, btnOrder, listOrder)
     local colBtn = Instance.new("TextButton", parent)
     colBtn.Size = UDim2.new(1, 0, 0, 28)
@@ -1297,15 +1294,24 @@ local TYPE_DISPLAY = {
 
 for i, typeName in ipairs(STAGE_TYPES_ALLOWED) do
     local dispName = TYPE_DISPLAY[typeName]
-    local sec = section(joinerPage, dispName, i + 1)
+    local sec = section(joinerPage, dispName, i)   -- starts at 1, no optSec offset
 
     local _, getAutoJoin = toggle(sec, "Auto Join", 1, false, "joiner."..typeName..".auto")
 
-    -- Stage collapsible
-    local stageList = makeColPanel(sec, "Stage", 2, 3)
+    -- Story Mode gets a Nightmare toggle; other types always use Normal difficulty
+    local stageColOrder, stageListOrder, actColOrder, actListOrder
+    if typeName == "Story" then
+        local _, nm = toggle(sec, "Nightmare Mode", 2, false, "joiner.nightmare")
+        getNightmare = nm   -- upvalue updated; Story loop closure will see this getter
+        stageColOrder = 3; stageListOrder = 4
+        actColOrder   = 5; actListOrder   = 6
+    else
+        stageColOrder = 2; stageListOrder = 3
+        actColOrder   = 4; actListOrder   = 5
+    end
 
-    -- Act collapsible (rebuilt when stage changes)
-    local actList = makeColPanel(sec, "Act", 4, 5)
+    local stageList = makeColPanel(sec, "Stage", stageColOrder, stageListOrder)
+    local actList   = makeColPanel(sec, "Act",   actColOrder,   actListOrder)
 
     -- State for this type
     local selStage = nil
@@ -1419,13 +1425,15 @@ for i, typeName in ipairs(STAGE_TYPES_ALLOWED) do
             local lobbyEv = Net:FindFirstChild("LobbyEvent")
             if not lobbyEv then continue end
             lastFire = os.clock()
+            local diff = "Normal"
+            if typeName == "Story" and getNightmare() then diff = "Nightmare" end
             pcall(function()
                 lobbyEv:FireServer("AddMatch", {
                     StageType   = typeName,
                     Stage       = selStage,
                     Act         = selAct,
-                    Difficulty  = getNightmare() and "Nightmare" or "Normal",
-                    FriendsOnly = getFriendsOnly(),
+                    Difficulty  = diff,
+                    FriendsOnly = false,
                 })
             end)
         end
@@ -1433,7 +1441,7 @@ for i, typeName in ipairs(STAGE_TYPES_ALLOWED) do
 end
 
 -- ── Odyssey Adventure section ─────────────────────────────────────────────────
-local advSec = section(joinerPage, "Odyssey Adventure", #STAGE_TYPES_ALLOWED + 2)
+local advSec = section(joinerPage, "Odyssey Adventure", #STAGE_TYPES_ALLOWED + 1)
 local _, getAdvJoin = toggle(advSec, "Auto Join", 1, false, "joiner.odyssey.auto")
 
 local charList = makeColPanel(advSec, "Character", 2, 3)
@@ -1493,6 +1501,216 @@ task.spawn(function()
         pcall(function()
             odysseyEv:FireServer("Play", "Adventure", {CharacterName = selAdventure})
         end)
+    end
+end)
+
+-- ── Challenge Sections ────────────────────────────────────────────────────────
+-- Confirmed remote: ReplicatedStorage.Networking.ChallengesEvent:FireServer("StartChallenge", name)
+-- Timer logic: ChallengesData.GetChallengeSeed(type) vs ChallengesAttemptsHandler seed
+-- Cooldowns: Weekly=604800s, Daily=86400s, Regular=1800s
+
+-- Lazy-require challenge modules (may yield — done async)
+local _cd  = nil  -- ChallengesData
+local _cat = nil  -- ChallengesAttemptsHandler
+task.spawn(function()
+    local ok, h = pcall(function()
+        return require(RS.Modules.Data.Challenges.ChallengesData)
+    end)
+    if ok and h then _cd = h end
+    local ok2, h2 = pcall(function()
+        return require(game:GetService("StarterPlayer").Modules.Gameplay.Challenges.ChallengesAttemptsHandler)
+    end)
+    if ok2 and h2 then _cat = h2 end
+end)
+
+local function challengeReady(challengeType)
+    if not _cd then return true end
+    local cur = _cd.GetChallengeSeed(challengeType)
+    if not _cat then return true end
+    local att = _cat.GetChallengeSeed(challengeType)
+    return cur ~= att  -- seeds differ → not yet attempted this period
+end
+
+local function secondsUntilReset(challengeType)
+    if not _cd then return 0 end
+    local seed = _cd.GetChallengeSeed(challengeType)
+    local secs = _cd.GetNextReset(challengeType, seed)
+    return secs or 0
+end
+
+local function fmtTime(secs)
+    secs = math.max(0, math.floor(secs))
+    local h = math.floor(secs/3600)
+    local m = math.floor((secs%3600)/60)
+    local s = secs%60
+    if h > 0 then return ("%dh %dm"):format(h, m)
+    elseif m > 0 then return ("%dm %ds"):format(m, s)
+    else return ("%ds"):format(s) end
+end
+
+local function fireChallenge(name)
+    local ev = Net:FindFirstChild("ChallengesEvent")
+    if not ev then return notify("ChallengesEvent not found", false) end
+    pcall(function() ev:FireServer("StartChallenge", name) end)
+end
+
+-- ── Helper: timer status row ─────────────────────────────────────────────────
+local function timerRow(parent, order)
+    local lbl = Instance.new("TextLabel", parent)
+    lbl.Size = UDim2.new(1, -16, 0, 22)
+    lbl.BackgroundTransparency = 1
+    lbl.LayoutOrder = order
+    lbl.TextColor3 = C.SUBTEXT
+    lbl.TextSize = 11
+    lbl.Font = FONT_SEMI
+    lbl.TextXAlignment = Enum.TextXAlignment.Center
+    lbl.Text = "Checking timer..."
+    return lbl
+end
+
+-- ── Weekly Challenge ─────────────────────────────────────────────────────────
+local wklySec = section(joinerPage, "Weekly Challenge", #STAGE_TYPES_ALLOWED + 2)
+local _, getWklyOn = toggle(wklySec, "Auto Join Weekly", 1, false, "joiner.weekly.auto")
+local wklyLbl = timerRow(wklySec, 2)
+
+task.spawn(function()
+    local lastFire = 0
+    while true do
+        task.wait(5)
+        -- Update timer label
+        local secs = secondsUntilReset("Weekly")
+        wklyLbl.Text = secs <= 0 and "✓ Available" or ("Resets in: "..fmtTime(secs))
+        wklyLbl.TextColor3 = secs <= 0 and C.GREEN or C.SUBTEXT
+        if not getWklyOn() then continue end
+        if inGameMode() then continue end
+        if not challengeReady("Weekly") then continue end
+        if os.clock() - lastFire < 15 then continue end
+        lastFire = os.clock()
+        fireChallenge("Weekly Challenge")
+        notify("Joined Weekly Challenge", true)
+    end
+end)
+
+-- ── Daily Challenge ───────────────────────────────────────────────────────────
+local dailySec = section(joinerPage, "Daily Challenge", #STAGE_TYPES_ALLOWED + 3)
+local _, getDailyOn = toggle(dailySec, "Auto Join Daily", 1, false, "joiner.daily.auto")
+local dailyLbl = timerRow(dailySec, 2)
+
+task.spawn(function()
+    local lastFire = 0
+    while true do
+        task.wait(5)
+        local secs = secondsUntilReset("Daily")
+        dailyLbl.Text = secs <= 0 and "✓ Available" or ("Resets in: "..fmtTime(secs))
+        dailyLbl.TextColor3 = secs <= 0 and C.GREEN or C.SUBTEXT
+        if not getDailyOn() then continue end
+        if inGameMode() then continue end
+        if not challengeReady("Daily") then continue end
+        if os.clock() - lastFire < 15 then continue end
+        lastFire = os.clock()
+        fireChallenge("Daily Challenge")
+        notify("Joined Daily Challenge", true)
+    end
+end)
+
+-- ── Regular Challenge ─────────────────────────────────────────────────────────
+local REGULAR_CHALLENGES = {
+    "Essence Stone Challenge (Green)",
+    "Stat Chip Challenge",
+    "Trait Reroll Challenge",
+    "Essence Stone Challenge (Mythic)",
+    "Essence Stone Challenge (Legendary)",
+    "Memoria Shard Challenge",
+}
+-- Challenges that award capped currencies → will fall back to backup when cap hit
+local CAP_CHALLENGES = {
+    ["Trait Reroll Challenge"]  = { currency = "TraitRerolls",   cap = 50 },
+    ["Memoria Shard Challenge"] = { currency = "MemoriaShards",  cap = 50 },
+}
+
+local regSec = section(joinerPage, "Regular Challenge", #STAGE_TYPES_ALLOWED + 4)
+local _, getRegOn = toggle(regSec, "Auto Join Regular", 1, false, "joiner.regular.auto")
+local regLbl = timerRow(regSec, 2)
+
+-- Primary "Reward Challenge" collapsible
+local primList = makeColPanel(regSec, "Reward Challenge", 3, 4)
+-- Backup "Backup Rewards" collapsible
+local backList = makeColPanel(regSec, "Backup Rewards", 5, 6)
+
+local selPrimary = REGULAR_CHALLENGES[1]
+local selBackup  = REGULAR_CHALLENGES[2]
+
+-- Build radio rows for a regular challenge list
+local function buildChallengeRadio(parent, defaultSel, onSelect)
+    local setters = {}
+    for j, name in ipairs(REGULAR_CHALLENGES) do
+        local n = name
+        local f = Instance.new("Frame", parent)
+        f.Size = UDim2.new(1, 0, 0, 30)
+        f.BackgroundColor3 = (name == defaultSel) and C.ACCENT or C.PANEL
+        f.BorderSizePixel = 0
+        f.LayoutOrder = j
+        corner(f, 6)
+        local row = Instance.new("TextButton", f)
+        row.Size = UDim2.new(1, -12, 1, 0)
+        row.Position = UDim2.new(0, 10, 0, 0)
+        row.BackgroundTransparency = 1
+        row.Text = n
+        row.TextColor3 = (name == defaultSel) and C.TEXT or C.SUBTEXT
+        row.TextSize = 11
+        row.Font = FONT_SEMI
+        row.TextXAlignment = Enum.TextXAlignment.Left
+        row.AutoButtonColor = false
+        local function setSel(on)
+            f.BackgroundColor3 = on and C.ACCENT or C.PANEL
+            row.TextColor3 = on and C.TEXT or C.SUBTEXT
+        end
+        setters[n] = setSel
+        row.MouseButton1Click:Connect(function()
+            for _, s in pairs(setters) do s(false) end
+            setSel(true)
+            onSelect(n)
+        end)
+    end
+    return setters
+end
+
+buildChallengeRadio(primList, selPrimary, function(n) selPrimary = n end)
+buildChallengeRadio(backList, selBackup,  function(n) selBackup  = n end)
+
+-- Regular auto-join loop
+task.spawn(function()
+    local lastFire = 0
+    while true do
+        task.wait(5)
+        local secs = secondsUntilReset("Regular")
+        regLbl.Text = secs <= 0 and "✓ Available" or ("Resets in: "..fmtTime(secs))
+        regLbl.TextColor3 = secs <= 0 and C.GREEN or C.SUBTEXT
+        if not getRegOn() then continue end
+        if inGameMode() then continue end
+        if not challengeReady("Regular") then continue end
+        if os.clock() - lastFire < 15 then continue end
+        -- Determine which challenge to fire: primary unless it's capped
+        local target = selPrimary
+        local capInfo = CAP_CHALLENGES[target]
+        local primCapped = capInfo and getItemCount(capInfo.currency) >= capInfo.cap
+
+        if primCapped then
+            -- Try backup
+            local backCapInfo = CAP_CHALLENGES[selBackup]
+            local backCapped = backCapInfo and getItemCount(backCapInfo.currency) >= backCapInfo.cap
+            if backCapped then
+                -- Both capped — stay on, wait for daily reset, don't fire
+                regLbl.Text = "Both caps reached — waiting for reset"
+                regLbl.TextColor3 = C.YELLOW
+                continue
+            end
+            target = selBackup
+            notify("Cap reached → using backup: "..target, true)
+        end
+        lastFire = os.clock()
+        fireChallenge(target)
+        notify("Joined: "..target, true)
     end
 end)
 
@@ -3995,7 +4213,7 @@ corner(createBtn, 6)
 createBtn.MouseEnter:Connect(function() tween(createBtn,{BackgroundColor3=Color3.fromRGB(200,60,130)},0.08) end)
 createBtn.MouseLeave:Connect(function() tween(createBtn,{BackgroundColor3=C.ACCENT},0.08) end)
 
--- ── Status + control buttons ─────────────────────────────────────
+-- ── Status label + Play / Record toggles ─────────────────────────
 local statusLabel = Instance.new("TextLabel", controlSec)
 statusLabel.Size = UDim2.new(1,0,0,20)
 statusLabel.BackgroundTransparency = 1
@@ -4006,8 +4224,67 @@ statusLabel.Font = FONT_SEMI
 statusLabel.TextXAlignment = Enum.TextXAlignment.Center
 statusLabel.LayoutOrder = 1
 
-local playBtn = btn(controlSec, "Play",   Color3.fromRGB(38,38,42), 2)
-local recBtn  = btn(controlSec, "Record", Color3.fromRGB(38,38,42), 3)
+local _, getPlayOn,  onPlayChanged,  setPlayOn  = toggle(controlSec, "Play",   2, false, "macro.play.auto")
+local _, getRecOn,   onRecChanged,   setRecOn   = toggle(controlSec, "Record", 3, false, "macro.rec")
+
+-- ── Re-record confirmation modal ─────────────────────────────────
+-- Parented to gui so it floats above everything
+local confirmModal = Instance.new("Frame", gui)
+confirmModal.Size = UDim2.new(0, 280, 0, 130)
+confirmModal.AnchorPoint = Vector2.new(0.5, 0.5)
+confirmModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+confirmModal.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
+confirmModal.BorderSizePixel = 0
+confirmModal.ZIndex = 200
+confirmModal.Visible = false
+corner(confirmModal, 10)
+stroke(confirmModal, C.ACCENT, 1)
+
+local modalMsg = Instance.new("TextLabel", confirmModal)
+modalMsg.Size = UDim2.new(1, -24, 0, 56)
+modalMsg.Position = UDim2.new(0, 12, 0, 14)
+modalMsg.BackgroundTransparency = 1
+modalMsg.Text = "This macro has already been recorded.\nDo you want to reset it?"
+modalMsg.TextColor3 = C.TEXT
+modalMsg.TextSize = 12
+modalMsg.Font = FONT_SEMI
+modalMsg.TextWrapped = true
+modalMsg.TextXAlignment = Enum.TextXAlignment.Center
+modalMsg.ZIndex = 201
+
+local function modalBtn(labelText, bgCol, xPos)
+    local b = Instance.new("TextButton", confirmModal)
+    b.Size = UDim2.new(0, 110, 0, 34)
+    b.Position = UDim2.new(0, xPos, 1, -46)
+    b.BackgroundColor3 = bgCol
+    b.BorderSizePixel = 0
+    b.Text = labelText
+    b.TextColor3 = Color3.fromRGB(255,255,255)
+    b.TextSize = 13
+    b.Font = FONT_SEMI
+    b.AutoButtonColor = false
+    b.ZIndex = 201
+    corner(b, 8)
+    return b
+end
+local modalYes = modalBtn("Yes, Reset", C.ACCENT, 18)
+local modalNo  = modalBtn("No",         Color3.fromRGB(50,50,55), 152)
+
+local _confirmYes, _confirmNo = nil, nil
+local function showConfirm(onYes, onNo)
+    _confirmYes, _confirmNo = onYes, onNo
+    confirmModal.Visible = true
+end
+modalYes.MouseButton1Click:Connect(function()
+    confirmModal.Visible = false
+    if _confirmYes then _confirmYes() end
+    _confirmYes, _confirmNo = nil, nil
+end)
+modalNo.MouseButton1Click:Connect(function()
+    confirmModal.Visible = false
+    if _confirmNo then _confirmNo() end
+    _confirmYes, _confirmNo = nil, nil
+end)
 
 -- ── Helpers ──────────────────────────────────────────────────────
 local function setStatus(txt, col)
@@ -4015,24 +4292,16 @@ local function setStatus(txt, col)
     statusLabel.TextColor3 = col or C.SUBTEXT
 end
 
-local function setRecordToggle(active)
-    if active then
-        tween(recBtn, {BackgroundColor3=C.ACCENT}, 0.12)
-        recBtn.Text = "Recording..."
-    else
-        tween(recBtn, {BackgroundColor3=Color3.fromRGB(38,38,42)}, 0.12)
-        recBtn.Text = "Record"
-    end
-end
+local function setRecordToggle(active) setRecOn(active) end
+local function setPlayToggle(active)   setPlayOn(active) end
 
-local function setPlayToggle(active)
-    if active then
-        tween(playBtn, {BackgroundColor3=C.GREEN}, 0.12)
-        playBtn.Text = "Playing..."
-    else
-        tween(playBtn, {BackgroundColor3=Color3.fromRGB(38,38,42)}, 0.12)
-        playBtn.Text = "Play"
-    end
+local function startRecording()
+    macros[selectedMacro].events = {}
+    recUUIDs  = {}
+    recStart  = os.clock()
+    recording = true
+    setStatus("Recording...", C.YELLOW)
+    notify("Recording " .. selectedMacro, true)
 end
 
 local function updateColHeader()
@@ -4281,46 +4550,46 @@ if typeof(hookmetamethod) == "function" then
 end
 
 -- ── Record button ─────────────────────────────────────────────────
-recBtn.MouseButton1Click:Connect(function()
-    if not selectedMacro then
-        return notify("Select or create a macro first", false)
-    end
-    if playing then
-        return notify("Stop playback first", false)
-    end
-    if not inGameMode() then
-        return notify("Must be in a match to record", false)
-    end
-    if typeof(hookmetamethod) ~= "function" then
-        return notify("Executor lacks hookmetamethod", false)
-    end
-
-    if recording then
-        -- Stop recording
-        recording = false
-        local mac = macros[selectedMacro]
-        if mac then
-            mac.duration = os.clock() - recStart
+-- ── Record toggle callback ────────────────────────────────────────
+onRecChanged(function(on)
+    if on then
+        -- Validate — macros only work inside a match
+        if not selectedMacro then
+            setRecOn(false); return notify("Select or create a macro first", false)
         end
-        -- Unhook by replacing with passthrough (can't unhook in most executors)
-        -- The hook checks `recording` so it silently passes through when false
-        setRecordToggle(false)
-        saveMacros()
-        local evCount = mac and #mac.events or 0
-        setStatus(("Recorded %d events"):format(evCount), C.GREEN)
-        notify("Recorded Macro", true)
-        rebuildList()
-        return
+        if playing then
+            setRecOn(false); return notify("Stop playback first", false)
+        end
+        if not inGameMode() then
+            setRecOn(false); return notify("Must be in a match to record", false)
+        end
+        if typeof(hookmetamethod) ~= "function" then
+            setRecOn(false); return notify("Executor lacks hookmetamethod", false)
+        end
+        -- If already has recorded events, prompt to reset
+        local mac = macros[selectedMacro]
+        if mac and #(mac.events or {}) > 0 then
+            showConfirm(
+                function() startRecording() end,   -- Yes: reset and start
+                function() setRecOn(false) end     -- No: cancel
+            )
+        else
+            startRecording()
+        end
+    else
+        -- User manually toggled off → stop recording
+        if recording then
+            recording = false
+            local mac = macros[selectedMacro]
+            if mac then mac.duration = os.clock() - recStart end
+            recUUIDs = {}
+            saveMacros()
+            local evCount = mac and #(mac.events or {}) or 0
+            setStatus(("Recorded %d events"):format(evCount), C.GREEN)
+            notify("Recorded " .. (selectedMacro or "macro"), true)
+            rebuildList()
+        end
     end
-
-    -- Start recording — clear previous events and UUID map
-    macros[selectedMacro].events = {}
-    recUUIDs  = {}
-    recStart  = os.clock()
-    recording = true
-    setRecordToggle(true)
-    setStatus("Recording...", C.YELLOW)
-    notify("Recording " .. selectedMacro, true)
 end)
 
 -- ── Playback core ────────────────────────────────────────────────
@@ -4405,37 +4674,30 @@ local function startMacroPlayback()
     end)
 end
 
--- ── Play toggle button ────────────────────────────────────────────
-playBtn.MouseButton1Click:Connect(function()
-    if autoPlay then
-        -- Turn off — stop any active playback
+-- ── Play toggle callback ──────────────────────────────────────────
+onPlayChanged(function(on)
+    if on then
+        if not selectedMacro then
+            setPlayOn(false); return notify("Select a macro first", false)
+        end
+        if recording then
+            setPlayOn(false); return notify("Stop recording first", false)
+        end
+        if not inGameMode() then
+            return notify("Can't play macro in lobby", false)
+        end
+        local mac = macros[selectedMacro]
+        if not mac or #(mac.events or {}) == 0 then
+            setPlayOn(false); return notify("Macro is empty — record something first", false)
+        end
+        autoPlay = true
+        setStatus("Auto-play on — waiting for match", C.GREEN)
+        notify("Playing " .. selectedMacro, true)
+        if inGameMode() then startMacroPlayback() end
+    else
         autoPlay = false
         playing  = false
-        setPlayToggle(false)
         setStatus("Auto-play off", C.SUBTEXT)
-        return
-    end
-    if not selectedMacro then
-        return notify("Select a macro first", false)
-    end
-    if recording then
-        return notify("Stop recording first", false)
-    end
-    if not inGameMode() then
-        notify("Must be in a match to play", false)
-    end
-    local mac = macros[selectedMacro]
-    if not mac or #mac.events == 0 then
-        return notify("Macro is empty — record something first", false)
-    end
-
-    autoPlay = true
-    setPlayToggle(true)
-    setStatus("Auto-play on — waiting for match", C.GREEN)
-
-    -- If already in a match start immediately, otherwise wait for MatchStarted
-    if inGameMode() then
-        startMacroPlayback()
     end
 end)
 
