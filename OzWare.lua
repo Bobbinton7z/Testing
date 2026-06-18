@@ -254,6 +254,11 @@ local function safeCall(fn, okMsg, failPrefix)
     if okMsg or not ok then notify(ok and okMsg or ((failPrefix or "Error")..": "..tostring(err)), ok) end
     return ok
 end
+-- Tab setup functions are pcall-wrapped so one failing tab can't prevent others from loading
+local function _safeSetup(name, fn)
+    local ok, err = pcall(fn)
+    if not ok then notify("["..name.."] load err: "..tostring(err):sub(1,50), false) end
+end
 
 -- ======================
 -- SETTINGS AUTOSAVE
@@ -3646,20 +3651,7 @@ do
 end
 
 end -- _setupOdysseyTab
-
--- Tab functions are pcall-wrapped: one tab failing cannot prevent others from loading.
--- Rules for all future tab additions:
---   1. Each tab's setup code goes inside its own local function (_setup*Tab)
---   2. Any require() or WaitForChild() that might yield must be in task.spawn, never inline
---   3. New module-scope locals must be in a table (not bare) to stay under Luau's 200-register cap
---   4. Always verify block balance (do/end) after any edit using the tokenizer
-local function _safeSetup(name, fn)
-    local ok, err = pcall(fn)
-    if not ok then notify("["..name.."] setup error: "..tostring(err):sub(1,60), false) end
-end
-_safeSetup("Odyssey",  _setupOdysseyTab)
-_safeSetup("SpringLTM",_setupSpringTab)
-_safeSetup("Macro",    _setupMacroTab)
+_safeSetup("Odyssey", _setupOdysseyTab)
 
 -- ======================
 -- SPRING LTM TAB
@@ -3748,6 +3740,7 @@ do
     end)
 end
 end -- _setupSpringTab
+_safeSetup("SpringLTM", _setupSpringTab)
 
 -- ======================
 -- MACRO TAB
@@ -4400,6 +4393,7 @@ if _macroGameEv then
 end
 
 end -- _setupMacroTab
+_safeSetup("Macro", _setupMacroTab)
 
 -- ======================
 -- BOOT
