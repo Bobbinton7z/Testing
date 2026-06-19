@@ -113,7 +113,7 @@ local C = {
     YELLOW   = Color3.fromRGB(230, 180, 60),
     TEXT     = Color3.fromRGB(240, 240, 240),        -- near-white
     SUBTEXT  = Color3.fromRGB(190, 185, 205),        -- light grey inactive
-    DIM      = Color3.fromRGB(80,  80,  90),         -- very dim
+    DIM      = Color3.fromRGB(160, 155, 175),        -- section headers / category labels
     DISABLED = Color3.fromRGB(75,  75,  82),         -- off-circle (visible on dark bg)
 }
 local FONT_BOLD = Enum.Font.GothamBold
@@ -444,7 +444,7 @@ contentArea.BackgroundTransparency=1; contentArea.ClipsDescendants=true; content
 
 -- ── Tab system ────────────────────────────────────────────────────
 local tabButtons,tabLabels,tabIcons,tabPages,activeTab={},{},{},{},nil
-local TAB_NAMES={"Lobby","Joiner","Game","Odyssey","SpringLTM","Macro"}
+local TAB_NAMES={"Lobby","Joiner","Game","Odyssey","SpringLTM","PirateDynasty","Macro"}
 
 local function makePage()
     local p=Instance.new("ScrollingFrame")
@@ -503,7 +503,7 @@ local function section(page, title, order)
     if title and title ~= "" then
         local hdr=Instance.new("TextLabel",page)
         hdr.Size=UDim2.new(1,0,0,26); hdr.BackgroundTransparency=1
-        hdr.Text=title; hdr.TextColor3=C.DIM
+        hdr.Text=title; hdr.TextColor3=C.SUBTEXT
         hdr.TextSize=10; hdr.Font=FONT_BOLD
         hdr.TextXAlignment=Enum.TextXAlignment.Center
         hdr.LayoutOrder=(order or 1)*2-1; hdr.ZIndex=3
@@ -531,7 +531,7 @@ end
 local function label(parent, text, order)
     local l=Instance.new("TextLabel",parent)
     l.Size=UDim2.new(1,0,0,16); l.BackgroundTransparency=1
-    l.Text=text; l.TextColor3=C.DIM; l.TextSize=10; l.Font=FONT_REG
+    l.Text=text; l.TextColor3=C.SUBTEXT; l.TextSize=10; l.Font=FONT_REG
     l.TextXAlignment=Enum.TextXAlignment.Left
     l.LayoutOrder=order or 99; l.ZIndex=3
     padding(l,nil,0,0,14,0)
@@ -921,7 +921,7 @@ essColBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 essColBtn.BorderSizePixel = 0
 essColBtn.LayoutOrder = 2
 essColBtn.Text = "▶  Auto Craft Essences"
-essColBtn.TextColor3 = C.SUBTEXT
+essColBtn.TextColor3 = C.TEXT
 essColBtn.TextSize = 12
 essColBtn.Font = FONT_SEMI
 essColBtn.AutoButtonColor = false
@@ -1268,7 +1268,7 @@ local function makeColPanel(parent, label, btnOrder, listOrder)
     colBtn.BorderSizePixel = 0
     colBtn.LayoutOrder = btnOrder
     colBtn.Text = "▶  "..label
-    colBtn.TextColor3 = C.SUBTEXT
+    colBtn.TextColor3 = C.TEXT
     colBtn.TextSize = 12
     colBtn.Font = FONT_SEMI
     colBtn.AutoButtonColor = false
@@ -1283,7 +1283,20 @@ local function makeColPanel(parent, label, btnOrder, listOrder)
     colList.Visible = false
     listLayout(colList, nil, 2)
     makeCollapsible(colBtn, colList, label)
-    return colList
+    -- Selection display setter — fires AFTER makeCollapsible's click handler
+    -- so it can append the selected name to whatever arrow text was set
+    local _sel = ""
+    colBtn.MouseButton1Click:Connect(function()
+        if _sel ~= "" then
+            colBtn.Text = colBtn.Text:gsub("  "..label..".*$", "  "..label..": ".._sel)
+        end
+    end)
+    local function setDisplay(text)
+        _sel = text or ""
+        local arrow = colList.Visible and "▼" or "▶"
+        colBtn.Text = arrow.."  "..label..(_sel ~= "" and ": ".._sel or "")
+    end
+    return colList, setDisplay
 end
 
 -- ── Per-type sections ─────────────────────────────────────────────────────────
@@ -1310,10 +1323,9 @@ for i, typeName in ipairs(STAGE_TYPES_ALLOWED) do
         actColOrder   = 4; actListOrder   = 5
     end
 
-    local stageList = makeColPanel(sec, "Stage", stageColOrder, stageListOrder)
-    local actList   = makeColPanel(sec, "Act",   actColOrder,   actListOrder)
+    local stageList, setStageDisplay = makeColPanel(sec, "Stage", stageColOrder, stageListOrder)
+    local actList,   setActDisplay   = makeColPanel(sec, "Act",   actColOrder,   actListOrder)
 
-    -- State for this type
     local selStage = nil
     local selAct   = nil
     local actSetters = {}
@@ -1322,54 +1334,42 @@ for i, typeName in ipairs(STAGE_TYPES_ALLOWED) do
         for _, c in ipairs(actList:GetChildren()) do
             if c:IsA("Frame") then c:Destroy() end
         end
-        actSetters = {}
-        selAct = nil
+        actSetters = {}; selAct = nil; setActDisplay(nil)
         if not selStage then return end
         local acts = (STAGES[typeName] and STAGES[typeName][selStage]) or {}
-        local newSetters, getSelAct = makeRadioList(actList, acts,
-            function(k) return k end, "joiner."..typeName..".act")
-        actSetters = newSetters
         selAct = acts[1] or nil
-        -- Wire up act selection to update selAct
-        for _, actKey in ipairs(acts) do
+        if selAct then setActDisplay(selAct) end
+        for j, actKey in ipairs(acts) do
             local ak = actKey
-            -- Re-wrap click to update selAct (makeRadioList already handles visuals)
-            local origSetter = actSetters[ak]
-            actSetters[ak] = function(on)
-                origSetter(on)
-                if on then selAct = ak end
+            local f = Instance.new("Frame", actList)
+            f.Size = UDim2.new(1, 0, 0, 30)
+            f.BackgroundColor3 = (j == 1) and C.ACCENT or C.PANEL
+            f.BorderSizePixel = 0; f.LayoutOrder = j; corner(f, 6)
+            local row = Instance.new("TextButton", f)
+            row.Size = UDim2.new(1, -12, 1, 0); row.Position = UDim2.new(0, 10, 0, 0)
+            row.BackgroundTransparency = 1; row.Text = ak
+            row.TextColor3 = (j == 1) and C.TEXT or C.SUBTEXT
+            row.TextSize = 12; row.Font = FONT_SEMI
+            row.TextXAlignment = Enum.TextXAlignment.Left; row.AutoButtonColor = false
+            local function setActSel(on)
+                f.BackgroundColor3 = on and C.ACCENT or C.PANEL
+                row.TextColor3 = on and C.TEXT or C.SUBTEXT
             end
-        end
-        -- Reconnect buttons (we need to override clicks since makeRadioList
-        -- closed over its own `selected` var which we can't access)
-        local order = 0
-        for _, child in ipairs(actList:GetChildren()) do
-            if child:IsA("Frame") then
-                order = order + 1
-                local ak = acts[order]
-                if ak then
-                    local row = child:FindFirstChildOfClass("TextButton")
-                    if row then
-                        row.MouseButton1Click:Connect(function()
-                            for _, s in pairs(actSetters) do s(false) end
-                            actSetters[ak](true)
-                            selAct = ak
-                        end)
-                    end
-                end
-            end
+            actSetters[ak] = setActSel
+            row.MouseButton1Click:Connect(function()
+                for _, s in pairs(actSetters) do s(false) end
+                setActSel(true); selAct = ak; setActDisplay(ak)
+            end)
         end
     end
 
-    -- Build stage list
     local stageKeys = {}
     if STAGES[typeName] then
         for k in pairs(STAGES[typeName]) do table.insert(stageKeys, k) end
         table.sort(stageKeys, function(a, b)
             local na = tonumber(a:match("%d+")) or 9999
             local nb = tonumber(b:match("%d+")) or 9999
-            if na ~= nb then return na < nb end
-            return a < b
+            if na ~= nb then return na < nb end; return a < b
         end)
     end
 
@@ -1380,19 +1380,13 @@ for i, typeName in ipairs(STAGE_TYPES_ALLOWED) do
         local f = Instance.new("Frame", stageList)
         f.Size = UDim2.new(1, 0, 0, 30)
         f.BackgroundColor3 = (j == 1) and C.ACCENT or C.PANEL
-        f.BorderSizePixel = 0
-        f.LayoutOrder = j
-        corner(f, 6)
+        f.BorderSizePixel = 0; f.LayoutOrder = j; corner(f, 6)
         local row = Instance.new("TextButton", f)
-        row.Size = UDim2.new(1, -12, 1, 0)
-        row.Position = UDim2.new(0, 10, 0, 0)
-        row.BackgroundTransparency = 1
-        row.Text = disp
+        row.Size = UDim2.new(1, -12, 1, 0); row.Position = UDim2.new(0, 10, 0, 0)
+        row.BackgroundTransparency = 1; row.Text = disp
         row.TextColor3 = (j == 1) and C.TEXT or C.SUBTEXT
-        row.TextSize = 12
-        row.Font = FONT_SEMI
-        row.TextXAlignment = Enum.TextXAlignment.Left
-        row.AutoButtonColor = false
+        row.TextSize = 12; row.Font = FONT_SEMI
+        row.TextXAlignment = Enum.TextXAlignment.Left; row.AutoButtonColor = false
         local function setStageSel(on)
             f.BackgroundColor3 = on and C.ACCENT or C.PANEL
             row.TextColor3 = on and C.TEXT or C.SUBTEXT
@@ -1400,16 +1394,15 @@ for i, typeName in ipairs(STAGE_TYPES_ALLOWED) do
         stageSetters[skk] = setStageSel
         row.MouseButton1Click:Connect(function()
             for _, s in pairs(stageSetters) do s(false) end
-            setStageSel(true)
-            selStage = skk
-            buildActs()
+            setStageSel(true); selStage = skk
+            setStageDisplay(disp); buildActs()
         end)
     end
 
-    -- Select first stage by default
     if stageKeys[1] then
         selStage = stageKeys[1]
         if stageSetters[selStage] then stageSetters[selStage](true) end
+        setStageDisplay((DISPLAY[typeName] and DISPLAY[typeName][stageKeys[1]]) or stageKeys[1])
         buildActs()
     end
 
@@ -1444,7 +1437,7 @@ end
 local advSec = section(joinerPage, "Odyssey Adventure", #STAGE_TYPES_ALLOWED + 1)
 local _, getAdvJoin = toggle(advSec, "Auto Join", 1, false, "joiner.odyssey.auto")
 
-local charList = makeColPanel(advSec, "Character", 2, 3)
+local charList, _ = makeColPanel(advSec, "Character", 2, 3)
 
 local selAdventure = _UNIT_ORDER[1]
 local advSetters = {}
@@ -1571,16 +1564,11 @@ end
 -- ── Weekly Challenge ─────────────────────────────────────────────────────────
 local wklySec = section(joinerPage, "Weekly Challenge", #STAGE_TYPES_ALLOWED + 2)
 local _, getWklyOn = toggle(wklySec, "Auto Join Weekly", 1, false, "joiner.weekly.auto")
-local wklyLbl = timerRow(wklySec, 2)
 
 task.spawn(function()
     local lastFire = 0
     while true do
         task.wait(5)
-        -- Update timer label
-        local secs = secondsUntilReset("Weekly")
-        wklyLbl.Text = secs <= 0 and "✓ Available" or ("Resets in: "..fmtTime(secs))
-        wklyLbl.TextColor3 = secs <= 0 and C.GREEN or C.SUBTEXT
         if not getWklyOn() then continue end
         if inGameMode() then continue end
         if not challengeReady("Weekly") then continue end
@@ -1594,15 +1582,11 @@ end)
 -- ── Daily Challenge ───────────────────────────────────────────────────────────
 local dailySec = section(joinerPage, "Daily Challenge", #STAGE_TYPES_ALLOWED + 3)
 local _, getDailyOn = toggle(dailySec, "Auto Join Daily", 1, false, "joiner.daily.auto")
-local dailyLbl = timerRow(dailySec, 2)
 
 task.spawn(function()
     local lastFire = 0
     while true do
         task.wait(5)
-        local secs = secondsUntilReset("Daily")
-        dailyLbl.Text = secs <= 0 and "✓ Available" or ("Resets in: "..fmtTime(secs))
-        dailyLbl.TextColor3 = secs <= 0 and C.GREEN or C.SUBTEXT
         if not getDailyOn() then continue end
         if inGameMode() then continue end
         if not challengeReady("Daily") then continue end
@@ -1622,26 +1606,22 @@ local REGULAR_CHALLENGES = {
     "Essence Stone Challenge (Legendary)",
     "Memoria Shard Challenge",
 }
--- Challenges that award capped currencies → will fall back to backup when cap hit
 local CAP_CHALLENGES = {
-    ["Trait Reroll Challenge"]  = { currency = "TraitRerolls",   cap = 50 },
-    ["Memoria Shard Challenge"] = { currency = "MemoriaShards",  cap = 50 },
+    ["Trait Reroll Challenge"]  = { currency = "TraitRerolls",  cap = 50 },
+    ["Memoria Shard Challenge"] = { currency = "MemoriaShards", cap = 50 },
 }
 
 local regSec = section(joinerPage, "Regular Challenge", #STAGE_TYPES_ALLOWED + 4)
 local _, getRegOn = toggle(regSec, "Auto Join Regular", 1, false, "joiner.regular.auto")
-local regLbl = timerRow(regSec, 2)
 
--- Primary "Reward Challenge" collapsible
-local primList = makeColPanel(regSec, "Reward Challenge", 3, 4)
--- Backup "Backup Rewards" collapsible
-local backList = makeColPanel(regSec, "Backup Rewards", 5, 6)
+local primList, setPrimDisplay = makeColPanel(regSec, "Reward Challenge", 2, 3)
+local backList, setBackDisplay = makeColPanel(regSec, "Backup Rewards",   4, 5)
 
 local selPrimary = REGULAR_CHALLENGES[1]
 local selBackup  = REGULAR_CHALLENGES[2]
 
 -- Build radio rows for a regular challenge list
-local function buildChallengeRadio(parent, defaultSel, onSelect)
+local function buildChallengeRadio(parent, defaultSel, onSelect, setDisplay)
     local setters = {}
     for j, name in ipairs(REGULAR_CHALLENGES) do
         local n = name
@@ -1657,7 +1637,7 @@ local function buildChallengeRadio(parent, defaultSel, onSelect)
         row.BackgroundTransparency = 1
         row.Text = n
         row.TextColor3 = (name == defaultSel) and C.TEXT or C.SUBTEXT
-        row.TextSize = 11
+        row.TextSize = 12
         row.Font = FONT_SEMI
         row.TextXAlignment = Enum.TextXAlignment.Left
         row.AutoButtonColor = false
@@ -1670,47 +1650,96 @@ local function buildChallengeRadio(parent, defaultSel, onSelect)
             for _, s in pairs(setters) do s(false) end
             setSel(true)
             onSelect(n)
+            setDisplay(n)
         end)
     end
     return setters
 end
 
-buildChallengeRadio(primList, selPrimary, function(n) selPrimary = n end)
-buildChallengeRadio(backList, selBackup,  function(n) selBackup  = n end)
+buildChallengeRadio(primList, selPrimary, function(n) selPrimary = n end, setPrimDisplay)
+buildChallengeRadio(backList, selBackup,  function(n) selBackup  = n end, setBackDisplay)
+setPrimDisplay(selPrimary)
+setBackDisplay(selBackup)
 
 -- Regular auto-join loop
 task.spawn(function()
     local lastFire = 0
     while true do
         task.wait(5)
-        local secs = secondsUntilReset("Regular")
-        regLbl.Text = secs <= 0 and "✓ Available" or ("Resets in: "..fmtTime(secs))
-        regLbl.TextColor3 = secs <= 0 and C.GREEN or C.SUBTEXT
         if not getRegOn() then continue end
         if inGameMode() then continue end
         if not challengeReady("Regular") then continue end
         if os.clock() - lastFire < 15 then continue end
-        -- Determine which challenge to fire: primary unless it's capped
         local target = selPrimary
         local capInfo = CAP_CHALLENGES[target]
         local primCapped = capInfo and getItemCount(capInfo.currency) >= capInfo.cap
-
         if primCapped then
-            -- Try backup
             local backCapInfo = CAP_CHALLENGES[selBackup]
             local backCapped = backCapInfo and getItemCount(backCapInfo.currency) >= backCapInfo.cap
-            if backCapped then
-                -- Both capped — stay on, wait for daily reset, don't fire
-                regLbl.Text = "Both caps reached — waiting for reset"
-                regLbl.TextColor3 = C.YELLOW
-                continue
-            end
+            if backCapped then continue end  -- both capped, stay on, wait
             target = selBackup
             notify("Cap reached → using backup: "..target, true)
         end
         lastFire = os.clock()
         fireChallenge(target)
         notify("Joined: "..target, true)
+    end
+end)
+
+-- ── Spring Event ─────────────────────────────────────────────────────────────
+-- StageType="LTM", Stage="Spring", Acts: "Endless" / "Pirate Dynasty"
+local SPRING_ACTS = { "Endless", "Pirate Dynasty" }
+
+local sprEvSec = section(joinerPage, "Spring Event", #STAGE_TYPES_ALLOWED + 5)
+local _, getSpringOn = toggle(sprEvSec, "Auto Join", 1, false, "joiner.spring.auto")
+local sprActList, setSpringActDisplay = makeColPanel(sprEvSec, "Act", 2, 3)
+
+local selSpringAct = SPRING_ACTS[1]
+setSpringActDisplay(selSpringAct)
+
+local sprActSetters = {}
+for j, actName in ipairs(SPRING_ACTS) do
+    local an = actName
+    local f = Instance.new("Frame", sprActList)
+    f.Size = UDim2.new(1, 0, 0, 30)
+    f.BackgroundColor3 = (j == 1) and C.ACCENT or C.PANEL
+    f.BorderSizePixel = 0; f.LayoutOrder = j; corner(f, 6)
+    local row = Instance.new("TextButton", f)
+    row.Size = UDim2.new(1, -12, 1, 0); row.Position = UDim2.new(0, 10, 0, 0)
+    row.BackgroundTransparency = 1; row.Text = an
+    row.TextColor3 = (j == 1) and C.TEXT or C.SUBTEXT
+    row.TextSize = 12; row.Font = FONT_SEMI
+    row.TextXAlignment = Enum.TextXAlignment.Left; row.AutoButtonColor = false
+    local function setSprActSel(on)
+        f.BackgroundColor3 = on and C.ACCENT or C.PANEL
+        row.TextColor3 = on and C.TEXT or C.SUBTEXT
+    end
+    sprActSetters[an] = setSprActSel
+    row.MouseButton1Click:Connect(function()
+        for _, s in pairs(sprActSetters) do s(false) end
+        setSprActSel(true); selSpringAct = an; setSpringActDisplay(an)
+    end)
+end
+
+task.spawn(function()
+    local lastFire = 0
+    while true do
+        task.wait(0.5)
+        if not getSpringOn() then continue end
+        if inGameMode() then continue end
+        if os.clock() - lastFire < 10 then continue end
+        local lobbyEv = Net:FindFirstChild("LobbyEvent")
+        if not lobbyEv then continue end
+        lastFire = os.clock()
+        pcall(function()
+            lobbyEv:FireServer("AddMatch", {
+                StageType   = "LTM",
+                Stage       = "Spring",
+                Act         = selSpringAct,
+                Difficulty  = "Normal",
+                FriendsOnly = false,
+            })
+        end)
     end
 end)
 
@@ -4074,12 +4103,180 @@ do
         end
     end)
 end
+
 end -- _setupSpringTab
 _safeSetup("SpringLTM", _setupSpringTab)
 
 -- ======================
--- MACRO TAB
+-- PIRATE DYNASTY TAB
 -- ======================
+local function _setupPDTab()
+local pdPage = tabPages["PirateDynasty"]
+local pdNet  = RS:FindFirstChild("Networking")
+
+-- Confirmed from PirateDynastyConfig.t.Characters (decompile):
+-- Character Ids (used for SetLoadout) + display names + unlock levels
+local PD_CHARACTERS = {
+    { id = "HellkillerSlayer",      display = "Hellkiller",                  level = 1 },
+    { id = "ElasticCaptainPirate",  display = "Elastic Captain (Cog 4th)",   level = 1 },
+    { id = "NineTailedFox",         display = "9 Tailed Fox",                level = 3 },
+    { id = "ElasticCaptainSunGod",  display = "Elastic Captain (Cog 5th)",   level = 4 },
+}
+
+-- ── Character ──────────────────────────────────────────────────────────────
+-- Selecting a character fires Spring event SetLoadout (pre-match selection)
+local charSec = section(pdPage, "Character", 1)
+
+local charBtn = Instance.new("TextButton", charSec)
+charBtn.Size = UDim2.new(1, 0, 0, 28)
+charBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+charBtn.BorderSizePixel = 0; charBtn.LayoutOrder = 1
+charBtn.Text = "▶  Character: "..PD_CHARACTERS[1]
+charBtn.TextColor3 = C.TEXT
+charBtn.TextSize = 12; charBtn.Font = FONT_SEMI
+charBtn.AutoButtonColor = false; charBtn.ZIndex = 3
+corner(charBtn, 6)
+
+local charList = Instance.new("Frame", charSec)
+charList.Size = UDim2.new(1, 0, 0, 0)
+charList.AutomaticSize = Enum.AutomaticSize.Y
+charList.BackgroundTransparency = 1; charList.BorderSizePixel = 0
+charList.LayoutOrder = 2; charList.Visible = false
+listLayout(charList, nil, 2)
+makeCollapsible(charBtn, charList, "Character")
+
+local selChar = PD_CHARACTERS[1].id
+-- Append selection to header after makeCollapsible sets the arrow
+charBtn.MouseButton1Click:Connect(function()
+    local arrow = charList.Visible and "▼" or "▶"
+    local disp = PD_CHARACTERS[1].display
+    for _, c in ipairs(PD_CHARACTERS) do if c.id == selChar then disp = c.display end end
+    charBtn.Text = arrow.."  Character: "..disp
+end)
+charBtn.Text = "▶  Character: "..PD_CHARACTERS[1].display
+
+local charSetters = {}
+for j, entry in ipairs(PD_CHARACTERS) do
+    local charId   = entry.id
+    local charDisp = entry.display
+    local charLvl  = entry.level
+    local f = Instance.new("Frame", charList)
+    f.Size = UDim2.new(1, 0, 0, 30)
+    f.BackgroundColor3 = (j == 1) and C.ACCENT or C.PANEL
+    f.BorderSizePixel = 0; f.LayoutOrder = j; corner(f, 6)
+    local row = Instance.new("TextButton", f)
+    row.Size = UDim2.new(1, -12, 1, 0); row.Position = UDim2.new(0, 10, 0, 0)
+    row.BackgroundTransparency = 1
+    row.Text = charDisp..(charLvl > 1 and ("  [Lv"..charLvl.."+]") or "")
+    row.TextColor3 = (j == 1) and C.TEXT or C.SUBTEXT
+    row.TextSize = 12; row.Font = FONT_SEMI
+    row.TextXAlignment = Enum.TextXAlignment.Left; row.AutoButtonColor = false
+    local function setSel(on)
+        f.BackgroundColor3 = on and C.ACCENT or C.PANEL
+        row.TextColor3 = on and C.TEXT or C.SUBTEXT
+    end
+    charSetters[charId] = setSel
+    row.MouseButton1Click:Connect(function()
+        for _, s in pairs(charSetters) do s(false) end
+        setSel(true); selChar = charId
+        local arrow = charList.Visible and "▼" or "▶"
+        charBtn.Text = arrow.."  Character: "..charDisp
+        -- Fire SetLoadout with the PD character Id
+        local springEv = pdNet and pdNet:FindFirstChild("SpringEvent")
+        local loadoutEv = springEv and springEv:FindFirstChild("SetLoadout")
+        if loadoutEv then pcall(function() loadoutEv:FireServer(charId) end) end
+    end)
+end
+
+-- ── Auto Attack ────────────────────────────────────────────────────────────
+local attackSec = section(pdPage, "Auto Attack", 2)
+
+-- Save Position — one-tap toggle (captures HRP.CFrame, turns itself off)
+local savedCFrame = nil
+local _, _, onSavePos, setSavePos = toggle(attackSec, "Save Position", 1, false)
+
+local posLbl = Instance.new("TextLabel", attackSec)
+posLbl.Size = UDim2.new(1, -16, 0, 18)
+posLbl.BackgroundTransparency = 1
+posLbl.Text = "No position saved"
+posLbl.TextColor3 = C.SUBTEXT
+posLbl.TextSize = 11; posLbl.Font = FONT_SEMI
+posLbl.TextXAlignment = Enum.TextXAlignment.Center
+posLbl.LayoutOrder = 2
+
+onSavePos(function(on)
+    if not on then return end
+    task.defer(function() setSavePos(false) end)  -- always self-turns-off
+    local char = player.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return notify("No character found", false) end
+    savedCFrame = hrp.CFrame
+    posLbl.Text = ("Saved  %.0f, %.0f, %.0f"):format(
+        hrp.Position.X, hrp.Position.Y, hrp.Position.Z)
+    posLbl.TextColor3 = C.GREEN
+    notify("Position saved", true)
+end)
+
+-- Auto Attack toggle — moves to saved position then loops AttackEvent
+local pdAttacking = false
+
+local function startAttack()
+    pdAttacking = true
+    local attackEv = pdNet and pdNet:FindFirstChild("AttackEvent")
+    if not attackEv then pdAttacking = false; return end
+    task.spawn(function()
+        -- Move to saved spot first
+        if savedCFrame then
+            local char = player.Character
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:MoveTo(savedCFrame.Position)
+                local done = false
+                local conn; conn = hum.MoveToFinished:Connect(function()
+                    done = true; conn:Disconnect()
+                end)
+                local t0 = os.clock()
+                while not done and pdAttacking and os.clock() - t0 < 8 do
+                    task.wait(0.1)
+                end
+                if conn then conn:Disconnect() end
+            end
+        end
+        -- Attack loop
+        while pdAttacking and inGameMode() do
+            pcall(function() attackEv:FireServer() end)
+            task.wait(0.1)
+        end
+        pdAttacking = false
+    end)
+end
+
+local _, getAttackOn, onAttackChanged, setAttackOn = toggle(
+    attackSec, "Auto Attack", 3, false, "pd.autoattack")
+
+onAttackChanged(function(on)
+    if on then
+        if not inGameMode() then
+            setAttackOn(false); return notify("Must be in a match", false)
+        end
+        startAttack()
+        notify("Auto Attack started", true)
+    else
+        pdAttacking = false
+    end
+end)
+
+-- Re-trigger after respawn while toggle is still ON
+player.CharacterAdded:Connect(function()
+    if pdAttacking then pdAttacking = false end
+    task.wait(2)
+    if inGameMode() and getAttackOn() then
+        startAttack()
+    end
+end)
+
+end -- _setupPDTab
+_safeSetup("PirateDynasty", _setupPDTab)
 local function _setupMacroTab()
 local macroPage = tabPages["Macro"]
 local Net        = RS:FindFirstChild("Networking")
@@ -4360,7 +4557,7 @@ local function rebuildList()
         delX.Position = UDim2.new(1,-34,0.5,-14)
         delX.BackgroundColor3 = Color3.fromRGB(180,50,50)
         delX.BorderSizePixel = 0
-        delX.Text = "✕"
+        delX.Text = "X"
         delX.TextColor3 = Color3.fromRGB(255,255,255)
         delX.TextSize = 11
         delX.Font = FONT_BOLD
@@ -4691,13 +4888,11 @@ onPlayChanged(function(on)
             setPlayOn(false); return notify("Macro is empty — record something first", false)
         end
         autoPlay = true
-        setStatus("Auto-play on — waiting for match", C.GREEN)
         notify("Playing " .. selectedMacro, true)
         if inGameMode() then startMacroPlayback() end
     else
         autoPlay = false
         playing  = false
-        setStatus("Auto-play off", C.SUBTEXT)
     end
 end)
 
