@@ -4282,6 +4282,8 @@ local macroPage = tabPages["Macro"]
 local Net        = RS:FindFirstChild("Networking")
 local unitEv     = Net and Net:FindFirstChild("UnitEvent")
 local abilityEv  = Net and Net:FindFirstChild("AbilityEvent")
+local _ifaceNet  = Net and Net:FindFirstChild("Interface")
+local toggleStateEv = _ifaceNet and _ifaceNet:FindFirstChild("ToggleState")
 
 -- Macro storage: saved to writefile so they persist between sessions
 local MACRO_FILE = "OzWare_macros.json"
@@ -4662,8 +4664,10 @@ end
 -- Captures: Render, Upgrade, Sell, ChangePriority (UnitEvent) + Ninjutsu
 if typeof(hookmetamethod) == "function" then
     local watched = {}
-    if unitEv    then watched[unitEv]    = "Unit"     end
-    if ninjutsuEv then watched[ninjutsuEv] = "Ninjutsu" end
+    if unitEv       then watched[unitEv]       = "Unit"    end
+    if ninjutsuEv   then watched[ninjutsuEv]   = "Ninjutsu" end
+    if abilityEv    then watched[abilityEv]    = "Ability" end
+    if toggleStateEv then watched[toggleStateEv] = "Toggle"  end
 
     local old; old = hookmetamethod(game, "__namecall", function(self, ...)
         local m = getnamecallmethod()
@@ -4739,6 +4743,38 @@ if typeof(hookmetamethod) == "function" then
                         data = { donorIdentifier = donorId }
                     })
                     recUUIDs[donorUUID] = nil  -- donor unit consumed
+                end
+
+            elseif evType == "Ability" then
+                -- AbilityEvent payload is runtime-only; capture all args generically.
+                -- Any string arg found in recUUIDs is a unit UUID — swap to identifier.
+                local argc = #args
+                local argv = {}
+                for i, arg in ipairs(args) do
+                    if type(arg) == "string" and recUUIDs[arg] then
+                        argv[i] = { isUUID = true, id = recUUIDs[arg] }
+                    else
+                        argv[i] = { val = arg }
+                    end
+                end
+                table.insert(mac.events, {
+                    t      = os.clock() - recStart,
+                    action = "Ability",
+                    data   = { argc = argc, argv = argv }
+                })
+
+            elseif evType == "Toggle" then
+                -- ToggleState:FireServer(uuid, enabled)
+                -- Confirmed path: Networking.Interface.ToggleState
+                local uuid    = args[1]
+                local enabled = args[2]
+                local id = type(uuid) == "string" and recUUIDs[uuid]
+                if id then
+                    table.insert(mac.events, {
+                        t      = os.clock() - recStart,
+                        action = "Toggle",
+                        data   = { identifier = id, enabled = enabled }
+                    })
                 end
             end
         end
@@ -4853,6 +4889,34 @@ local function startMacroPlayback()
                 if uuid then
                     pcall(function()
                         unitEv:FireServer("ChangePriority", uuid, data.mode)
+                    end)
+                end
+
+            elseif action == "Ability" then
+                -- Reconstruct args, substituting live UUIDs for recorded identifiers
+                local argc = data.argc or 0
+                local argv = data.argv or {}
+                local liveArgs = table.create(argc)
+                for i = 1, argc do
+                    local slot = argv[i]
+                    if slot and slot.isUUID then
+                        liveArgs[i] = resolveUUID(slot.id) or slot.id
+                    elseif slot then
+                        liveArgs[i] = slot.val
+                    end
+                end
+                if abilityEv and argc > 0 then
+                    pcall(function()
+                        abilityEv:FireServer(table.unpack(liveArgs, 1, argc))
+                    end)
+                end
+
+            elseif action == "Toggle" then
+                -- ToggleState:FireServer(uuid, enabled)
+                local uuid = resolveUUID(data.identifier)
+                if uuid and toggleStateEv then
+                    pcall(function()
+                        toggleStateEv:FireServer(uuid, data.enabled)
                     end)
                 end
             end
