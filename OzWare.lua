@@ -1102,7 +1102,7 @@ local function _doEndScreenVote()
     if not _endScreenEvRef then return end
     task.wait(0.5)
     if getAutoNext and getAutoNext() then
-        _endScreenEvRef:FireServer("Next")
+        pcall(function() _endScreenEvRef:FireServer("Next") end)
         pcall(function()
             local es = realGui:FindFirstChild("EndScreen")
             local btn = es and safePath(es,"Holder","Buttons","Next","Button")
@@ -1110,7 +1110,7 @@ local function _doEndScreenVote()
         end)
         _endScreenShowing = false
     elseif getAutoRetry and getAutoRetry() then
-        _endScreenEvRef:FireServer("Retry")
+        pcall(function() _endScreenEvRef:FireServer("Retry") end)
         pcall(function()
             local es = realGui:FindFirstChild("EndScreen")
             local btn = es and safePath(es,"Holder","Buttons","Retry","Button")
@@ -1225,40 +1225,6 @@ if not next(STAGES) then task.delay(3, function() pcall(loadStages) end) end
 local getNightmare = function() return false end  -- overridden when Story section is built
 
 -- ── Helper: vertical radio list ──────────────────────────────────────────────
-local function makeRadioList(parent, items, getLabel)
-    local setters = {}
-    local selected = items[1] or nil
-    for j, key in ipairs(items) do
-        local k = key
-        local f = Instance.new("Frame", parent)
-        f.Size = UDim2.new(1, 0, 0, 30)
-        f.BackgroundColor3 = (j == 1) and C.ACCENT or C.PANEL
-        f.BorderSizePixel = 0
-        f.LayoutOrder = j
-        corner(f, 6)
-        local row = Instance.new("TextButton", f)
-        row.Size = UDim2.new(1, -12, 1, 0)
-        row.Position = UDim2.new(0, 10, 0, 0)
-        row.BackgroundTransparency = 1
-        row.Text = getLabel(k)
-        row.TextColor3 = (j == 1) and C.TEXT or C.SUBTEXT
-        row.TextSize = 12
-        row.Font = FONT_SEMI
-        row.TextXAlignment = Enum.TextXAlignment.Left
-        row.AutoButtonColor = false
-        local function setSel(on)
-            f.BackgroundColor3 = on and C.ACCENT or C.PANEL
-            row.TextColor3 = on and C.TEXT or C.SUBTEXT
-        end
-        setters[k] = setSel
-        row.MouseButton1Click:Connect(function()
-            for _, s in pairs(setters) do s(false) end
-            setSel(true)
-            selected = k
-        end)
-    end
-    return setters, function() return selected end
-end
 
 -- ── Helper: collapsible button + list frame ───────────────────────────────────
 local function makeColPanel(parent, label, btnOrder, listOrder)
@@ -1548,19 +1514,6 @@ local function fireChallenge(name)
 end
 
 -- ── Helper: timer status row ─────────────────────────────────────────────────
-local function timerRow(parent, order)
-    local lbl = Instance.new("TextLabel", parent)
-    lbl.Size = UDim2.new(1, -16, 0, 22)
-    lbl.BackgroundTransparency = 1
-    lbl.LayoutOrder = order
-    lbl.TextColor3 = C.SUBTEXT
-    lbl.TextSize = 11
-    lbl.Font = FONT_SEMI
-    lbl.TextXAlignment = Enum.TextXAlignment.Center
-    lbl.Text = "Checking timer..."
-    return lbl
-end
-
 -- ── Weekly Challenge ─────────────────────────────────────────────────────────
 local wklySec = section(joinerPage, "Weekly Challenge", #STAGE_TYPES_ALLOWED + 2)
 local _, getWklyOn = toggle(wklySec, "Auto Join Weekly", 1, false, "joiner.weekly.auto")
@@ -4114,26 +4067,47 @@ local function _setupPDTab()
 local pdPage = tabPages["PirateDynasty"]
 local pdNet  = RS:FindFirstChild("Networking")
 
--- Confirmed from PirateDynastyConfig.t.Characters (decompile):
--- Character Ids (used for SetLoadout) + display names + unlock levels
 local PD_CHARACTERS = {
-    { id = "HellkillerSlayer",      display = "Hellkiller",                  level = 1 },
-    { id = "ElasticCaptainPirate",  display = "Elastic Captain (Cog 4th)",   level = 1 },
-    { id = "NineTailedFox",         display = "9 Tailed Fox",                level = 3 },
-    { id = "ElasticCaptainSunGod",  display = "Elastic Captain (Cog 5th)",   level = 4 },
+    { id = "HellkillerSlayer",     display = "Hellkiller",                level = 1 },
+    { id = "ElasticCaptainPirate", display = "Elastic Captain (Cog 4th)", level = 1 },
+    { id = "NineTailedFox",        display = "9 Tailed Fox",              level = 3 },
+    { id = "ElasticCaptainSunGod", display = "Elastic Captain (Cog 5th)", level = 4 },
 }
 
+-- ── Joiner ─────────────────────────────────────────────────────────────────
+local joinSec = section(pdPage, "Joiner", 1)
+local _, getJoinOn = toggle(joinSec, "Auto Join", 1, false, "pd.autojoin")
+
+task.spawn(function()
+    local lastFire = 0
+    while true do
+        task.wait(0.5)
+        if not getJoinOn() then continue end
+        if inGameMode() then continue end
+        if os.clock() - lastFire < 10 then continue end
+        local lobbyEv = pdNet and pdNet:FindFirstChild("LobbyEvent")
+        if not lobbyEv then continue end
+        lastFire = os.clock()
+        pcall(function()
+            lobbyEv:FireServer("AddMatch", {
+                StageType   = "LTM",
+                Stage       = "Spring",
+                Act         = "Pirate Dynasty",
+                Difficulty  = "Normal",
+                FriendsOnly = false,
+            })
+        end)
+    end
+end)
+
 -- ── Character ──────────────────────────────────────────────────────────────
--- Selecting a character fires Spring event SetLoadout (pre-match selection)
-local charSec = section(pdPage, "Character", 1)
+local charSec = section(pdPage, "Character", 2)
 
 local charBtn = Instance.new("TextButton", charSec)
 charBtn.Size = UDim2.new(1, 0, 0, 28)
 charBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 charBtn.BorderSizePixel = 0; charBtn.LayoutOrder = 1
-charBtn.Text = "▶  Character: "..PD_CHARACTERS[1]
-charBtn.TextColor3 = C.TEXT
-charBtn.TextSize = 12; charBtn.Font = FONT_SEMI
+charBtn.TextColor3 = C.TEXT; charBtn.TextSize = 12; charBtn.Font = FONT_SEMI
 charBtn.AutoButtonColor = false; charBtn.ZIndex = 3
 corner(charBtn, 6)
 
@@ -4146,20 +4120,18 @@ listLayout(charList, nil, 2)
 makeCollapsible(charBtn, charList, "Character")
 
 local selChar = PD_CHARACTERS[1].id
--- Append selection to header after makeCollapsible sets the arrow
-charBtn.MouseButton1Click:Connect(function()
-    local arrow = charList.Visible and "▼" or "▶"
+local function updateCharHeader()
     local disp = PD_CHARACTERS[1].display
     for _, c in ipairs(PD_CHARACTERS) do if c.id == selChar then disp = c.display end end
+    local arrow = charList.Visible and "\xE2\x96\xBC" or "\xE2\x96\xB6"
     charBtn.Text = arrow.."  Character: "..disp
-end)
-charBtn.Text = "▶  Character: "..PD_CHARACTERS[1].display
+end
+charBtn.MouseButton1Click:Connect(updateCharHeader)
+updateCharHeader()
 
 local charSetters = {}
 for j, entry in ipairs(PD_CHARACTERS) do
-    local charId   = entry.id
-    local charDisp = entry.display
-    local charLvl  = entry.level
+    local charId = entry.id; local charDisp = entry.display; local charLvl = entry.level
     local f = Instance.new("Frame", charList)
     f.Size = UDim2.new(1, 0, 0, 30)
     f.BackgroundColor3 = (j == 1) and C.ACCENT or C.PANEL
@@ -4178,54 +4150,61 @@ for j, entry in ipairs(PD_CHARACTERS) do
     charSetters[charId] = setSel
     row.MouseButton1Click:Connect(function()
         for _, s in pairs(charSetters) do s(false) end
-        setSel(true); selChar = charId
-        local arrow = charList.Visible and "▼" or "▶"
-        charBtn.Text = arrow.."  Character: "..charDisp
-        -- Fire SetLoadout with the PD character Id
+        setSel(true); selChar = charId; updateCharHeader()
+        -- SetLoadout only fires inside the PD match (PirateDynastySelect phase)
+        if not inGameMode() then return end
         local springEv = pdNet and pdNet:FindFirstChild("SpringEvent")
         local loadoutEv = springEv and springEv:FindFirstChild("SetLoadout")
         if loadoutEv then pcall(function() loadoutEv:FireServer(charId) end) end
     end)
 end
 
--- ── Auto Attack ────────────────────────────────────────────────────────────
-local attackSec = section(pdPage, "Auto Attack", 2)
+-- ── Auto Attack ─────────────────────────────────────────────────────────────
+local atkSec = section(pdPage, "Auto Attack", 3)
 
--- Save Position — one-tap toggle (captures HRP.CFrame, turns itself off)
-local savedCFrame = nil
-local _, _, onSavePos, setSavePos = toggle(attackSec, "Save Position", 1, false)
+local _, getAttackOn, onAttackChanged, setAttackOn = toggle(
+    atkSec, "Auto Attack", 1, false, "pd.autoattack")
 
-local posLbl = Instance.new("TextLabel", attackSec)
-posLbl.Size = UDim2.new(1, -16, 0, 18)
+-- Inline position row: [Position: X, Y, Z ——] [Set Position toggle]
+local posRow = Instance.new("Frame", atkSec)
+posRow.Size = UDim2.new(1, 0, 0, 32)
+posRow.BackgroundTransparency = 1; posRow.BorderSizePixel = 0; posRow.LayoutOrder = 2
+
+local posLbl = Instance.new("TextLabel", posRow)
+posLbl.Size = UDim2.new(1, -112, 1, 0); posLbl.Position = UDim2.new(0, 8, 0, 0)
 posLbl.BackgroundTransparency = 1
-posLbl.Text = "No position saved"
-posLbl.TextColor3 = C.SUBTEXT
-posLbl.TextSize = 11; posLbl.Font = FONT_SEMI
-posLbl.TextXAlignment = Enum.TextXAlignment.Center
-posLbl.LayoutOrder = 2
+posLbl.Text = "Position: —"
+posLbl.TextColor3 = C.SUBTEXT; posLbl.TextSize = 11; posLbl.Font = FONT_SEMI
+posLbl.TextXAlignment = Enum.TextXAlignment.Left
+posLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
-onSavePos(function(on)
+local setPosHolder = Instance.new("Frame", posRow)
+setPosHolder.Size = UDim2.new(0, 108, 1, 0)
+setPosHolder.Position = UDim2.new(1, -108, 0, 0)
+setPosHolder.BackgroundTransparency = 1; setPosHolder.BorderSizePixel = 0
+
+local _, _, onSetPos, doSetPos = toggle(setPosHolder, "Set Position", 1, false)
+
+local savedCFrame = nil
+onSetPos(function(on)
     if not on then return end
-    task.defer(function() setSavePos(false) end)  -- always self-turns-off
+    task.defer(function() doSetPos(false) end)
     local char = player.Character
     local hrp  = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return notify("No character found", false) end
     savedCFrame = hrp.CFrame
-    posLbl.Text = ("Saved  %.0f, %.0f, %.0f"):format(
+    posLbl.Text = ("%.0f,  %.0f,  %.0f"):format(
         hrp.Position.X, hrp.Position.Y, hrp.Position.Z)
     posLbl.TextColor3 = C.GREEN
     notify("Position saved", true)
 end)
 
--- Auto Attack toggle — moves to saved position then loops AttackEvent
 local pdAttacking = false
-
 local function startAttack()
     pdAttacking = true
     local attackEv = pdNet and pdNet:FindFirstChild("AttackEvent")
     if not attackEv then pdAttacking = false; return end
     task.spawn(function()
-        -- Move to saved spot first
         if savedCFrame then
             local char = player.Character
             local hum  = char and char:FindFirstChildOfClass("Humanoid")
@@ -4236,13 +4215,10 @@ local function startAttack()
                     done = true; conn:Disconnect()
                 end)
                 local t0 = os.clock()
-                while not done and pdAttacking and os.clock() - t0 < 8 do
-                    task.wait(0.1)
-                end
+                while not done and pdAttacking and os.clock() - t0 < 8 do task.wait(0.1) end
                 if conn then conn:Disconnect() end
             end
         end
-        -- Attack loop
         while pdAttacking and inGameMode() do
             pcall(function() attackEv:FireServer() end)
             task.wait(0.1)
@@ -4251,28 +4227,21 @@ local function startAttack()
     end)
 end
 
-local _, getAttackOn, onAttackChanged, setAttackOn = toggle(
-    attackSec, "Auto Attack", 3, false, "pd.autoattack")
-
 onAttackChanged(function(on)
     if on then
         if not inGameMode() then
             setAttackOn(false); return notify("Must be in a match", false)
         end
-        startAttack()
-        notify("Auto Attack started", true)
+        startAttack(); notify("Auto Attack started", true)
     else
         pdAttacking = false
     end
 end)
 
--- Re-trigger after respawn while toggle is still ON
 player.CharacterAdded:Connect(function()
     if pdAttacking then pdAttacking = false end
     task.wait(2)
-    if inGameMode() and getAttackOn() then
-        startAttack()
-    end
+    if inGameMode() and getAttackOn() then startAttack() end
 end)
 
 end -- _setupPDTab
